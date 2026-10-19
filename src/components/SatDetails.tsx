@@ -10,7 +10,7 @@ export default function SatDetails({ sat, at, showTle = true }: { sat: SatRecord
   const pos = propagateSubPoint(sat, at);
   const age = elementAgeDays(sat, at);
   const conf = confidenceForAge(age);
-  const tasking = m?.tasking === 'commercial' ? t('Commercial tasking via provider') : m?.tasking === 'agency' ? t('Requests via agency') : t('No user tasking');
+  const tasking = m?.tasking === 'commercial' ? t('Commercial tasking via provider') : m?.tasking === 'agency' ? t('Requests via agency') : m?.tasking === 'unknown' ? t('Unknown') : t('No user tasking');
   return (
     <div className="space-y-3">
       <div>

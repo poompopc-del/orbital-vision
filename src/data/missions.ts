@@ -17,7 +17,7 @@ export interface Mission {
   bands?: string;
   capabilities: string;
   archive: string;
-  tasking: 'commercial' | 'agency' | 'none';
+  tasking: 'commercial' | 'agency' | 'none' | 'unknown';
   stacCollection?: string;
 }
 
@@ -169,6 +169,13 @@ export const MISSIONS: Mission[] = [
     archive: 'EUMETSAT Data Store', tasking: 'none',
   },
 ];
+
+/** Used for satellites the user adds by NORAD ID that match no known mission. */
+export const CUSTOM_MISSION: Mission = {
+  id: 'custom', name: 'User-added', providerId: 'custom', pattern: /$^/,
+  sensor: 'unknown', missionType: 'Unknown', instrument: 'Unknown', resolution: 'Unknown',
+  capabilities: 'Orbit tracking only — no sensor metadata', archive: 'Unknown', tasking: 'unknown',
+};
 
 export const missionForName = (name: string): Mission | undefined =>
   MISSIONS.find((m) => m.pattern.test(name.toUpperCase()));

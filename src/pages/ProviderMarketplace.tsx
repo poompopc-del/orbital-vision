@@ -54,7 +54,7 @@ export default function ProviderMarketplace() {
           label={t('Sensor')}
           value={sensor}
           onChange={setSensor}
-          options={[{ value: 'all', label: t('All') }, ...(Object.keys(SENSOR_LABEL) as SensorCategory[]).map((s) => ({ value: s, label: SENSOR_LABEL[s] }))]}
+          options={[{ value: 'all', label: t('All') }, ...(Object.keys(SENSOR_LABEL) as SensorCategory[]).filter((s) => s !== 'unknown').map((s) => ({ value: s, label: SENSOR_LABEL[s] }))]}
         />
         <ChipRow label={t('Resolution')} value={res} onChange={setRes} options={[{ value: 'all', label: t('All') }, { value: 'high', label: t('High') }, { value: 'medium', label: t('Medium') }, { value: 'wide', label: t('Wide-area') }]} />
         <ChipRow label={t('Acquisition')} value={acq} onChange={setAcq} options={[{ value: 'all', label: t('All') }, { value: 'archive', label: t('Archive imagery') }, { value: 'tasking', label: t('New acquisition') }]} />

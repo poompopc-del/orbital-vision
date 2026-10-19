@@ -21,6 +21,7 @@ export interface SatRecord {
   orbitType: string;
   mission?: Mission;
   provider?: Provider;
+  custom?: boolean;
 }
 
 export interface SubPoint {

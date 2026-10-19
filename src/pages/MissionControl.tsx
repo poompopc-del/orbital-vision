@@ -3,6 +3,7 @@ import { t } from '../i18n';
 import { Link } from 'react-router-dom';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
+import AddSatellite from '../components/AddSatellite';
 import SatDetails from '../components/SatDetails';
 import { Badge, Button, Input, Notice, Panel, Spinner, cx } from '../components/ui';
 import { Cesium, getLabelsLayer, getBaseName, hasIon, setTerrain, showAoi } from '../lib/cesium';
@@ -367,6 +368,8 @@ export default function MissionControl() {
           <label className="mt-2 flex items-center gap-2 text-xs text-slate-300">
             <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} /> {t('Boundaries & place names')} </label>
         </Panel>
+
+        <AddSatellite />
 
         <Panel title={t('Filters')} right={<span className="font-mono text-[10px] text-muted">{visible.length}/{sats.length}</span>}>
           <div className="space-y-2">

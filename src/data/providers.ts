@@ -2,7 +2,7 @@
 // prices are never invented. Verify everything against the official links before relying on it.
 
 export type DataAccess = 'commercial' | 'public' | 'scientific';
-export type SensorCategory = 'optical' | 'multispectral' | 'sar' | 'hyperspectral' | 'thermal' | 'weather';
+export type SensorCategory = 'optical' | 'multispectral' | 'sar' | 'hyperspectral' | 'thermal' | 'weather' | 'unknown';
 export type IntegrationStatus = 'integrated-stac' | 'not-integrated' | 'planned';
 export type ResolutionClass = 'high' | 'medium' | 'wide';
 
@@ -359,6 +359,7 @@ export const SENSOR_LABEL: Record<SensorCategory, string> = {
   hyperspectral: 'Hyperspectral',
   thermal: 'Thermal IR',
   weather: 'Weather',
+  unknown: 'User-added',
 };
 
 export const SENSOR_COLOR: Record<SensorCategory, string> = {
@@ -368,4 +369,5 @@ export const SENSOR_COLOR: Record<SensorCategory, string> = {
   hyperspectral: '#c58bff',
   thermal: '#ff7a59',
   weather: '#8fb3ff',
+  unknown: '#e6edf5',
 };

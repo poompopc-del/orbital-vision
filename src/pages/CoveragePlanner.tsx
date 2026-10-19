@@ -5,7 +5,7 @@ import AoiPicker from '../components/AoiPicker';
 import { Badge, Button, Field, Notice, Panel, Spinner, cx } from '../components/ui';
 import { Cesium, showAoi } from '../lib/cesium';
 import { useOrbit, useWorkspace } from '../store';
-import { MISSIONS } from '../data/missions';
+import { MISSIONS, CUSTOM_MISSION } from '../data/missions';
 import { SENSOR_COLOR } from '../data/providers';
 import { findPassesBatched, type PassEstimate } from '../lib/passes';
 import { groundTrack } from '../lib/orbit';
@@ -79,7 +79,7 @@ export default function CoveragePlanner() {
         <Panel title={t('Satellites & window')}>
           <div className="space-y-2.5">
             <div className="flex flex-wrap gap-1">
-              {MISSIONS.filter((m) => m.id !== 'goes').map((m) => {
+              {[...MISSIONS.filter((m) => m.id !== 'goes'), CUSTOM_MISSION].map((m) => {
                 const on = missionIds.includes(m.id);
                 return (
                   <button
@@ -88,7 +88,7 @@ export default function CoveragePlanner() {
                     className={cx('flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px]', on ? 'border-cyan-400/50 text-white' : 'border-line text-muted')}
                   >
                     <span className="h-1.5 w-1.5 rounded-full" style={{ background: SENSOR_COLOR[m.sensor] }} />
-                    {m.name}
+                    {m.id === 'custom' ? t('User-added') : m.name}
                   </button>
                 );
               })}
@@ -131,7 +131,7 @@ export default function CoveragePlanner() {
                     <div className="mt-1 grid grid-cols-2 gap-x-2 text-[10px] text-muted">
                       <span>Source: SGP4 + {p.basis === 'nominal-swath' ? `nominal ${p.sat.mission?.swathKm} km swath` : t('track proximity')}</span>
                       <span>
-                        Tasking: {p.sat.mission?.tasking === 'commercial' ? t('via provider') : p.sat.mission?.tasking === 'agency' ? t('via agency') : t('not taskable')} · Provider confirmation: none
+                        Tasking: {p.sat.mission?.tasking === 'commercial' ? t('via provider') : p.sat.mission?.tasking === 'agency' ? t('via agency') : p.sat.mission?.tasking === 'unknown' ? t('Unknown') : t('not taskable')} · Provider confirmation: none
                       </span>
                     </div>
                     {p.notes.length > 0 && <div className="mt-1 text-[10px] text-warn">{p.notes.map((n) => t(n)).join(' · ')}</div>}

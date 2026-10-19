@@ -22,6 +22,33 @@ const QUERIES = [
 ];
 
 export default async function handler(req, res) {
+  const catnr = req.query && req.query.catnr;
+  if (catnr !== undefined) {
+    if (!/^\d{1,9}$/.test(String(catnr))) {
+      res.status(400).json({ error: 'catnr must be a numeric NORAD catalogue number' });
+      return;
+    }
+    try {
+      const r = await fetch(`https://celestrak.org/NORAD/elements/gp.php?CATNR=${catnr}&FORMAT=3le`, {
+        headers: { 'User-Agent': 'orbital-vision/0.1 (+vercel)' },
+      });
+      const text = r.ok ? await r.text() : '';
+      if (!r.ok) {
+        res.status(502).json({ error: `CelesTrak HTTP ${r.status}` });
+        return;
+      }
+      if (!text.trim() || /No GP data found/i.test(text)) {
+        res.setHeader('Cache-Control', 's-maxage=3600');
+        res.status(404).json({ error: 'not found', catnr });
+        return;
+      }
+      res.setHeader('Cache-Control', 's-maxage=7200, stale-while-revalidate=3600');
+      res.status(200).json({ source: 'CelesTrak GP (3LE)', fetchedAt: new Date().toISOString(), tle: text });
+    } catch (e) {
+      res.status(502).json({ error: String(e && e.message ? e.message : e) });
+    }
+    return;
+  }
   const results = await Promise.allSettled(
     QUERIES.map(async (q) => {
       const r = await fetch(`https://celestrak.org/NORAD/elements/gp.php?${q}&FORMAT=3le`, {
