@@ -18,7 +18,7 @@ const SENSORS = Object.keys(SENSOR_LABEL) as SensorCategory[];
 
 export default function MissionControl() {
   const { sats, status, error, source, fetchedAt } = useOrbit();
-  const { aoi, selectedSat, setSelectedSat, pinned, togglePin, pinnedOnly, setPinnedOnly } = useWorkspace();
+  const { aoi, selectedSat, setSelectedSat, pinned, togglePin, pinnedOnly, setPinnedOnly, customOnly } = useWorkspace();
   const [focus, setFocus] = useState(false);
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
   const [mode, setMode] = useState<Mode>('live');
@@ -41,6 +41,7 @@ export default function MissionControl() {
   const onlyPinned = (pinnedOnly || focus) && pinned.length > 0;
   const visible = useMemo(() => {
     if (onlyPinned) return sats.filter((s) => pinned.includes(s.noradId));
+    if (customOnly) return sats.filter((s) => s.custom);
     const t = text.trim().toUpperCase();
     return sats.filter((s) => {
       const m = s.mission!;
@@ -51,7 +52,7 @@ export default function MissionControl() {
       if (t && !s.name.includes(t) && !s.noradId.includes(t) && !m.name.toUpperCase().includes(t)) return false;
       return true;
     });
-  }, [sats, sensorF, providerF, accessF, text, onlyPinned, pinned]);
+  }, [sats, sensorF, providerF, accessF, text, onlyPinned, pinned, customOnly]);
 
   const selected = useMemo(() => sats.find((s) => s.noradId === selectedSat) ?? null, [sats, selectedSat]);
 

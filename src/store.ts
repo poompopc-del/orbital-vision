@@ -36,6 +36,8 @@ interface WorkspaceState {
   togglePin: (id: string) => void;
   pinnedOnly: boolean;
   setPinnedOnly: (v: boolean) => void;
+  customOnly: boolean;
+  setCustomOnly: (v: boolean) => void;
   lastResults: ImageryItem[];
   setLastResults: (r: ImageryItem[]) => void;
   compare: ImageryItem[];
@@ -56,6 +58,8 @@ export const useWorkspace = create<WorkspaceState>()(
       togglePin: (id) => set({ pinned: get().pinned.includes(id) ? get().pinned.filter((x) => x !== id) : [...get().pinned, id] }),
       pinnedOnly: false,
       setPinnedOnly: (pinnedOnly) => set({ pinnedOnly }),
+      customOnly: false,
+      setCustomOnly: (customOnly) => set({ customOnly }),
       lastResults: [],
       setLastResults: (r) => set({ lastResults: r.map(slim) }),
       compare: [],

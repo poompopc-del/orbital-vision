@@ -10,7 +10,7 @@ const MAX_SHOWN = 30;
 
 export default function AddSatellite() {
   const { sats } = useOrbit();
-  const { setSelectedSat } = useWorkspace();
+  const { setSelectedSat, customOnly, setCustomOnly, pinned, togglePin } = useWorkspace();
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
@@ -69,7 +69,7 @@ export default function AddSatellite() {
   };
 
   return (
-    <Panel title={t('Add satellite by name or NORAD ID')}>
+    <Panel title={t('Add satellite by name or NORAD ID')} right={<span className="font-mono text-[10px] text-muted">{custom.length} {t('added')}</span>}>
       <div className="flex gap-1.5">
         <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} placeholder={t('e.g. ISS, THEOS, 25544')} />
         <Button variant="primary" onClick={submit} disabled={busy}>{busy ? <Spinner /> : t('Search')}</Button>
@@ -109,9 +109,25 @@ export default function AddSatellite() {
       )}
 
       {custom.length > 0 && (
-        <ul className="mt-2 space-y-0.5">
+        <div className="mt-3 rounded border border-line">
+          <div className="flex items-center justify-between border-b border-line px-2 py-1.5">
+            <span className="label">{t('My added satellites')}</span>
+            <span className="font-mono text-[10px] text-muted">{custom.length}</span>
+          </div>
+          <label className="flex items-center gap-2 border-b border-white/5 px-2 py-1.5 text-xs text-slate-300">
+            <input type="checkbox" checked={customOnly} onChange={(e) => setCustomOnly(e.target.checked)} />
+            {t('Show only added satellites on the globe')}
+          </label>
+        <ul className="max-h-48 overflow-y-auto px-2 py-1 scroll-thin">
           {custom.map((s) => (
-            <li key={s.noradId} className="flex items-center gap-2 text-xs">
+            <li key={s.noradId} className="flex items-center gap-2 py-0.5 text-xs">
+              <button
+                title={pinned.includes(s.noradId) ? t('Unpin') : t('Pin to my view')}
+                onClick={() => togglePin(s.noradId)}
+                className={pinned.includes(s.noradId) ? 'text-warn' : 'text-muted hover:text-warn'}
+              >
+                {pinned.includes(s.noradId) ? '★' : '☆'}
+              </button>
               <button onClick={() => setSelectedSat(s.noradId)} className="min-w-0 flex-1 truncate text-left text-slate-200 hover:text-white">
                 {s.name}
               </button>
@@ -130,6 +146,7 @@ export default function AddSatellite() {
             </li>
           ))}
         </ul>
+        </div>
       )}
       <p className="mt-1.5 text-[10px] leading-snug text-muted">{t('Any satellite in the public CelesTrak catalogue. Kept in this browser.')}</p>
     </Panel>
