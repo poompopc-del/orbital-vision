@@ -217,7 +217,18 @@ export default function SpectralPanel() {
 
       {mode === 'index' && (
         <>
-          <div className="max-h-48 overflow-y-auto rounded border border-line scroll-thin">
+          <div className="flex flex-wrap gap-1">
+            {['ndvi', 'ndwi', 'mndwi', 'ndbi', 'nbr'].map((id) => {
+              const d = INDICES.find((x) => x.id === id)!;
+              const a = scene ? indexAvailability(scene, d) : { ok: true };
+              return (
+                <Button key={id} variant={indexId === id ? 'active' : 'ghost'} disabled={!!scene && !a.ok} onClick={() => pickIndex(d)}>
+                  {d.name.split(' ')[0]}
+                </Button>
+              );
+            })}
+          </div>
+          <div className="max-h-72 overflow-y-auto rounded border border-line scroll-thin">
             {grouped.map(([grp, list]) => (
               <div key={grp}>
                 <div className="label bg-ink-950/60 px-2 py-1">{t(grp)}</div>

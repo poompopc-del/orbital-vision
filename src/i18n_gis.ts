@@ -152,6 +152,8 @@ export const TH_GIS: Record<string, string> = {
   'Move up': 'เลื่อนขึ้น',
   'NDVI change (vegetation)': 'การเปลี่ยนแปลง NDVI (พืชพรรณ)',
   'NDWI change (water)': 'การเปลี่ยนแปลง NDWI (น้ำ)',
+  'NDBI change (built-up)': 'การเปลี่ยนแปลง NDBI (สิ่งปลูกสร้าง)',
+  'Time series supports NDVI, NDWI, MNDWI, NDBI and SAR.': 'อนุกรมเวลารองรับ NDVI, NDWI, MNDWI, NDBI และ SAR',
   'New acquisition — needs provider check': 'สั่งถ่ายใหม่ — ต้องตรวจสอบกับผู้ให้บริการ',
   'New water (possible flood)': 'น้ำใหม่ (อาจเป็นน้ำท่วม)',
   'No data / cloud': 'ไม่มีข้อมูล / เมฆ',

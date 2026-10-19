@@ -12,12 +12,13 @@ import { useGis } from './GisContext';
 import { imageProvider, pcProvider, sceneLabel } from './sceneLayer';
 import { compareWarnings } from './compareChecks';
 
-type Kind = 'ndvi' | 'ndwi' | 'mndwi' | 'dnbr' | 'sar' | 'general';
+type Kind = 'ndvi' | 'ndwi' | 'mndwi' | 'ndbi' | 'dnbr' | 'sar' | 'general';
 
 const KINDS: { id: Kind; label: string }[] = [
   { id: 'ndvi', label: 'NDVI change (vegetation)' },
   { id: 'ndwi', label: 'NDWI change (water)' },
   { id: 'mndwi', label: 'MNDWI change (water)' },
+  { id: 'ndbi', label: 'NDBI change (built-up)' },
   { id: 'dnbr', label: 'dNBR burn severity' },
   { id: 'sar', label: 'SAR VV backscatter change (dB)' },
   { id: 'general', label: 'General brightness difference' },
@@ -104,8 +105,8 @@ export default function ChangePanel() {
         out = classify(aoi.geometry, ra, rb, (a, b) => DNBR_CLASSES.find((c) => a - b < c.max)!.id, DNBR_CLASSES);
         legend = { items: [...DNBR_CLASSES.slice(1).map((c) => ({ color: `rgba(${c.rgba.join(',')})`, label: t(c.label) })), { color: 'rgb(128,128,128)', label: t('No data / cloud') }], note: t('dNBR = NBR(before) − NBR(after). Classes: Key & Benson (2006), FIREMON. Regional calibration recommended.') };
       } else {
-        const up = kind === 'ndvi' ? [79, 209, 139, 220] : kind === 'sar' || kind === 'general' ? [124, 231, 247, 220] : [30, 144, 255, 230];
-        const down = [242, 102, 90, 220];
+        const up = kind === 'ndbi' ? [255, 120, 90, 220] : kind === 'ndvi' ? [79, 209, 139, 220] : kind === 'sar' || kind === 'general' ? [124, 231, 247, 220] : [30, 144, 255, 230];
+        const down = kind === 'ndbi' ? [79, 209, 139, 220] : [242, 102, 90, 220];
         out = classify(aoi.geometry, ra, rb, (a, b) => (b - a >= thr ? 1 : a - b >= thr ? 2 : 3), [
           { id: 1, label: 'Increase', rgba: up as any },
           { id: 2, label: 'Decrease', rgba: down as any },
@@ -164,7 +165,7 @@ export default function ChangePanel() {
 
   const runSeries = async () => {
     if (!aoi || !A) return;
-    if (kind === 'general' || kind === 'dnbr') return setErr(t('Time series supports NDVI, NDWI, MNDWI and SAR.'));
+    if (kind === 'general' || kind === 'dnbr') return setErr(t('Time series supports NDVI, NDWI, MNDWI, NDBI and SAR.'));
     const pool = [...lastResults].filter((x) => x.collection === A.collection && x.source === 'planetary-computer').sort((a, b) => a.datetime.localeCompare(b.datetime)).slice(-14);
     if (pool.length < 2) return setErr(t('Search more scenes of the same collection over this AOI first (Imagery Explorer or Identify).'));
     abort.current?.abort();
