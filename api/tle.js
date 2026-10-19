@@ -18,6 +18,7 @@ const QUERIES = [
   'NAME=CAPELLA',
   'NAME=UMBRA',
   'NAME=THEOS',
+  'NAME=NAPA',
 ];
 
 export default async function handler(req, res) {

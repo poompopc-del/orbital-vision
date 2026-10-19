@@ -145,6 +145,12 @@ export const MISSIONS: Mission[] = [
     archive: 'Via GISTDA', tasking: 'agency',
   },
   {
+    id: 'napa', name: 'NAPA (RTAF)', providerId: 'rtaf', pattern: /^NAPA/,
+    sensor: 'optical', missionType: 'Military Earth observation (nanosatellite)', instrument: 'Optical imager',
+    resolution: 'Not published here', capabilities: 'Airspace observation; disaster support (operator-reported)',
+    archive: 'Not public', tasking: 'none',
+  },
+  {
     id: 'jpss', name: 'JPSS / Suomi NPP', providerId: 'noaa', pattern: /^(NOAA 2[0-9]|SUOMI NPP)/,
     sensor: 'weather', missionType: 'Polar weather', instrument: 'VIIRS, ATMS, CrIS',
     resolution: 'VIIRS 375 m / 750 m', swathKm: 3040, capabilities: 'Day/night band, fires, clouds',

@@ -2,13 +2,13 @@ import { parseTleText, type SatRecord } from './orbit';
 import { bumpQuota } from './quotas';
 import { logAudit } from './repo';
 
-const CACHE_KEY = 'ov.tle.cache.v1';
+const CACHE_KEY = 'ov.tle.cache.v2';
 const MAX_AGE_MS = 2 * 60 * 60 * 1000; // CelesTrak asks for ≤ 1 download per ~2 h
 
 const DIRECT_QUERIES = [
   'GROUP=resource', 'GROUP=planet', 'GROUP=weather',
   'NAME=SENTINEL', 'NAME=LANDSAT', 'NAME=WORLDVIEW', 'NAME=GEOEYE', 'NAME=PLEIADES', 'NAME=SPOT',
-  'NAME=BLACKSKY', 'NAME=NUSAT', 'NAME=ICEYE', 'NAME=CAPELLA', 'NAME=UMBRA', 'NAME=THEOS',
+  'NAME=BLACKSKY', 'NAME=NUSAT', 'NAME=ICEYE', 'NAME=CAPELLA', 'NAME=UMBRA', 'NAME=THEOS', 'NAME=NAPA',
 ];
 
 export interface TleLoadResult {

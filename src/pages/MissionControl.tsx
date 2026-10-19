@@ -31,6 +31,8 @@ export default function MissionControl() {
   const [cursor, setCursor] = useState<{ lat: number; lon: number } | null>(null);
   const [histDate, setHistDate] = useState(() => new Date(Date.now() - 86400000).toISOString().slice(0, 16));
   const [showPanel, setShowPanel] = useState(true);
+  const [follow, setFollow] = useState(false);
+  const followRef = useRef<{ on: boolean; id: string | null }>({ on: false, id: null });
   const pointsRef = useRef<Cesium.PointPrimitiveCollection | null>(null);
   const pointMap = useRef(new Map<string, Cesium.PointPrimitive>());
 
@@ -100,6 +102,17 @@ export default function MissionControl() {
         const p = propagateSubPoint(s, t);
         if (p) pt.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.heightKm * 1000);
       });
+      const f = followRef.current;
+      if (f.on && f.id) {
+        const s = byId.get(f.id);
+        const p = s && propagateSubPoint(s, t);
+        if (p) {
+          const target = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.heightKm * 1000);
+          const cam = viewer.camera;
+          const range = Math.max(4e5, Math.min(2e7, Cesium.Cartesian3.distance(cam.positionWC, target)));
+          cam.lookAt(target, new Cesium.HeadingPitchRange(cam.heading, Math.min(-0.2, cam.pitch), range));
+        }
+      }
       setSimTime(t);
     });
     return () => remove();
@@ -282,6 +295,11 @@ export default function MissionControl() {
     return () => clearInterval(t);
   }, [viewer, labels]);
 
+  useEffect(() => {
+    followRef.current = { on: follow && !!selectedSat, id: selectedSat };
+    if (viewer && (!follow || !selectedSat)) viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+  }, [viewer, follow, selectedSat]);
+
   const isLive = Math.abs(simTime.getTime() - Date.now()) < 10000;
   const maxAge = selected ? elementAgeDays(selected, simTime) : null;
 
@@ -410,6 +428,7 @@ export default function MissionControl() {
           </div>
           <div className="font-mono text-[11px] text-white">{fmtUtc(simTime)}</div>
           {fetchedAt && <div className="font-mono text-[10px] text-muted">{source} · {t('fetched')} {fmtUtc(fetchedAt)}</div>}
+          {viewer && <div className="font-mono text-[10px] text-muted">{t('Base:')} {getBaseName(viewer) || '…'}</div>}
           {maxAge != null && Math.abs(maxAge) > 7 && <Badge tone="warn">Selected element set {Math.abs(maxAge).toFixed(0)} d from epoch</Badge>}
         </div>
 
@@ -418,17 +437,12 @@ export default function MissionControl() {
             {fmtLatLon(cursor.lat, cursor.lon)}
           </div>
         )}
-        {viewer && (
-          <div className="pointer-events-none absolute bottom-[70px] left-[180px] z-10 hidden rounded bg-ink-950/80 px-2 py-0.5 font-mono text-[10px] text-muted md:block">
-            {t('Base:')} {getBaseName(viewer) || '…'}
-          </div>
-        )}
 
         {selected && (
           <div className="absolute right-3 top-3 z-20 max-h-[calc(100%-110px)] w-[300px] max-w-[calc(100%-24px)] overflow-y-auto rounded-md border border-line bg-navy-900/95 p-3 shadow-2xl backdrop-blur scroll-thin">
             <div className="mb-2 flex items-center justify-between">
               <span className="label">{t('Selected satellite')}</span>
-              <button onClick={() => setSelectedSat(null)} className="text-muted hover:text-white">✕</button>
+              <button onClick={() => { setSelectedSat(null); setFollow(false); }} className="text-muted hover:text-white">✕</button>
             </div>
             <SatDetails sat={selected} at={simTime} showTle={false} />
             <div className="mt-3 flex gap-1.5">
@@ -440,6 +454,11 @@ export default function MissionControl() {
                   if (p) viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.heightKm * 1000 + 3.5e6), duration: 1.4 });
                 }}
               >{t('Fly to')} </Button>
+              <Button variant={follow ? 'active' : 'ghost'} className="flex-1" onClick={() => setFollow(!follow)}>
+                {follow ? t('Stop following') : t('Follow')}
+              </Button>
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
               <Link to={`/catalog?sat=${selected.noradId}`} className="flex-1">
                 <Button className="w-full">{t('Catalog record')}</Button>
               </Link>
