@@ -4,6 +4,7 @@ import { Badge, Button, Input, KV, Notice, Select, Spinner } from '../ui';
 import { Cesium } from '../../lib/cesium';
 import { loadDams, mcmPerDayToM3s, storagePct, type DamStatus, type DamsResult } from '../../lib/dams';
 import { fmtNum } from '../../lib/format';
+import { geocode } from '../../lib/geo';
 import { useGis } from './GisContext';
 
 const pctColor = (p: number | null) =>
@@ -36,12 +37,69 @@ export default function DamsPanel() {
   const [pctMin, setPctMin] = useState(0);
   const [pctMax, setPctMax] = useState(200);
   const [sel, setSel] = useState<DamStatus | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locErr, setLocErr] = useState('');
+
+  const flyToDam = (lon: number, lat: number) => {
+    const v = g.viewer;
+    if (!v || v.isDestroyed()) return;
+    // oblique view centred on the dam
+    v.camera.flyToBoundingSphere(new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(lon, lat), 2500), {
+      offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-40), 14000),
+      duration: 1.6,
+    });
+  };
+
+  /** Select a dam and fly to it; if OSM matching found no location, try a Nominatim name search once. */
+  const focusDam = async (d: DamStatus) => {
+    setSel(d);
+    setLocErr('');
+    if (d.lat != null && d.lon != null) return flyToDam(d.lon, d.lat);
+    const cacheKey = 'ov.dam.geocode.v1';
+    let cache: Record<string, [number, number] | null> = {};
+    try {
+      cache = JSON.parse(localStorage.getItem(cacheKey) || '{}');
+    } catch {
+      /* ignore */
+    }
+    let hit = cache[d.id];
+    if (hit === undefined) {
+      setLocating(true);
+      try {
+        const r = await geocode(`เขื่อน${d.name.replace(/^เขื่อน/, '')} ประเทศไทย`);
+        hit = r[0] ? [r[0].lon, r[0].lat] : null;
+      } catch {
+        hit = null;
+      } finally {
+        setLocating(false);
+      }
+      cache[d.id] = hit;
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(cache));
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!hit) return setLocErr(t('No location found for this dam'));
+    const located: DamStatus = { ...d, lon: hit[0], lat: hit[1], locationSource: 'Nominatim (OpenStreetMap) name search — approximate' };
+    setRes((r) => (r ? { ...r, dams: r.dams.map((x) => (x.id === d.id ? located : x)) } : r));
+    setSel(located);
+    flyToDam(hit[0], hit[1]);
+  };
 
   const load = async () => {
     setBusy(true);
     setErr('');
     try {
-      setRes(await loadDams());
+      const r = await loadDams();
+      // re-apply dam locations found earlier by name search
+      try {
+        const cache: Record<string, [number, number] | null> = JSON.parse(localStorage.getItem('ov.dam.geocode.v1') || '{}');
+        r.dams = r.dams.map((d) => (d.lat == null && cache[d.id] ? { ...d, lon: cache[d.id]![0], lat: cache[d.id]![1], locationSource: 'Nominatim (OpenStreetMap) name search — approximate' } : d));
+      } catch {
+        /* ignore */
+      }
+      setRes(r);
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -75,7 +133,7 @@ export default function DamsPanel() {
       const p = storagePct(d);
       ds.entities.add({
         position: Cesium.Cartesian3.fromDegrees(d.lon, d.lat),
-        point: { pixelSize: 11, color: Cesium.Color.fromCssColorString(pctColor(p)), outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+        point: { pixelSize: sel?.id === d.id ? 18 : 11, color: Cesium.Color.fromCssColorString(pctColor(p)), outlineColor: sel?.id === d.id ? Cesium.Color.fromCssColorString('#22d3ee') : Cesium.Color.WHITE, outlineWidth: sel?.id === d.id ? 4 : 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
         label: {
           text: `${d.name}${p != null ? ` ${p.toFixed(0)}%` : ''}`,
           font: '11px Inter, sans-serif',
@@ -97,11 +155,12 @@ export default function DamsPanel() {
     const h = new Cesium.ScreenSpaceEventHandler(v.scene.canvas);
     h.setInputAction((e: any) => {
       const id = v.scene.pick(e.position)?.id?.properties?.damId?.getValue?.();
-      if (id) setSel(shown.find((d) => d.id === id) ?? null);
+      const d = id ? shown.find((x) => x.id === id) : null;
+      if (d) void focusDam(d);
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     return () => h.destroy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [g.viewer, shown]);
+  }, [g.viewer, shown, sel?.id]);
 
   const fr = freshness(res?.reportDate ?? null);
   const noPin = shown.filter((d) => d.lat == null).length;
@@ -144,10 +203,7 @@ export default function DamsPanel() {
           return (
             <li key={d.id}>
               <button
-                onClick={() => {
-                  setSel(d);
-                  if (d.lat != null && d.lon != null) g.viewer?.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(d.lon, d.lat, 60000), duration: 1.2 });
-                }}
+                onClick={() => void focusDam(d)}
                 className="flex w-full items-center gap-2 border-b border-white/5 px-2 py-1 text-left text-xs hover:bg-navy-800"
               >
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: pctColor(p) }} />
@@ -177,6 +233,11 @@ export default function DamsPanel() {
               </div>
             );
           })()}
+          {locating && <div className="mb-1 flex items-center gap-2 text-[11px] text-muted"><Spinner /> {t('Looking up the dam location…')}</div>}
+          {locErr && <div className="mb-1 text-[11px] text-warn">{locErr}</div>}
+          {sel.lat != null && sel.lon != null && (
+            <Button className="mb-1.5" onClick={() => flyToDam(sel.lon!, sel.lat!)}>📍 {t('Go to dam')}</Button>
+          )}
           <dl>
             <KV k={t('Agency / owner')} v={sel.owner || '—'} />
             <KV k={t('Region / group')} v={sel.group || '—'} />
