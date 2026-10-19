@@ -295,6 +295,25 @@ export default function MissionControl() {
     return () => clearInterval(t);
   }, [viewer, labels]);
 
+  // fly to a satellite as soon as it is selected (globe click or list)
+  const flyToSat = (id: string | null) => {
+    if (!viewer || !id) return;
+    const s = sats.find((x) => x.noradId === id);
+    if (!s) return;
+    const now = Cesium.JulianDate.toDate(viewer.clock.currentTime);
+    const lead = propagateSubPoint(s, new Date(now.getTime() + 1500)); // where it will be when the flight ends
+    if (!lead) return;
+    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(lead.lon, lead.lat, lead.heightKm * 1000 + Math.max(1.2e6, lead.heightKm * 400)),
+      duration: 1.5,
+    });
+  };
+  useEffect(() => {
+    if (!follow) flyToSat(selectedSat);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewer, selectedSat]);
+
   useEffect(() => {
     followRef.current = { on: follow && !!selectedSat, id: selectedSat };
     if (viewer && (!follow || !selectedSat)) viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
@@ -448,11 +467,7 @@ export default function MissionControl() {
             <div className="mt-3 flex gap-1.5">
               <Button
                 className="flex-1"
-                onClick={() => {
-                  if (!viewer) return;
-                  const p = propagateSubPoint(selected, simTime);
-                  if (p) viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.heightKm * 1000 + 3.5e6), duration: 1.4 });
-                }}
+                onClick={() => flyToSat(selected.noradId)}
               >{t('Fly to')} </Button>
               <Button variant={follow ? 'active' : 'ghost'} className="flex-1" onClick={() => setFollow(!follow)}>
                 {follow ? t('Stop following') : t('Follow')}
