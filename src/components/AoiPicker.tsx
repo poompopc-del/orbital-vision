@@ -1,7 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { useWorkspace } from '../store';
-import { aoiFromFile, areaKm2, bboxPolygon, geocode, pointAoi, type GeocodeHit } from '../lib/geo';
+import { aoiFromFile, areaKm2, bboxPolygon, downloadJson, geocode, pointAoi, type GeocodeHit } from '../lib/geo';
+import { bounds, editAoi, isRectangle, readFavourites, writeFavourites, type FavAoi } from '../lib/aoiEdit';
+import { uid } from '../lib/repo';
 import { Cesium, drawOnGlobe, flyToPolygon, type DrawMode } from '../lib/cesium';
 import { logAudit } from '../lib/repo';
 import { Button, Input, Spinner, cx } from './ui';
@@ -15,6 +17,29 @@ export default function AoiPicker({ viewer, compact }: { viewer?: Cesium.Viewer 
   const [drawing, setDrawing] = useState<DrawMode | null>(null);
   const cancelRef = useRef<() => void>();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [editing, setEditing] = useState(false);
+  const stopEdit = useRef<(() => void) | null>(null);
+  const [favs, setFavs] = useState<FavAoi[]>(() => readFavourites());
+  const [saving, setSaving] = useState(false);
+  const [favName, setFavName] = useState('');
+  const [favDesc, setFavDesc] = useState('');
+  const [showFavs, setShowFavs] = useState(false);
+
+  // stop editing when the AOI changes from outside, the viewer goes away, or on unmount
+  useEffect(() => () => stopEdit.current?.(), []);
+  useEffect(() => {
+    if (!editing || !viewer || !aoi) return;
+    stopEdit.current?.();
+    stopEdit.current = editAoi(viewer, aoi.geometry, (g) => setAoi({ ...aoi, geometry: g, name: aoi.name, source: 'drawn' }));
+    return () => {
+      stopEdit.current?.();
+      stopEdit.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, viewer]);
+  useEffect(() => {
+    if (!aoi) setEditing(false);
+  }, [aoi]);
 
   const apply = (geometry: GeoJSON.Polygon, name: string, source: 'drawn' | 'search' | 'coordinates' | 'import') => {
     setAoi({ geometry, name, source });
@@ -104,13 +129,82 @@ export default function AoiPicker({ viewer, compact }: { viewer?: Cesium.Viewer 
         <input ref={fileRef} type="file" accept=".geojson,.json,.kml" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
       </div>
       {err && <p className="text-[11px] text-bad">{err}</p>}
-      {aoi && (
-        <div className={cx('rounded border border-cyan-400/30 bg-cyan-400/5 px-2.5 py-2', compact && 'py-1.5')}>
-          <div className="label text-cyan-300">{t('Area of interest')}</div>
-          <div className="truncate text-xs text-white">{aoi.name}</div>
-          <div className="font-mono text-[10px] text-muted">
-            {areaKm2(aoi.geometry).toLocaleString(undefined, { maximumFractionDigits: 1 })} km² · {aoi.source}
+      {aoi && (() => {
+        const b = bounds(aoi.geometry);
+        const km2 = areaKm2(aoi.geometry);
+        return (
+          <div className={cx('rounded border border-cyan-400/30 bg-cyan-400/5 px-2.5 py-2', compact && 'py-1.5')}>
+            <div className="label text-cyan-300">{t('Area of interest')}</div>
+            <div className="truncate text-xs text-white">{aoi.name}</div>
+            <div className="font-mono text-[10px] text-muted">
+              {km2.toLocaleString(undefined, { maximumFractionDigits: 2 })} km² · {isRectangle(aoi.geometry) ? t('rectangle') : t('polygon')} · {aoi.source}
+            </div>
+            <div className="mt-1 grid grid-cols-2 gap-x-2 font-mono text-[10px] text-slate-300">
+              <span>N {b.north.toFixed(5)}°</span>
+              <span>S {b.south.toFixed(5)}°</span>
+              <span>W {b.west.toFixed(5)}°</span>
+              <span>E {b.east.toFixed(5)}°</span>
+            </div>
+            {km2 > 20000 && <p className="mt-1 text-[10px] text-warn">{t('Large AOI — some analyses limit the area (statistics are resampled; hydrology needs ≤ 2,500 km²).')}</p>}
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {viewer && <Button variant={editing ? 'active' : 'ghost'} onClick={() => setEditing(!editing)}>{editing ? t('Done editing') : t('Edit shape')}</Button>}
+              <Button onClick={() => { setSaving(!saving); setFavName(aoi.name); }}>☆ {t('Save')}</Button>
+              <Button onClick={() => downloadJson(`aoi-${aoi.name.replace(/[^\w-]+/g, '_').slice(0, 40)}.geojson`, { type: 'Feature', properties: { name: aoi.name, areaKm2: +km2.toFixed(4), crs: 'EPSG:4326' }, geometry: aoi.geometry })}>
+                {t('Export GeoJSON')}
+              </Button>
+            </div>
+            {editing && <p className="mt-1 text-[10px] text-cyan-300">{t('Drag the white handles on the map. Rectangles keep their shape.')}</p>}
+            {saving && (
+              <div className="mt-2 space-y-1">
+                <Input value={favName} onChange={(e) => setFavName(e.target.value)} placeholder={t('Name')} />
+                <Input value={favDesc} onChange={(e) => setFavDesc(e.target.value)} placeholder={t('Description (optional)')} />
+                <Button
+                  variant="primary"
+                  className="w-full"
+                  onClick={() => {
+                    const next = [{ id: uid(), name: favName || aoi.name, description: favDesc, geometry: aoi.geometry, savedAt: new Date().toISOString() }, ...favs];
+                    setFavs(next);
+                    writeFavourites(next);
+                    setSaving(false);
+                    setFavDesc('');
+                  }}
+                >
+                  {t('Save to favourites')}
+                </Button>
+              </div>
+            )}
           </div>
+        );
+      })()}
+      {favs.length > 0 && (
+        <div className="rounded border border-line">
+          <button onClick={() => setShowFavs(!showFavs)} className="label flex w-full justify-between px-2 py-1.5">
+            <span>★ {t('Favourite AOIs')} ({favs.length})</span>
+            <span>{showFavs ? '−' : '+'}</span>
+          </button>
+          {showFavs && (
+            <ul className="max-h-40 overflow-y-auto border-t border-line scroll-thin">
+              {favs.map((f) => (
+                <li key={f.id} className="flex items-center gap-1.5 border-b border-white/5 px-2 py-1 text-xs">
+                  <button onClick={() => apply(f.geometry, f.name, 'import')} className="min-w-0 flex-1 text-left">
+                    <div className="truncate text-slate-200">{f.name}</div>
+                    {f.description && <div className="truncate text-[10px] text-muted">{f.description}</div>}
+                  </button>
+                  <span className="font-mono text-[10px] text-muted">{areaKm2(f.geometry).toFixed(1)} km²</span>
+                  <button
+                    onClick={() => {
+                      const next = favs.filter((x) => x.id !== f.id);
+                      setFavs(next);
+                      writeFavourites(next);
+                    }}
+                    className="text-muted hover:text-bad"
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>

@@ -13,6 +13,8 @@ export const CYAN_SOFT = Cesium.Color.fromCssColorString('#7ce7f7');
 export interface ViewerOptions {
   timeline?: boolean;
   animation?: boolean;
+  /** false = start without any imagery (the caller manages basemaps) */
+  baseLayers?: boolean;
 }
 
 export function createViewer(el: HTMLElement, opts: ViewerOptions = {}): Cesium.Viewer {
@@ -40,7 +42,7 @@ export function createViewer(el: HTMLElement, opts: ViewerOptions = {}): Cesium.
   scene.fog.enabled = true;
   (scene as any).highDynamicRange = false;
   viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-  void addBaseLayers(viewer);
+  if (opts.baseLayers !== false) void addBaseLayers(viewer);
   return viewer;
 }
 
@@ -93,7 +95,8 @@ export function getBaseName(viewer: Cesium.Viewer): string {
 
 export async function setTerrain(viewer: Cesium.Viewer, on: boolean) {
   if (on && ionToken) {
-    viewer.scene.setTerrain(Cesium.Terrain.fromWorldTerrain());
+    // vertex normals are needed for hillshade / slope / aspect shading
+    viewer.scene.setTerrain(Cesium.Terrain.fromWorldTerrain({ requestVertexNormals: true }));
   } else {
     viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
   }

@@ -3,6 +3,7 @@ import { t } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
 import SatPicker from '../components/SatPicker';
+import PassClassNote from '../components/PassClassNote';
 import { Badge, Button, Notice, Panel, Spinner } from '../components/ui';
 import { Cesium, showAoi } from '../lib/cesium';
 import { useSatPoints, setLiveClock } from '../components/satLayer';
@@ -108,6 +109,8 @@ export default function ImagingView() {
         <Notice>
           {t('Strips show the nominal documented swath under each satellite (last 10 min faint, next 10 min bright). They show where a sensor could image, not where it actually is imaging.')}
         </Notice>
+
+        <PassClassNote active="opportunity" />
 
         <SatPicker sensors={IMAGING} title={t('Imaging satellites')} />
 

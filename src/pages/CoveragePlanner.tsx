@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { t } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
+import PassClassNote from '../components/PassClassNote';
 import { Badge, Button, Field, Notice, Panel, Spinner, cx } from '../components/ui';
 import { Cesium, showAoi } from '../lib/cesium';
 import { useOrbit, useWorkspace } from '../store';
@@ -75,6 +76,7 @@ export default function CoveragePlanner() {
           <h1 className="text-base font-semibold text-white">{t('Estimated observation opportunities')}</h1>
         </div>
         <Notice tone="warn">{t('A satellite passing over an area does not mean it will or can image it. These are geometric estimates from public orbital elements and nominal swath widths — not provider schedules. No pass shown here is confirmed by any provider.')} </Notice>
+        <PassClassNote active="opportunity" />
         <Panel title={t('Area of interest')}><AoiPicker viewer={viewer} compact /></Panel>
         <Panel title={t('Satellites & window')}>
           <div className="space-y-2.5">

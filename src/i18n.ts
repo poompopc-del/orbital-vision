@@ -561,3 +561,7 @@ export const TH: Record<string, string> = {
   'Earth Search STAC queries': 'การค้น Earth Search STAC',
   'Nominatim geocoding requests': 'การค้นหาสถานที่ Nominatim',
 };
+
+// GIS workspace strings
+import { TH_GIS } from './i18n_gis';
+Object.assign(TH, TH_GIS);

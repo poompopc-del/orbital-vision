@@ -7,7 +7,8 @@ export const fmtUtc = (d: Date | string | null | undefined) => {
 
 export const fmtLocal = (d: Date | string) => {
   const x = typeof d === 'string' ? new Date(d) : d;
-  return x.toLocaleString(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  // all local times are shown in Thailand time (Asia/Bangkok, UTC+7)
+  return x.toLocaleString(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
 };
 
 export const fmtNum = (n: number | null | undefined, digits = 1) =>

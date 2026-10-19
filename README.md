@@ -89,3 +89,30 @@ git push -u origin main
 - อ่าน COG ราย band เพื่อทำ false-color, ปรับการแสดงผล SAR (dB) และอ่านค่า pixel
 - ดึง TLE ย้อนหลังจาก Space-Track (ต้องมีบัญชี) เพื่อให้ Historical replay แม่นยำ
 - ระบบจัดการผู้ใช้หลายคนในหน้า Admin (ต้องใช้ Supabase service role ผ่าน server)
+
+---
+
+## GIS Workspace (`/gis`)
+
+แผนที่เดียวที่รวมเครื่องมือวิเคราะห์ทั้งหมด และใช้ AOI ชุดเดียวกับทุกหน้า
+
+| เครื่องมือ | แหล่งข้อมูลจริง | หมายเหตุ |
+|---|---|---|
+| แผนที่ฐาน Satellite / Hybrid / Street / Terrain / OSM + ชั้นถนน ขอบเขต และชื่อสถานที่ | Esri, Bing (Cesium ion), OpenStreetMap | ไม่มีขอบเขตอำเภอ/ตำบล ให้นำเข้า GeoJSON เอง |
+| เขื่อนและอ่างเก็บน้ำ | กรมชลประทาน `app.rid.go.th/reservoir/api/dam/public` ผ่าน `/api/dams` | API ไม่มีพิกัด จึงจับคู่ชื่อกับ OpenStreetMap และไม่มีข้อมูลย้อนหลังหรือระดับน้ำ |
+| คลิกค้นภาพ ณ จุด | Microsoft Planetary Computer STAC | แยกภาพในคลัง (ฟรี) ออกจากการสั่งถ่ายใหม่ (ต้องตรวจสอบกับผู้ให้บริการ) |
+| ดัชนี NDVI, EVI, SAVI, NDRE, NDWI, MNDWI, AWEI, NBR, NDBI, BSI, SAR dB | PC data API: band math จากแบนด์ต้นฉบับฝั่งเซิร์ฟเวอร์ | ปรับค่า S2 offset (baseline ≥ 04.00) และ Landsat scale/offset ให้อัตโนมัติ |
+| False-color / Custom RGB / stretch / gamma | PC data API | ยืดค่า 2–98 % จากสถิติใน AOI |
+| สถิติใน AOI, histogram, ค่าเฉลี่ยตัดเมฆ (SCL) | PC `/item/statistics` | resample ไม่เกิน 1024 px |
+| แผนที่น้ำ Optical (NDWI/MNDWI) และ SAR (S1 RTC VV dB) ก่อน/หลัง | PC tiles → ประมวลผลรายพิกเซลในเบราว์เซอร์ | ค่ามาจาก tiles 8 บิต · ส่งออกได้แค่ PNG + GeoJSON สรุป (ไม่มี GeoTIFF) |
+| Change detection (NDVI/NDWI/MNDWI/dNBR/SAR/ความสว่าง), swipe, อนุกรมเวลา + CSV | เหมือนข้างบน | dNBR แบ่งชั้นตาม Key & Benson (2006) |
+| DEM: ภูมิประเทศ 3D, ramp ความสูง/ลาด/ทิศลาด, contour, hillshade, ขยายแนวดิ่ง, ความสูง ณ จุด | Cesium World Terrain (ต้องมี ion token) | ความสูงเหนือทรงรี WGS84 |
+| Fill sinks + D8 + Flow accumulation + Watershed | สุ่มค่าความสูงจาก terrain เป็นกริดในเบราว์เซอร์ | จำกัด AOI ≤ 2,500 ตร.กม. · ใช้ลำน้ำจาก OSM เปรียบเทียบ |
+| รายงาน | HTML พร้อมภาพแผนที่ สถิติ วันที่ และแหล่งข้อมูล | |
+
+**ยังไม่ได้ทำ หรือต้องมี backend เพิ่ม:**
+- **ส่งออก GeoTIFF และ raster processing ขนาดใหญ่:** ต้องมี GIS processing service
+- **อัปโหลด DEM GeoTIFF:** ต้องใช้ไลบรารี geotiff ร่วมกับ backend
+- **การจำแนกสิ่งปกคลุมดิน (land-cover):** ต้องมีตัวจำแนก
+- **ข้อมูลเขื่อนย้อนหลัง:** API สาธารณะไม่ให้ข้อมูลนี้
+- **ข้อมูลภาพจากผู้ให้บริการเชิงพาณิชย์:** ต้องมี API key ฝั่งเซิร์ฟเวอร์

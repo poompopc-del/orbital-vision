@@ -11,6 +11,7 @@ export const STAC_FALLBACK = 'https://earth-search.aws.element84.com/v1';
 export const STAC_COLLECTIONS = [
   { id: 'sentinel-2-l2a', label: 'Sentinel-2 L2A', providerId: 'copernicus', missionId: 'sentinel-2', sensor: 'multispectral', gsd: '10 m', optical: true, level: 'L2A surface reflectance' },
   { id: 'landsat-c2-l2', label: 'Landsat C2 L2', providerId: 'usgs', missionId: 'landsat', sensor: 'multispectral', gsd: '30 m', optical: true, level: 'Collection 2 Level-2' },
+  { id: 'sentinel-1-rtc', label: 'Sentinel-1 RTC', providerId: 'copernicus', missionId: 'sentinel-1', sensor: 'sar', gsd: '10 m (RTC γ⁰)', optical: false, level: 'Radiometrically terrain corrected' },
   { id: 'sentinel-1-grd', label: 'Sentinel-1 GRD', providerId: 'copernicus', missionId: 'sentinel-1', sensor: 'sar', gsd: '~10 m pixel (IW GRD)', optical: false, level: 'Level-1 GRD' },
 ] as const;
 
@@ -34,6 +35,8 @@ export interface ImageryItem {
   /** TileJSON URL for full-resolution rendered tiles (Planetary Computer data API), when available. */
   tilejson: string | null;
   source: 'planetary-computer' | 'earth-search';
+  /** Sentinel-2 processing baseline (e.g. "05.10"); from 04.00 on, L2A digital numbers carry a +1000 offset. */
+  baseline: string | null;
   coveragePct: number | null;
   assets: Record<string, { href: string; type?: string; title?: string }>;
   selfHref: string | null;
@@ -72,6 +75,7 @@ function toItem(f: any, aoi: GeoJSON.Polygon, source: ImageryItem['source']): Im
     thumbnail: thumb && /^https?:/.test(thumb) ? thumb : null,
     tilejson: tj && /^https?:/.test(tj) ? tj : null,
     source,
+    baseline: p['s2:processing_baseline'] ?? null,
     coveragePct: aoiCoveragePct(aoi, f.geometry),
     assets: f.assets || {},
     selfHref: self,

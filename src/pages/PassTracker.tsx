@@ -3,6 +3,7 @@ import { t } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
 import SatPicker from '../components/SatPicker';
+import PassClassNote from '../components/PassClassNote';
 import { Badge, Button, Notice, Panel, Spinner, cx } from '../components/ui';
 import { Cesium, CYAN } from '../lib/cesium';
 import { setLiveClock, useSatPoints } from '../components/satLayer';
@@ -171,6 +172,8 @@ export default function PassTracker() {
           <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-cyan-400">🛰 {t('Pass view')}</div>
           <h1 className="text-base font-semibold text-white">{t('When satellites pass over my area')}</h1>
         </div>
+
+        <PassClassNote active="pass" />
 
         <Panel title={t('Observer location')}>
           <AoiPicker viewer={viewer} compact />
