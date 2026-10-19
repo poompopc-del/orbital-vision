@@ -10,6 +10,8 @@ import CoveragePlanner from './pages/CoveragePlanner';
 import ImageAnalysis from './pages/ImageAnalysis';
 import Orders from './pages/Orders';
 import Admin from './pages/Admin';
+import ImagingView from './pages/ImagingView';
+import PassTracker from './pages/PassTracker';
 import { refreshOrbits } from './lib/orbitLoader';
 import { useLang } from './i18n';
 
@@ -22,6 +24,8 @@ export default function App() {
     <Routes key={lang}>
       <Route element={<Layout />}>
         <Route index element={<MissionControl />} />
+        <Route path="imaging" element={<ImagingView />} />
+        <Route path="passes" element={<PassTracker />} />
         <Route path="imagery" element={<ImageryExplorer />} />
         <Route path="acquire" element={<NewAcquisition />} />
         <Route path="catalog" element={<SatelliteCatalog />} />

@@ -8,6 +8,8 @@ import { Badge, Button, Input, cx } from './ui';
 
 const NAV = [
   { to: '/', code: 'A', label: 'Mission Control', icon: 'M12 3a9 9 0 100 18 9 9 0 000-18zm-9 9h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18' },
+  { to: '/imaging', code: 'IM', label: 'Imaging view', icon: 'M4 8h3l2-3h6l2 3h3v11H4zM12 17a4 4 0 100-8 4 4 0 000 8z' },
+  { to: '/passes', code: 'PS', label: 'Pass view', icon: 'M3 18h18M5 18a7 7 0 0114 0M12 11l3-6' },
   { to: '/imagery', code: 'B', label: 'Imagery Explorer', icon: 'M4 5h16v14H4zM4 15l5-5 4 4 3-3 4 4' },
   { to: '/acquire', code: 'C', label: 'New Acquisition', icon: 'M12 5v14M5 12h14M12 2v2M12 20v2M2 12h2M20 12h2' },
   { to: '/catalog', code: 'D', label: 'Satellite Catalog', icon: 'M4 6h16M4 12h16M4 18h10' },

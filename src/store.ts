@@ -38,6 +38,8 @@ interface WorkspaceState {
   setPinnedOnly: (v: boolean) => void;
   customOnly: boolean;
   setCustomOnly: (v: boolean) => void;
+  passSats: string[];
+  setPassSats: (ids: string[]) => void;
   lastResults: ImageryItem[];
   setLastResults: (r: ImageryItem[]) => void;
   compare: ImageryItem[];
@@ -60,6 +62,8 @@ export const useWorkspace = create<WorkspaceState>()(
       setPinnedOnly: (pinnedOnly) => set({ pinnedOnly }),
       customOnly: false,
       setCustomOnly: (customOnly) => set({ customOnly }),
+      passSats: [],
+      setPassSats: (passSats) => set({ passSats }),
       lastResults: [],
       setLastResults: (r) => set({ lastResults: r.map(slim) }),
       compare: [],
