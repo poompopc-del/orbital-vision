@@ -22,6 +22,31 @@ const QUERIES = [
 ];
 
 export default async function handler(req, res) {
+  const name = req.query && req.query.name;
+  if (name !== undefined) {
+    const q = String(name).trim();
+    if (!/^[A-Za-z0-9 ()\-./+_]{2,40}$/.test(q)) {
+      res.status(400).json({ error: 'name must be 2–40 letters, digits, spaces or - ( ) . / + _' });
+      return;
+    }
+    try {
+      const r = await fetch(`https://celestrak.org/NORAD/elements/gp.php?NAME=${encodeURIComponent(q)}&FORMAT=3le`, {
+        headers: { 'User-Agent': 'orbital-vision/0.1 (+vercel)' },
+      });
+      if (!r.ok) {
+        res.status(502).json({ error: `CelesTrak HTTP ${r.status}` });
+        return;
+      }
+      const text = await r.text();
+      const found = text.trim() && !/No GP data found/i.test(text);
+      res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=3600');
+      res.status(200).json({ source: 'CelesTrak GP (3LE)', fetchedAt: new Date().toISOString(), tle: found ? text : '' });
+    } catch (e) {
+      res.status(502).json({ error: String(e && e.message ? e.message : e) });
+    }
+    return;
+  }
+
   const catnr = req.query && req.query.catnr;
   if (catnr !== undefined) {
     if (!/^\d{1,9}$/.test(String(catnr))) {

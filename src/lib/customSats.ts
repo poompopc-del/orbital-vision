@@ -59,6 +59,40 @@ function toRecord(e: Entry): SatRecord | null {
   return rec;
 }
 
+/** Search the public catalogue by (partial) satellite name. */
+export async function searchByName(q: string): Promise<SatRecord[]> {
+  const name = q.trim();
+  if (!/^[A-Za-z0-9 ()\-./+_]{2,40}$/.test(name)) throw new Error('invalid-name');
+  bumpQuota('tle');
+  let text = '';
+  let viaApi = false;
+  try {
+    const r = await fetch(`/api/tle?name=${encodeURIComponent(name)}`);
+    const ct = r.headers.get('content-type') || '';
+    if (r.ok && ct.includes('json')) {
+      text = (await r.json()).tle || '';
+      viaApi = true;
+    }
+  } catch {
+    /* fall back to direct */
+  }
+  if (!viaApi) {
+    const r = await fetch(`https://celestrak.org/NORAD/elements/gp.php?NAME=${encodeURIComponent(name)}&FORMAT=3le`);
+    if (!r.ok) throw new Error(`CelesTrak HTTP ${r.status}`);
+    text = await r.text();
+    if (/No GP data found/i.test(text)) text = '';
+  }
+  return parseTleText(text);
+}
+
+/** Add a satellite whose element set is already in hand (from a name search). */
+export function addCustomRecord(rec: SatRecord): SatRecord {
+  const entry: Entry = { id: rec.noradId, tle: `${rec.name}\n${rec.tle1}\n${rec.tle2}`, fetchedAt: new Date().toISOString() };
+  write([...read().filter((e) => e.id !== rec.noradId), entry]);
+  void logAudit('custom_sat.add', { norad: rec.noradId, name: rec.name });
+  return toRecord(entry)!;
+}
+
 export function customRecords(): SatRecord[] {
   return read().map(toRecord).filter(Boolean) as SatRecord[];
 }
