@@ -11,6 +11,8 @@ export default function ImageryCard({
   onFocus,
   onCompare,
   onSave,
+  onView,
+  viewing,
 }: {
   item: ImageryItem;
   active?: boolean;
@@ -18,6 +20,8 @@ export default function ImageryCard({
   onFocus?: () => void;
   onCompare?: () => void;
   onSave?: () => void;
+  onView?: () => void;
+  viewing?: boolean;
 }) {
   const [imgErr, setImgErr] = useState(false);
   return (
@@ -51,6 +55,9 @@ export default function ImageryCard({
           <span className="truncate">{item.level}</span>
         </div>
         <div className="flex flex-wrap gap-1 pt-0.5">
+          {onView && item.tilejson && (
+            <Button variant={viewing ? 'active' : 'primary'} onClick={onView}>{viewing ? t('Hide image') : `🌍 ${t('View real image')}`}</Button>
+          )}
           {onCompare && <Button variant={inCompare ? 'active' : 'ghost'} onClick={onCompare}>{inCompare ? t('In compare') : t('Compare')}</Button>}
           {onSave && <Button onClick={onSave}>{t('Save to orders')}</Button>}
           {item.selfHref && (

@@ -7,7 +7,7 @@ import { Cesium, CYAN_SOFT, drawOnGlobe, flyToBbox, showAoi } from '../lib/cesiu
 import { useWorkspace } from '../store';
 import { downloadJson, lineLengthKm, polygonAreaKm2 } from '../lib/geo';
 import { fmtNum, fmtUtc } from '../lib/format';
-import type { ImageryItem } from '../lib/stac';
+import { addSceneLayer, type ImageryItem } from '../lib/stac';
 
 const COLL_COLOR: Record<string, string> = { 'sentinel-2-l2a': '#22d3ee', 'landsat-c2-l2': '#4f8dff', 'sentinel-1-grd': '#f5b84b' };
 
@@ -80,15 +80,24 @@ export default function ImageAnalysis() {
     setLayerErr([]);
     const items = [a, b].filter(Boolean) as ImageryItem[];
     items.forEach(async (it, idx) => {
-      if (!it.thumbnail) {
+      if (!it.thumbnail && !it.tilejson) {
         setLayerErr((e) => [...e, `${it.id}: no preview asset`]);
         return;
       }
       try {
-        const [w, s, e, n] = it.bbox;
-        const prov = await Cesium.SingleTileImageryProvider.fromUrl(it.thumbnail, { rectangle: Cesium.Rectangle.fromDegrees(w, s, e, n) });
-        if (cancelled || viewer.isDestroyed()) return;
-        const layer = viewer.imageryLayers.addImageryProvider(prov);
+        // full-resolution tiles when the scene has them; otherwise the preview image on the item bbox
+        let layer = it.tilejson ? await addSceneLayer(viewer, it).catch(() => null) : null;
+        if (cancelled || viewer.isDestroyed()) {
+          if (layer && !viewer.isDestroyed()) viewer.imageryLayers.remove(layer, true);
+          return;
+        }
+        if (!layer) {
+          if (!it.thumbnail) throw new Error('no preview');
+          const [w, s, e, n] = it.bbox;
+          const prov = await Cesium.SingleTileImageryProvider.fromUrl(it.thumbnail, { rectangle: Cesium.Rectangle.fromDegrees(w, s, e, n) });
+          if (cancelled || viewer.isDestroyed()) return;
+          layer = viewer.imageryLayers.addImageryProvider(prov);
+        }
         layer.alpha = 0.95;
         if (items.length === 2) layer.splitDirection = idx === 0 ? Cesium.SplitDirection.LEFT : Cesium.SplitDirection.RIGHT;
         layers.current.push(layer);
@@ -147,7 +156,11 @@ export default function ImageAnalysis() {
           </>
         )}
         <div className="pointer-events-none absolute bottom-14 left-3 z-10 max-w-sm">
-          <Badge tone="warn">{t('Preview overlay — JPEG thumbnail placed on item bbox, approximate georeference, not radiometric data')}</Badge>
+          {compare.some((c) => c.tilejson) ? (
+            <Badge tone="ok">{t('Real full-resolution image (rendered tiles, Microsoft Planetary Computer)')}</Badge>
+          ) : (
+            <Badge tone="warn">{t('Preview overlay — JPEG thumbnail placed on item bbox, approximate georeference, not radiometric data')}</Badge>
+          )}
         </div>
       </div>
 
@@ -205,7 +218,7 @@ export default function ImageAnalysis() {
         <Panel title={t('Display & pixel tools')}>
           <div className="space-y-1.5 text-xs">
             {[
-              ['Natural colour (RGB)', 'Shown via provider thumbnail / visual COG', true],
+              ['Natural colour (RGB)', 'Full-resolution rendered tiles (Planetary Computer)', true],
               ['False colour composites', 'Needs per-band COG reading (nir, swir) — not integrated yet', false],
               ['SAR display (dB stretch)', 'Needs GRD COG access (requester-pays bucket) — not integrated yet', false],
               ['Pixel values', 'Unavailable on JPEG previews; requires COG band integration', false],

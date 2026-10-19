@@ -66,7 +66,7 @@ export default function Admin() {
           <Panel title={t('Data sources')}>
             <dl className="max-w-2xl">
               <KV k={t('Orbital elements')} v={<span>{orbit.source || '—'} · {orbit.sats.length} satellites · fetched {fmtUtc(orbit.fetchedAt)}</span>} />
-              <KV k={t('Archive search')} v="Earth Search STAC v1 (Element 84) — Sentinel-2 L2A, Landsat C2 L2, Sentinel-1 GRD" />
+              <KV k={t('Archive search')} v="Microsoft Planetary Computer STAC + data API tiles (fallback: Earth Search) — Sentinel-2 L2A, Landsat C2 L2, Sentinel-1 GRD" />
               <KV k={t('Geocoding')} v="OpenStreetMap Nominatim (rate-limited, 1 req/s)" />
               <KV k={t('Base map')} v={cesiumTokenConfigured ? 'Cesium ion (Bing Maps Aerial) + World Terrain' : 'Esri World Imagery (no ion token — terrain disabled)'} />
               <KV k={t('Persistence')} v={mode === 'supabase' ? 'Supabase (Postgres + PostGIS, RLS)' : 'Browser localStorage'} />

@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { Link } from 'react-router-dom';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
 import ImageryCard from '../components/ImageryCard';
 import { Badge, Button, Field, Input, Notice, Panel, Spinner } from '../components/ui';
-import { Cesium, CYAN, showAoi } from '../lib/cesium';
-import { searchArchive, STAC_COLLECTIONS, type ImageryItem, type StacCollectionId } from '../lib/stac';
+import { Cesium, CYAN, flyToBbox, getLabelsLayer, showAoi } from '../lib/cesium';
+import { addSceneLayer, searchArchive, STAC_COLLECTIONS, type ImageryItem, type StacCollectionId } from '../lib/stac';
 import { useWorkspace } from '../store';
 import { isoDay } from '../lib/format';
 import { PROVIDERS } from '../data/providers';
@@ -24,6 +24,10 @@ export default function ImageryExplorer() {
   const [err, setErr] = useState('');
   const [focus, setFocus] = useState<string | null>(null);
   const [saved, setSaved] = useState('');
+  const [viewing, setViewing] = useState<string | null>(null);
+  const [viewErr, setViewErr] = useState('');
+  const [viewBusy, setViewBusy] = useState(false);
+  const sceneLayer = useRef<Cesium.ImageryLayer | null>(null);
   const results = lastResults;
 
   const shown = useMemo(() => results.filter((r) => (r.coveragePct ?? 100) >= minCov), [results, minCov]);
@@ -49,6 +53,37 @@ export default function ImageryExplorer() {
       });
     });
   }, [viewer, shown, focus]);
+
+  // full-resolution scene on the globe
+  useEffect(() => {
+    if (!viewer) return;
+    let cancelled = false;
+    if (sceneLayer.current) {
+      viewer.imageryLayers.remove(sceneLayer.current, true);
+      sceneLayer.current = null;
+    }
+    setViewErr('');
+    const it = results.find((r) => r.id === viewing);
+    if (!it) return;
+    setViewBusy(true);
+    addSceneLayer(viewer, it)
+      .then((l) => {
+        if (cancelled || !l) {
+          if (l && !viewer.isDestroyed()) viewer.imageryLayers.remove(l, true);
+          return;
+        }
+        sceneLayer.current = l;
+        const lab = getLabelsLayer(viewer);
+        if (lab) viewer.imageryLayers.raiseToTop(lab);
+        const [w, so, e, n] = it.bbox;
+        flyToBbox(viewer, w, so, e, n);
+      })
+      .catch((e) => !cancelled && setViewErr(`${t('Could not load the image')}: ${e.message}`))
+      .finally(() => !cancelled && setViewBusy(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [viewer, viewing]);
 
   const run = async () => {
     if (!aoi) return setErr('Select an area of interest first.');
@@ -135,13 +170,14 @@ export default function ImageryExplorer() {
           )}
         >
           <div className="space-y-2">
-            {!results.length && !busy && <p className="text-xs text-muted">{t('Run a search to list genuine catalogue records from the public Earth Search STAC API.')}</p>}
+            {!results.length && !busy && <p className="text-xs text-muted">{t('Run a search to list real Sentinel and Landsat scenes. Press “View real image” to see the full-resolution picture on the globe.')}</p>}
             {compare.length > 0 && (
               <div className="flex items-center justify-between rounded border border-cyan-400/30 px-2 py-1.5 text-xs">
                 <span className="text-slate-300">{compare.length}/2 selected for comparison</span>
                 <Link to="/analysis"><Button variant="primary">{t('Open analysis')}</Button></Link>
               </div>
             )}
+            {viewErr && <Notice tone="bad">{viewErr}</Notice>}
             {saved && <Notice>{t('Saved to Orders & Projects as an archive record.')}</Notice>}
             {shown.map((r) => (
               <ImageryCard
@@ -152,6 +188,8 @@ export default function ImageryExplorer() {
                 onFocus={() => setFocus(r.id)}
                 onCompare={() => toggleCompare(r)}
                 onSave={() => saveItem(r)}
+                viewing={viewing === r.id}
+                onView={() => setViewing(viewing === r.id ? null : r.id)}
               />
             ))}
           </div>
@@ -175,7 +213,8 @@ export default function ImageryExplorer() {
       <div className="relative min-h-[320px] flex-1">
         <GlobeHost onReady={setViewer} />
         <div className="pointer-events-none absolute left-3 top-3 flex gap-1.5">
-          <Badge tone="cyan">{t('Footprints · Earth Search STAC')}</Badge>
+          <Badge tone="cyan">{t('Open data · Microsoft Planetary Computer STAC')}</Badge>
+          {viewing && <Badge tone="ok">{viewBusy ? t('Loading image…') : t('Real image shown')}</Badge>}
         </div>
       </div>
     </div>

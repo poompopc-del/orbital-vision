@@ -1,9 +1,12 @@
-// Archive search against the public Earth Search STAC API (Element 84, AWS open data).
+// Archive search against public STAC catalogues of open satellite data.
+// Primary: Microsoft Planetary Computer (items carry full-resolution map tiles); fallback: Earth Search (Element 84).
 // Returns genuine catalogue records — nothing here is synthesised.
 import { bumpQuota } from './quotas';
 import { aoiCoveragePct } from './geo';
+import { Cesium } from './cesium';
 
-export const STAC_API = 'https://earth-search.aws.element84.com/v1';
+export const STAC_API = 'https://planetarycomputer.microsoft.com/api/stac/v1';
+export const STAC_FALLBACK = 'https://earth-search.aws.element84.com/v1';
 
 export const STAC_COLLECTIONS = [
   { id: 'sentinel-2-l2a', label: 'Sentinel-2 L2A', providerId: 'copernicus', missionId: 'sentinel-2', sensor: 'multispectral', gsd: '10 m', optical: true, level: 'L2A surface reflectance' },
@@ -28,6 +31,9 @@ export interface ImageryItem {
   geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
   bbox: [number, number, number, number];
   thumbnail: string | null;
+  /** TileJSON URL for full-resolution rendered tiles (Planetary Computer data API), when available. */
+  tilejson: string | null;
+  source: 'planetary-computer' | 'earth-search';
   coveragePct: number | null;
   assets: Record<string, { href: string; type?: string; title?: string }>;
   selfHref: string | null;
@@ -43,10 +49,11 @@ export interface StacQuery {
   limit?: number;
 }
 
-function toItem(f: any, aoi: GeoJSON.Polygon): ImageryItem {
+function toItem(f: any, aoi: GeoJSON.Polygon, source: ImageryItem['source']): ImageryItem {
   const meta = STAC_COLLECTIONS.find((c) => c.id === f.collection) ?? STAC_COLLECTIONS[0];
   const p = f.properties || {};
-  const thumb = f.assets?.thumbnail?.href || f.assets?.preview?.href || null;
+  const thumb = f.assets?.rendered_preview?.href || f.assets?.thumbnail?.href || f.assets?.preview?.href || null;
+  const tj = f.assets?.tilejson?.href || null;
   const self = (f.links || []).find((l: any) => l.rel === 'self')?.href ?? null;
   return {
     id: f.id,
@@ -63,6 +70,8 @@ function toItem(f: any, aoi: GeoJSON.Polygon): ImageryItem {
     geometry: f.geometry,
     bbox: f.bbox,
     thumbnail: thumb && /^https?:/.test(thumb) ? thumb : null,
+    tilejson: tj && /^https?:/.test(tj) ? tj : null,
+    source,
     coveragePct: aoiCoveragePct(aoi, f.geometry),
     assets: f.assets || {},
     selfHref: self,
@@ -70,30 +79,64 @@ function toItem(f: any, aoi: GeoJSON.Polygon): ImageryItem {
   };
 }
 
+async function searchOne(api: string, cid: StacCollectionId, q: StacQuery): Promise<any[]> {
+  const meta = STAC_COLLECTIONS.find((c) => c.id === cid)!;
+  const body: any = {
+    collections: [cid],
+    intersects: q.aoi,
+    datetime: `${q.from}T00:00:00Z/${q.to}T23:59:59Z`,
+    limit: q.limit ?? 40,
+    sortby: [{ field: 'properties.datetime', direction: 'desc' }],
+  };
+  if (meta.optical && q.maxCloud != null) body.query = { 'eo:cloud_cover': { lte: q.maxCloud } };
+  bumpQuota('stac');
+  const post = () => fetch(`${api}/search`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  let r = await post();
+  if (!r.ok && body.sortby) {
+    delete body.sortby;
+    r = await post();
+  }
+  if (!r.ok) throw new Error(`${meta.label}: STAC search failed (HTTP ${r.status})`);
+  return (await r.json()).features || [];
+}
+
 export async function searchArchive(q: StacQuery): Promise<ImageryItem[]> {
   const out: ImageryItem[] = [];
+  const errors: string[] = [];
   // query each collection separately so per-collection filters (cloud cover) apply correctly
   await Promise.all(
     q.collections.map(async (cid) => {
-      const meta = STAC_COLLECTIONS.find((c) => c.id === cid)!;
-      const body: any = {
-        collections: [cid],
-        intersects: q.aoi,
-        datetime: `${q.from}T00:00:00Z/${q.to}T23:59:59Z`,
-        limit: q.limit ?? 40,
-        sortby: [{ field: 'properties.datetime', direction: 'desc' }],
-      };
-      if (meta.optical && q.maxCloud != null) body.query = { 'eo:cloud_cover': { lte: q.maxCloud } };
-      bumpQuota('stac');
-      let r = await fetch(`${STAC_API}/search`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok && body.sortby) {
-        delete body.sortby;
-        r = await fetch(`${STAC_API}/search`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      try {
+        (await searchOne(STAC_API, cid, q)).forEach((f) => out.push(toItem(f, q.aoi, 'planetary-computer')));
+      } catch {
+        try {
+          (await searchOne(STAC_FALLBACK, cid, q)).forEach((f) => out.push(toItem(f, q.aoi, 'earth-search')));
+        } catch (e: any) {
+          errors.push(e.message);
+        }
       }
-      if (!r.ok) throw new Error(`${meta.label}: STAC search failed (HTTP ${r.status})`);
-      const j = await r.json();
-      for (const f of j.features || []) out.push(toItem(f, q.aoi));
     }),
   );
+  if (!out.length && errors.length) throw new Error(errors.join(' · '));
   return out.sort((a, b) => b.datetime.localeCompare(a.datetime));
+}
+
+/** Add the full-resolution rendered scene (map tiles) to a viewer. Returns null if the item has no tiles. */
+export async function addSceneLayer(viewer: Cesium.Viewer, item: ImageryItem): Promise<Cesium.ImageryLayer | null> {
+  if (!item.tilejson) return null;
+  const r = await fetch(item.tilejson);
+  if (!r.ok) throw new Error(`tilejson HTTP ${r.status}`);
+  const j = await r.json();
+  const url: string | undefined = j.tiles?.[0];
+  if (!url) throw new Error('no tiles in tilejson');
+  const [w, s, e, n] = (j.bounds as number[] | undefined) ?? item.bbox;
+  const provider = new Cesium.UrlTemplateImageryProvider({
+    url,
+    rectangle: Cesium.Rectangle.fromDegrees(w, s, e, n),
+    minimumLevel: 0,
+    maximumLevel: typeof j.maxzoom === 'number' ? j.maxzoom : 18,
+    credit: new Cesium.Credit(`${item.collectionLabel} · Microsoft Planetary Computer`),
+  });
+  if (viewer.isDestroyed()) return null;
+  return viewer.imageryLayers.addImageryProvider(provider);
 }
