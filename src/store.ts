@@ -32,6 +32,10 @@ interface WorkspaceState {
   setAoi: (a: Aoi | null) => void;
   selectedSat: string | null;
   setSelectedSat: (id: string | null) => void;
+  pinned: string[];
+  togglePin: (id: string) => void;
+  pinnedOnly: boolean;
+  setPinnedOnly: (v: boolean) => void;
   lastResults: ImageryItem[];
   setLastResults: (r: ImageryItem[]) => void;
   compare: ImageryItem[];
@@ -48,6 +52,10 @@ export const useWorkspace = create<WorkspaceState>()(
       setAoi: (aoi) => set({ aoi }),
       selectedSat: null,
       setSelectedSat: (selectedSat) => set({ selectedSat }),
+      pinned: [],
+      togglePin: (id) => set({ pinned: get().pinned.includes(id) ? get().pinned.filter((x) => x !== id) : [...get().pinned, id] }),
+      pinnedOnly: false,
+      setPinnedOnly: (pinnedOnly) => set({ pinnedOnly }),
       lastResults: [],
       setLastResults: (r) => set({ lastResults: r.map(slim) }),
       compare: [],

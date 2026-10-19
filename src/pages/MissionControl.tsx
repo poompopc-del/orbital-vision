@@ -18,7 +18,8 @@ const SENSORS = Object.keys(SENSOR_LABEL) as SensorCategory[];
 
 export default function MissionControl() {
   const { sats, status, error, source, fetchedAt } = useOrbit();
-  const { aoi, selectedSat, setSelectedSat } = useWorkspace();
+  const { aoi, selectedSat, setSelectedSat, pinned, togglePin, pinnedOnly, setPinnedOnly } = useWorkspace();
+  const [focus, setFocus] = useState(false);
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
   const [mode, setMode] = useState<Mode>('live');
   const [scene2d, setScene2d] = useState(false);
@@ -37,7 +38,9 @@ export default function MissionControl() {
   const pointsRef = useRef<Cesium.PointPrimitiveCollection | null>(null);
   const pointMap = useRef(new Map<string, Cesium.PointPrimitive>());
 
+  const onlyPinned = (pinnedOnly || focus) && pinned.length > 0;
   const visible = useMemo(() => {
+    if (onlyPinned) return sats.filter((s) => pinned.includes(s.noradId));
     const t = text.trim().toUpperCase();
     return sats.filter((s) => {
       const m = s.mission!;
@@ -48,7 +51,7 @@ export default function MissionControl() {
       if (t && !s.name.includes(t) && !s.noradId.includes(t) && !m.name.toUpperCase().includes(t)) return false;
       return true;
     });
-  }, [sats, sensorF, providerF, accessF, text]);
+  }, [sats, sensorF, providerF, accessF, text, onlyPinned, pinned]);
 
   const selected = useMemo(() => sats.find((s) => s.noradId === selectedSat) ?? null, [sats, selectedSat]);
 
@@ -320,6 +323,17 @@ export default function MissionControl() {
     if (viewer && (!follow || !selectedSat)) viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
   }, [viewer, follow, selectedSat]);
 
+  // focus mode: hide panels, overlays and Cesium clock widgets; Esc exits
+  useEffect(() => {
+    if (!viewer) return;
+    const els = [viewer.timeline?.container, viewer.animation?.container] as (HTMLElement | undefined)[];
+    els.forEach((el) => el && (el.style.display = focus ? 'none' : ''));
+    if (!focus) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setFocus(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewer, focus]);
+
   const isLive = Math.abs(simTime.getTime() - Date.now()) < 10000;
   const maxAge = selected ? elementAgeDays(selected, simTime) : null;
 
@@ -331,6 +345,7 @@ export default function MissionControl() {
           'z-20 flex w-[290px] shrink-0 flex-col gap-3 overflow-y-auto border-r border-line bg-ink-900 p-3 scroll-thin',
           'absolute inset-y-0 left-0 transition-transform md:static md:translate-x-0',
           !showPanel && '-translate-x-full md:hidden',
+          focus && 'hidden md:hidden',
         )}
       >
         <Panel title={t('Location / AOI')}>
@@ -370,6 +385,15 @@ export default function MissionControl() {
         </Panel>
 
         <AddSatellite />
+
+        <Panel title={t('My view')} right={<span className="font-mono text-[10px] text-muted">{pinned.length} ★</span>}>
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input type="checkbox" checked={pinnedOnly} onChange={(e) => setPinnedOnly(e.target.checked)} disabled={!pinned.length} />
+            {t('Show only pinned satellites')}
+          </label>
+          <p className="mt-1 text-[10px] leading-snug text-muted">{t('Click ☆ in the list or “Pin” on a satellite to add it to your view.')}</p>
+          <Button variant="primary" className="mt-2 w-full" onClick={() => setFocus(true)}>⛶ {t('Focus mode')}</Button>
+        </Panel>
 
         <Panel title={t('Filters')} right={<span className="font-mono text-[10px] text-muted">{visible.length}/{sats.length}</span>}>
           <div className="space-y-2">
@@ -417,10 +441,17 @@ export default function MissionControl() {
           )}
           <ul className="max-h-[320px] overflow-y-auto scroll-thin">
             {visible.slice(0, 400).map((s) => (
-              <li key={s.noradId}>
+              <li key={s.noradId} className={cx('flex items-center border-b border-white/5 hover:bg-navy-800', s.noradId === selectedSat && 'bg-cyan-400/10')}>
+                <button
+                  title={pinned.includes(s.noradId) ? t('Unpin') : t('Pin to my view')}
+                  onClick={() => togglePin(s.noradId)}
+                  className={cx('pl-3 pr-1 text-sm leading-none', pinned.includes(s.noradId) ? 'text-warn' : 'text-muted hover:text-warn')}
+                >
+                  {pinned.includes(s.noradId) ? '★' : '☆'}
+                </button>
                 <button
                   onClick={() => setSelectedSat(s.noradId)}
-                  className={cx('flex w-full items-center gap-2 border-b border-white/5 px-3 py-1.5 text-left hover:bg-navy-800', s.noradId === selectedSat && 'bg-cyan-400/10')}
+                  className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-1 pr-3 text-left"
                 >
                   <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: SENSOR_COLOR[s.mission!.sensor] }} />
                   <span className="min-w-0 flex-1 truncate text-xs text-slate-200">{s.name}</span>
@@ -436,14 +467,29 @@ export default function MissionControl() {
       <div className="relative min-w-0 flex-1">
         <GlobeHost onReady={setViewer} options={{ timeline: true, animation: true }} />
 
+        {focus ? (
+          <div className="absolute right-3 top-3 z-30 flex items-center gap-2">
+            {selected && <span className="rounded bg-ink-950/70 px-2 py-1 font-mono text-[11px] text-white">{selected.name}</span>}
+            <Button onClick={() => setFocus(false)} className="bg-ink-950/70">✕ {t('Exit focus mode')} (Esc)</Button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setFocus(true)}
+            title={t('Focus mode')}
+            className="absolute bottom-[100px] right-3 z-20 rounded border border-line bg-navy-900/90 px-2.5 py-1.5 text-xs text-slate-200 hover:border-cyan-400/50 hover:text-white"
+          >
+            ⛶ {t('Focus mode')}
+          </button>
+        )}
+
         <button
           onClick={() => setShowPanel(!showPanel)}
-          className="absolute left-3 top-3 z-30 rounded border border-line bg-navy-900/90 px-2 py-1 font-mono text-[10px] text-slate-300 md:hidden"
+          className={cx('absolute left-3 top-3 z-30 rounded border border-line bg-navy-900/90 px-2 py-1 font-mono text-[10px] text-slate-300 md:hidden', focus && 'hidden')}
         >
           {showPanel ? 'HIDE' : 'PANEL'}
         </button>
 
-        <div className="pointer-events-none absolute left-3 top-3 z-10 hidden flex-col gap-1.5 rounded-md border border-line bg-ink-950/80 px-2.5 py-2 backdrop-blur md:flex">
+        <div className={cx('pointer-events-none absolute left-3 top-3 z-10 hidden flex-col gap-1.5 rounded-md border border-line bg-ink-950/80 px-2.5 py-2 backdrop-blur', !focus && 'md:flex')}>
           <div className="flex items-center gap-1.5">
             {mode === 'historical' ? <Badge tone="warn">{t('Historical replay')}</Badge> : isLive ? <Badge tone="ok">{t('● Live clock')}</Badge> : <Badge tone="info">{t('Simulation time')}</Badge>}
             <Badge tone="cyan">{t('Propagated orbit · SGP4')}</Badge>
@@ -460,8 +506,8 @@ export default function MissionControl() {
           </div>
         )}
 
-        {selected && (
-          <div className="absolute right-3 top-3 z-20 max-h-[calc(100%-110px)] w-[300px] max-w-[calc(100%-24px)] overflow-y-auto rounded-md border border-line bg-navy-900/95 p-3 shadow-2xl backdrop-blur scroll-thin">
+        {selected && !focus && (
+          <div className="absolute right-3 top-3 z-20 max-h-[calc(100%-150px)] w-[300px] max-w-[calc(100%-24px)] overflow-y-auto rounded-md border border-line bg-navy-900/95 p-3 shadow-2xl backdrop-blur scroll-thin">
             <div className="mb-2 flex items-center justify-between">
               <span className="label">{t('Selected satellite')}</span>
               <button onClick={() => { setSelectedSat(null); setFollow(false); }} className="text-muted hover:text-white">✕</button>
@@ -477,6 +523,9 @@ export default function MissionControl() {
               </Button>
             </div>
             <div className="mt-1.5 flex gap-1.5">
+              <Button variant={pinned.includes(selected.noradId) ? 'active' : 'ghost'} className="flex-1" onClick={() => togglePin(selected.noradId)}>
+                {pinned.includes(selected.noradId) ? `★ ${t('Pinned')}` : `☆ ${t('Pin')}`}
+              </Button>
               <Link to={`/catalog?sat=${selected.noradId}`} className="flex-1">
                 <Button className="w-full">{t('Catalog record')}</Button>
               </Link>
@@ -484,7 +533,7 @@ export default function MissionControl() {
           </div>
         )}
 
-        <div className="pointer-events-none absolute bottom-[70px] left-1/2 z-10 hidden -translate-x-1/2 md:block">
+        <div className={cx('pointer-events-none absolute bottom-[70px] left-1/2 z-10 hidden -translate-x-1/2', !focus && 'md:block')}>
           <div className="flex gap-3 rounded bg-navy-900/80 px-3 py-1">
             {SENSORS.map((s) => (
               <span key={s} className="flex items-center gap-1 text-[10px] text-slate-300">
