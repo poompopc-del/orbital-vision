@@ -3,12 +3,12 @@ import { t } from '../i18n';
 import { Link } from 'react-router-dom';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
-import AddSatellite from '../components/AddSatellite';
+import SatPicker from '../components/SatPicker';
 import SatDetails from '../components/SatDetails';
-import { Badge, Button, Input, Notice, Panel, Spinner, cx } from '../components/ui';
+import { Badge, Button, Input, Notice, Panel, cx } from '../components/ui';
 import { Cesium, getLabelsLayer, getBaseName, hasIon, setTerrain, showAoi } from '../lib/cesium';
 import { elementAgeDays, groundTrack, propagateSubPoint, type SatRecord } from '../lib/orbit';
-import { PROVIDERS, SENSOR_COLOR, SENSOR_LABEL, type SensorCategory } from '../data/providers';
+import { SENSOR_COLOR, SENSOR_LABEL, type SensorCategory } from '../data/providers';
 import { useOrbit, useWorkspace } from '../store';
 import { fmtLatLon, fmtUtc } from '../lib/format';
 import { refreshOrbits } from '../lib/orbitLoader';
@@ -18,17 +18,13 @@ const SENSORS = Object.keys(SENSOR_LABEL) as SensorCategory[];
 
 export default function MissionControl() {
   const { sats, status, error, source, fetchedAt } = useOrbit();
-  const { aoi, selectedSat, setSelectedSat, pinned, togglePin, pinnedOnly, setPinnedOnly, customOnly } = useWorkspace();
+  const { aoi, selectedSat, setSelectedSat, mySats, setMySats } = useWorkspace();
   const [focus, setFocus] = useState(false);
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
   const [mode, setMode] = useState<Mode>('live');
   const [scene2d, setScene2d] = useState(false);
   const [terrain, setTerrainOn] = useState(false);
   const [labels, setLabels] = useState(true);
-  const [sensorF, setSensorF] = useState<Set<SensorCategory>>(new Set(SENSORS));
-  const [providerF, setProviderF] = useState<string>('all');
-  const [accessF, setAccessF] = useState<'all' | 'commercial' | 'public'>('all');
-  const [text, setText] = useState('');
   const [simTime, setSimTime] = useState(new Date());
   const [cursor, setCursor] = useState<{ lat: number; lon: number } | null>(null);
   const [histDate, setHistDate] = useState(() => new Date(Date.now() - 86400000).toISOString().slice(0, 16));
@@ -38,21 +34,10 @@ export default function MissionControl() {
   const pointsRef = useRef<Cesium.PointPrimitiveCollection | null>(null);
   const pointMap = useRef(new Map<string, Cesium.PointPrimitive>());
 
-  const onlyPinned = (pinnedOnly || focus) && pinned.length > 0;
   const visible = useMemo(() => {
-    if (onlyPinned) return sats.filter((s) => pinned.includes(s.noradId));
-    if (customOnly) return sats.filter((s) => s.custom);
-    const t = text.trim().toUpperCase();
-    return sats.filter((s) => {
-      const m = s.mission!;
-      if (!sensorF.has(m.sensor)) return false;
-      if (providerF !== 'all' && m.providerId !== providerF) return false;
-      if (accessF === 'commercial' && s.provider?.access !== 'commercial') return false;
-      if (accessF === 'public' && s.provider?.access === 'commercial') return false;
-      if (t && !s.name.includes(t) && !s.noradId.includes(t) && !m.name.toUpperCase().includes(t)) return false;
-      return true;
-    });
-  }, [sats, sensorF, providerF, accessF, text, onlyPinned, pinned, customOnly]);
+    const set = new Set(mySats);
+    return sats.filter((s) => set.has(s.noradId));
+  }, [sats, mySats]);
 
   const selected = useMemo(() => sats.find((s) => s.noradId === selectedSat) ?? null, [sats, selectedSat]);
 
@@ -385,83 +370,16 @@ export default function MissionControl() {
             <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} /> {t('Boundaries & place names')} </label>
         </Panel>
 
-        <AddSatellite />
+        <SatPicker />
 
-        <Panel title={t('My view')} right={<span className="font-mono text-[10px] text-muted">{pinned.length} ★</span>}>
-          <label className="flex items-center gap-2 text-xs text-slate-300">
-            <input type="checkbox" checked={pinnedOnly} onChange={(e) => setPinnedOnly(e.target.checked)} disabled={!pinned.length} />
-            {t('Show only pinned satellites')}
-          </label>
-          <p className="mt-1 text-[10px] leading-snug text-muted">{t('Click ☆ in the list or “Pin” on a satellite to add it to your view.')}</p>
-          <Button variant="primary" className="mt-2 w-full" onClick={() => setFocus(true)}>⛶ {t('Focus mode')}</Button>
-        </Panel>
-
-        <Panel title={t('Filters')} right={<span className="font-mono text-[10px] text-muted">{visible.length}/{sats.length}</span>}>
+        {status === 'error' && (
           <div className="space-y-2">
-            <Input value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Name or NORAD ID')} />
-            <div className="flex flex-wrap gap-1">
-              {SENSORS.map((s) => {
-                const on = sensorF.has(s);
-                return (
-                  <button
-                    key={s}
-                    onClick={() => {
-                      const n = new Set(sensorF);
-                      on ? n.delete(s) : n.add(s);
-                      setSensorF(n);
-                    }}
-                    className={cx('flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px]', on ? 'border-line text-slate-200' : 'border-transparent text-muted line-through')}
-                  >
-                    <span className="h-2 w-2 rounded-full" style={{ background: SENSOR_COLOR[s] }} />
-                    {t(SENSOR_LABEL[s])}
-                  </button>
-                );
-              })}
-            </div>
-            <select value={providerF} onChange={(e) => setProviderF(e.target.value)} className="w-full rounded border border-line bg-ink-900 px-2 py-1.5 text-xs">
-              <option value="all">{t('All operators')}</option>
-              {PROVIDERS.map((p) => (
-                <option key={p.id} value={p.id}>{p.shortName}</option>
-              ))}
-            </select>
-            <div className="grid grid-cols-3 gap-1">
-              {(['all', 'commercial', 'public'] as const).map((a) => (
-                <Button key={a} variant={accessF === a ? 'active' : 'ghost'} onClick={() => setAccessF(a)} className="capitalize">{t(a)}</Button>
-              ))}
-            </div>
+            <Notice tone="bad">{t('Orbital data unavailable:')} {error}. {t('No positions are shown rather than simulated ones.')}</Notice>
+            <Button onClick={() => refreshOrbits(true)}>{t('Retry')}</Button>
           </div>
-        </Panel>
+        )}
 
-        <Panel title={t('Satellites')} bodyClass="p-0">
-          {status === 'loading' && <div className="flex items-center gap-2 p-3 text-xs text-muted"><Spinner /> {t('Loading public orbital elements…')}</div>}
-          {status === 'error' && (
-            <div className="space-y-2 p-3">
-              <Notice tone="bad">{t('Orbital data unavailable:')} {error}. {t('No positions are shown rather than simulated ones.')}</Notice>
-              <Button onClick={() => refreshOrbits(true)}>{t('Retry')}</Button>
-            </div>
-          )}
-          <ul className="max-h-[320px] overflow-y-auto scroll-thin">
-            {visible.slice(0, 400).map((s) => (
-              <li key={s.noradId} className={cx('flex items-center border-b border-white/5 hover:bg-navy-800', s.noradId === selectedSat && 'bg-cyan-400/10')}>
-                <button
-                  title={pinned.includes(s.noradId) ? t('Unpin') : t('Pin to my view')}
-                  onClick={() => togglePin(s.noradId)}
-                  className={cx('pl-3 pr-1 text-sm leading-none', pinned.includes(s.noradId) ? 'text-warn' : 'text-muted hover:text-warn')}
-                >
-                  {pinned.includes(s.noradId) ? '★' : '☆'}
-                </button>
-                <button
-                  onClick={() => setSelectedSat(s.noradId)}
-                  className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-1 pr-3 text-left"
-                >
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: SENSOR_COLOR[s.mission!.sensor] }} />
-                  <span className="min-w-0 flex-1 truncate text-xs text-slate-200">{s.name}</span>
-                  <span className="font-mono text-[10px] text-muted">{s.noradId}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Panel>
+        <Button variant="primary" className="w-full" onClick={() => setFocus(true)}>⛶ {t('Focus mode')}</Button>
       </aside>
 
       {/* -------- globe -------- */}
@@ -501,6 +419,15 @@ export default function MissionControl() {
           {maxAge != null && Math.abs(maxAge) > 7 && <Badge tone="warn">Selected element set {Math.abs(maxAge).toFixed(0)} d from epoch</Badge>}
         </div>
 
+        {status === 'ready' && visible.length === 0 && !focus && (
+          <div className="pointer-events-none absolute inset-x-0 top-1/3 z-10 flex justify-center">
+            <div className="rounded-md border border-line bg-ink-950/85 px-4 py-3 text-center">
+              <div className="text-sm text-white">{t('No satellites selected')}</div>
+              <div className="mt-0.5 text-xs text-muted">{t('Search or pick a category in “My satellites” on the left.')}</div>
+            </div>
+          </div>
+        )}
+
         {cursor && (
           <div className="pointer-events-none absolute bottom-[70px] right-3 z-10 rounded bg-navy-900/80 px-2 py-1 font-mono text-[10px] text-slate-300">
             {fmtLatLon(cursor.lat, cursor.lon)}
@@ -524,8 +451,16 @@ export default function MissionControl() {
               </Button>
             </div>
             <div className="mt-1.5 flex gap-1.5">
-              <Button variant={pinned.includes(selected.noradId) ? 'active' : 'ghost'} className="flex-1" onClick={() => togglePin(selected.noradId)}>
-                {pinned.includes(selected.noradId) ? `★ ${t('Pinned')}` : `☆ ${t('Pin')}`}
+              <Button
+                variant="danger"
+                className="flex-1"
+                onClick={() => {
+                  setMySats(mySats.filter((x) => x !== selected.noradId));
+                  setSelectedSat(null);
+                  setFollow(false);
+                }}
+              >
+                {t('Remove from selection')}
               </Button>
               <Link to={`/catalog?sat=${selected.noradId}`} className="flex-1">
                 <Button className="w-full">{t('Catalog record')}</Button>

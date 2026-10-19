@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { t } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
-import { Badge, Button, Notice, Panel, Select, Spinner, cx } from '../components/ui';
+import SatPicker from '../components/SatPicker';
+import { Badge, Button, Notice, Panel, Spinner } from '../components/ui';
 import { Cesium, showAoi } from '../lib/cesium';
 import { useSatPoints, setLiveClock } from '../components/satLayer';
 import { groundTrack, haversineKm, propagateSubPoint } from '../lib/orbit';
 import { aoiRadiusKm, centroid } from '../lib/geo';
 import { findPassesBatched, type PassEstimate } from '../lib/passes';
-import { PROVIDERS, SENSOR_COLOR, SENSOR_LABEL, type SensorCategory } from '../data/providers';
+import { SENSOR_COLOR, SENSOR_LABEL, type SensorCategory } from '../data/providers';
 import { useOrbit, useWorkspace } from '../store';
 import { fmtLocal, fmtNum, fmtUtc } from '../lib/format';
 
@@ -19,10 +20,8 @@ const AHEAD_MIN = 10;
 
 export default function ImagingView() {
   const { sats } = useOrbit();
-  const { aoi } = useWorkspace();
+  const { aoi, mySats } = useWorkspace();
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
-  const [sensors, setSensors] = useState<Set<SensorCategory>>(new Set(IMAGING));
-  const [provider, setProvider] = useState('all');
   const [speed, setSpeed] = useState(1);
   const [simTime, setSimTime] = useState(new Date());
   const [sel, setSel] = useState<string | null>(null);
@@ -30,8 +29,11 @@ export default function ImagingView() {
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
 
   const imaging = useMemo(
-    () => sats.filter((s) => s.mission && IMAGING.includes(s.mission.sensor) && sensors.has(s.mission.sensor) && (provider === 'all' || s.mission.providerId === provider)),
-    [sats, sensors, provider],
+    () => {
+      const set = new Set(mySats);
+      return sats.filter((s) => set.has(s.noradId) && s.mission && IMAGING.includes(s.mission.sensor));
+    },
+    [sats, mySats],
   );
   const withSwath = useMemo(() => imaging.filter((s) => s.mission?.swathKm && s.periodMin < 300), [imaging]);
 
@@ -107,34 +109,10 @@ export default function ImagingView() {
           {t('Strips show the nominal documented swath under each satellite (last 10 min faint, next 10 min bright). They show where a sensor could image, not where it actually is imaging.')}
         </Notice>
 
-        <Panel title={t('Sensors')}>
-          <div className="flex flex-wrap gap-1">
-            {IMAGING.map((s) => {
-              const on = sensors.has(s);
-              return (
-                <button
-                  key={s}
-                  onClick={() => {
-                    const n = new Set(sensors);
-                    on ? n.delete(s) : n.add(s);
-                    setSensors(n);
-                  }}
-                  className={cx('flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px]', on ? 'border-line text-slate-200' : 'border-transparent text-muted line-through')}
-                >
-                  <span className="h-2 w-2 rounded-full" style={{ background: SENSOR_COLOR[s] }} />
-                  {t(SENSOR_LABEL[s])}
-                </button>
-              );
-            })}
-          </div>
-          <Select value={provider} onChange={(e) => setProvider(e.target.value)} className="mt-2">
-            <option value="all">{t('All operators')}</option>
-            {PROVIDERS.filter((p) => p.sensors.some((x) => IMAGING.includes(x))).map((p) => (
-              <option key={p.id} value={p.id}>{p.shortName}</option>
-            ))}
-          </Select>
-          <div className="mt-2 flex items-center gap-1.5">
-            <span className="label mr-1">{t('Speed')}</span>
+        <SatPicker sensors={IMAGING} title={t('Imaging satellites')} />
+
+        <Panel title={t('Speed')}>
+          <div className="flex items-center gap-1.5">
             {SPEEDS.map((x) => (
               <Button key={x} variant={speed === x ? 'active' : 'ghost'} onClick={() => setSpeed(x)}>{x}×</Button>
             ))}
@@ -201,6 +179,14 @@ export default function ImagingView() {
 
       <div className="relative min-h-[360px] flex-1">
         <GlobeHost onReady={setViewer} />
+        {imaging.length === 0 && (
+          <div className="pointer-events-none absolute inset-x-0 top-1/3 z-10 flex justify-center">
+            <div className="rounded-md border border-line bg-ink-950/85 px-4 py-3 text-center">
+              <div className="text-sm text-white">{t('No imaging satellites selected')}</div>
+              <div className="mt-0.5 text-xs text-muted">{t('Tick a category such as Sentinel-2 or SAR on the left.')}</div>
+            </div>
+          </div>
+        )}
         <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-col gap-1 rounded-md border border-line bg-ink-950/80 px-2.5 py-2">
           <div className="flex gap-1.5">
             <Badge tone="cyan">{t('Nominal swath · SGP4')}</Badge>

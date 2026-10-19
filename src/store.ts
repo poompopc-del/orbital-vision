@@ -32,14 +32,9 @@ interface WorkspaceState {
   setAoi: (a: Aoi | null) => void;
   selectedSat: string | null;
   setSelectedSat: (id: string | null) => void;
-  pinned: string[];
-  togglePin: (id: string) => void;
-  pinnedOnly: boolean;
-  setPinnedOnly: (v: boolean) => void;
-  customOnly: boolean;
-  setCustomOnly: (v: boolean) => void;
-  passSats: string[];
-  setPassSats: (ids: string[]) => void;
+  /** The one shared satellite selection used by every globe page. Starts empty. */
+  mySats: string[];
+  setMySats: (ids: string[]) => void;
   lastResults: ImageryItem[];
   setLastResults: (r: ImageryItem[]) => void;
   compare: ImageryItem[];
@@ -56,14 +51,8 @@ export const useWorkspace = create<WorkspaceState>()(
       setAoi: (aoi) => set({ aoi }),
       selectedSat: null,
       setSelectedSat: (selectedSat) => set({ selectedSat }),
-      pinned: [],
-      togglePin: (id) => set({ pinned: get().pinned.includes(id) ? get().pinned.filter((x) => x !== id) : [...get().pinned, id] }),
-      pinnedOnly: false,
-      setPinnedOnly: (pinnedOnly) => set({ pinnedOnly }),
-      customOnly: false,
-      setCustomOnly: (customOnly) => set({ customOnly }),
-      passSats: [],
-      setPassSats: (passSats) => set({ passSats }),
+      mySats: [],
+      setMySats: (mySats) => set({ mySats }),
       lastResults: [],
       setLastResults: (r) => set({ lastResults: r.map(slim) }),
       compare: [],
@@ -74,6 +63,15 @@ export const useWorkspace = create<WorkspaceState>()(
       },
       clearCompare: () => set({ compare: [] }),
     }),
-    { name: 'ov.workspace.v1' },
+    {
+      name: 'ov.workspace.v1',
+      version: 2,
+      // v2: one shared selection that starts empty (old pinned / per-page lists are dropped)
+      migrate: (old: any) => {
+        const { pinned, pinnedOnly, customOnly, passSats, ...rest } = old || {};
+        void pinned; void pinnedOnly; void customOnly; void passSats;
+        return { ...rest, mySats: [], selectedSat: null };
+      },
+    },
   ),
 );

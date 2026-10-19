@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { t } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
-import { Badge, Button, Input, Notice, Panel, Spinner, cx } from '../components/ui';
+import SatPicker from '../components/SatPicker';
+import { Badge, Button, Notice, Panel, Spinner, cx } from '../components/ui';
 import { Cesium, CYAN } from '../lib/cesium';
 import { setLiveClock, useSatPoints } from '../components/satLayer';
 import { centroid } from '../lib/geo';
@@ -58,13 +59,12 @@ function SkyPlot({ pass }: { pass: VisiblePass }) {
 
 export default function PassTracker() {
   const { sats, status } = useOrbit();
-  const { aoi, pinned, passSats, setPassSats } = useWorkspace();
+  const { aoi, mySats } = useWorkspace();
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
   const [hours, setHours] = useState(48);
   const [minEl, setMinEl] = useState(10);
   const [geo, setGeo] = useState<Observer | null>(null);
   const [geoErr, setGeoErr] = useState('');
-  const [q, setQ] = useState('');
   const [passes, setPasses] = useState<VisiblePass[] | null>(null);
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
   const [sel, setSel] = useState<string | null>(null);
@@ -76,15 +76,6 @@ export default function PassTracker() {
     return () => clearInterval(i);
   }, []);
 
-  // default selection: pinned + user-added satellites
-  useEffect(() => {
-    if (passSats.length === 0 && sats.length) {
-      const d = sats.filter((s) => pinned.includes(s.noradId) || s.custom).map((s) => s.noradId);
-      if (d.length) setPassSats(d);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sats.length]);
-
   const observer: Observer | null = useMemo(() => {
     if (geo) return geo;
     if (!aoi) return null;
@@ -92,12 +83,10 @@ export default function PassTracker() {
     return { name: aoi.name, lat, lon, heightKm: 0 };
   }, [geo, aoi]);
 
-  const chosen = useMemo(() => sats.filter((s) => passSats.includes(s.noradId)), [sats, passSats]);
-  const matches = useMemo(() => {
-    const k = q.trim().toUpperCase();
-    if (!k) return [];
-    return sats.filter((s) => !passSats.includes(s.noradId) && (s.name.includes(k) || s.noradId.includes(k))).slice(0, 12);
-  }, [q, sats, passSats]);
+  const chosen = useMemo(() => {
+    const set = new Set(mySats);
+    return sats.filter((s) => set.has(s.noradId));
+  }, [sats, mySats]);
 
 
   useEffect(() => {
@@ -193,40 +182,8 @@ export default function PassTracker() {
           {observer && <p className="mt-1.5 font-mono text-[10px] text-muted">{observer.name} · {fmtLatLon(observer.lat, observer.lon)}</p>}
         </Panel>
 
-        <Panel title={`${t('Satellites to track')} (${chosen.length})`}>
-          <div className="relative">
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Name or NORAD ID')} />
-            {matches.length > 0 && (
-              <ul className="absolute left-0 right-0 top-9 z-30 max-h-60 overflow-auto rounded border border-line bg-navy-850 shadow-xl scroll-thin">
-                {matches.map((s) => (
-                  <li key={s.noradId}>
-                    <button
-                      onClick={() => {
-                        setPassSats([...passSats, s.noradId]);
-                        setQ('');
-                      }}
-                      className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-navy-700"
-                    >
-                      <span className="flex-1 truncate text-slate-200">{s.name}</span>
-                      <span className="font-mono text-[10px] text-muted">{s.noradId}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {chosen.map((s) => (
-              <span key={s.noradId} className="flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[11px] text-slate-200">
-                <span className="h-1.5 w-1.5 rounded-full" style={{ background: SENSOR_COLOR[s.mission?.sensor ?? 'unknown'] }} />
-                {s.name}
-                <button onClick={() => setPassSats(passSats.filter((x) => x !== s.noradId))} className="ml-0.5 text-muted hover:text-bad">✕</button>
-              </span>
-            ))}
-            {!chosen.length && <p className="text-[11px] text-muted">{t('Search above, or pin / add satellites in Mission Control — they are selected here automatically.')}</p>}
-          </div>
-          {gp.length > 0 && <p className="mt-1.5 text-[10px] text-warn">{gp.map((s) => s.name).join(', ')}: {t('geostationary / high orbit — no discrete passes')}</p>}
-        </Panel>
+        <SatPicker title={t('Satellites to track')} />
+        {gp.length > 0 && <p className="-mt-1 text-[10px] text-warn">{gp.map((s) => s.name).join(', ')}: {t('geostationary / high orbit — no discrete passes')}</p>}
 
         <Panel title={t('Settings')}>
           <div className="space-y-2">
