@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #0b0e12;
+  color: #e6edf5;
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .label {
+    @apply font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-muted;
+  }
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 178, 214, 0.25) transparent;
+  }
+}
+
+/* --- Cesium widget restyle (keep attribution visible, just quieter) --- */
+.cesium-viewer,
+.cesium-widget {
+  font-family: Inter, system-ui, sans-serif;
+}
+.cesium-widget-credits {
+  font-size: 10px !important;
+  opacity: 0.7;
+}
+.cesium-viewer-bottom {
+  bottom: 2px !important;
+}
+.cesium-viewer-timelineContainer {
+  background: rgba(11, 21, 36, 0.92) !important;
+  border-top: 1px solid rgba(148, 178, 214, 0.12);
+}
+.cesium-timeline-main {
+  border: none !important;
+}
+.cesium-timeline-bar {
+  background: linear-gradient(#122136, #0b1524) !important;
+}
+.cesium-timeline-ticLabel {
+  color: #8b98ab !important;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+}
+.cesium-timeline-needle {
+  background: #22d3ee !important;
+}
+.cesium-viewer-animationContainer {
+  transform: scale(0.8);
+  transform-origin: bottom left;
+}
+.cesium-animation-theme {
+  visibility: hidden;
+}
+.cesium-animation-themeNormal { color: #122136; }
+.cesium-animation-themeHover { color: #1a2d48; }
+.cesium-animation-themeSelect { color: #22d3ee; }
+.cesium-animation-themeDisabled { color: #333; }
+.cesium-animation-themeKnob { color: #0e1a2c; }
+.cesium-animation-themePointer { color: #22d3ee; }
+.cesium-animation-themeSwoosh { color: #7ce7f7; }
+.cesium-animation-themeSwooshHover { color: #7ce7f7; }
+
+input[type='range'] {
+  accent-color: #22d3ee;
+}
