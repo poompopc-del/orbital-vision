@@ -75,6 +75,12 @@ export default function QueryPanel() {
     }
   };
 
+  useEffect(() => {
+    if (!g.resetKey) return;
+    setViewing(null);
+    setPt(null);
+  }, [g.resetKey]);
+
   const commercial = PROVIDERS.filter((p) => p.access === 'commercial');
 
   return (

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { t } from '../../i18n';
 import { Button, Field, Input, KV, Notice, Select, Spinner } from '../ui';
 import { classify, fetchRaster, gridFor, type Classified } from '../../lib/change';
@@ -44,6 +44,13 @@ export default function ChangePanel() {
   const [series, setSeries] = useState<{ date: string; value: number; id: string; clear: boolean }[] | null>(null);
   const abort = useRef<AbortController | null>(null);
   const A = g.sceneA, B = g.sceneB;
+  useEffect(() => {
+    if (!g.resetKey) return;
+    setRes(null);
+    setSeries(null);
+    setSwipe(false);
+    setErr('');
+  }, [g.resetKey]);
 
   const exprFor = (it: ImageryItem): { expr: string; range: [number, number] } => {
     if (kind === 'sar') return { expr: sarDbExpression('vv'), range: [-30, 5] };

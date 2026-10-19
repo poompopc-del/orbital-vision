@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { t } from '../../i18n';
 import { Button, Field, Input, KV, Notice, Select, Spinner } from '../ui';
 import { fetchRaster, gridFor, classify, type Classified, type Raster } from '../../lib/change';
@@ -30,6 +30,12 @@ export default function FloodPanel() {
   const [err, setErr] = useState('');
   const [res, setRes] = useState<(Classified & { mode: 'single' | 'pair'; post: ImageryItem; pre: ImageryItem | null }) | null>(null);
   const abort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!g.resetKey) return;
+    setRes(null);
+    setErr('');
+  }, [g.resetKey]);
 
   const post = g.sceneB ?? g.sceneA;
   const pre = usePre && g.sceneB ? g.sceneA : null;

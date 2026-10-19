@@ -38,6 +38,19 @@ export default function TerrainPanel() {
   const hyRef = useRef<{ grid: DemGrid; hy: Hydro } | null>(null);
 
   useEffect(() => {
+    if (!g.resetKey) return;
+    setShade('none');
+    setVex(1);
+    setHill(false);
+    setElev(null);
+    setGrid(null);
+    setHy(null);
+    setWs(null);
+    setOsmCount(null);
+    setErr('');
+    hyRef.current = null;
+  }, [g.resetKey]);
+  useEffect(() => {
     if (g.viewer) void setTerrain(g.viewer, terrainOn);
   }, [g.viewer, terrainOn]);
   useEffect(() => {

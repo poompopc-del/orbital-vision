@@ -6,6 +6,8 @@ import { Badge, Button, Select, cx } from '../components/ui';
 import { Cesium, drawOnGlobe, showAoi } from '../lib/cesium';
 import { LayerController, type BasemapId } from '../lib/basemaps';
 import { lineLengthKm, polygonAreaKm2, areaKm2 } from '../lib/geo';
+import { bounds } from '../lib/aoiEdit';
+const boundsArr = (g: GeoJSON.Polygon) => { const b = bounds(g); return [b.west, b.south, b.east, b.north]; };
 import { fmtLocal, fmtNum } from '../lib/format';
 import { useWorkspace } from '../store';
 import type { ImageryItem } from '../lib/stac';
@@ -58,6 +60,14 @@ export default function GisWorkspace() {
   const [measure, setMeasure] = useState<string>('');
   const [split, setSplit] = useState(0.5);
   const [cursor, setCursor] = useState<{ lat: number; lon: number } | null>(null);
+  const [resetKey, setResetKey] = useState(0);
+  const actions = useRef<Record<string, () => void>>({});
+  const registerAction = useRef((name: string, fn: () => void) => {
+    actions.current[name] = fn;
+    return () => {
+      if (actions.current[name] === fn) delete actions.current[name];
+    };
+  }).current;
 
   const sync = () => setLayers([...layersRef.current]);
 
@@ -151,11 +161,13 @@ export default function GisWorkspace() {
       sceneB,
       setSceneA,
       setSceneB,
+      resetKey,
+      registerAction,
       report,
       putReport: (s: ReportSection) => setReport((r) => [...r.filter((x) => x.id !== s.id), s]),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [viewer, controller, layers, tool, sceneA, sceneB, report, removeLayer],
+    [viewer, controller, layers, tool, sceneA, sceneB, report, removeLayer, resetKey],
   );
   // stable reference for panels' effect deps
   const onMapClickStable = useRef(api.onMapClick);
@@ -213,6 +225,44 @@ export default function GisWorkspace() {
     }
   };
 
+  // ---------- reset the map to its original state ----------
+  const resetMap = (alsoAoi: boolean) => {
+    if (!viewer) return;
+    // remove every analysis / imported layer (dam pins are kept — toggle them in Layers)
+    layersRef.current
+      .filter((l) => l.id !== 'dams')
+      .forEach((l) => {
+        if (l.layer) viewer.imageryLayers.remove(l.layer, true);
+        if (l.dataSource) viewer.dataSources.remove(l.dataSource, true);
+      });
+    layersRef.current = layersRef.current.filter((l) => l.id === 'dams');
+    sync();
+    ['gis-measure', 'query-pt'].forEach((id) => {
+      const e = viewer.entities.getById(id);
+      if (e) viewer.entities.remove(e);
+    });
+    // terrain look back to normal
+    viewer.scene.globe.material = undefined as any;
+    viewer.scene.globe.enableLighting = false;
+    viewer.scene.light = new Cesium.SunLight();
+    const sc: any = viewer.scene;
+    if ('verticalExaggeration' in sc) sc.verticalExaggeration = 1;
+    viewer.scene.splitPosition = 0.5;
+    setSplit(0.5);
+    setMeasure('');
+    setTool('pan');
+    setReport([]);
+    setBasemap('hybrid');
+    if (alsoAoi) {
+      setAoi(null);
+      setSceneA(null);
+      setSceneB(null);
+    }
+    setResetKey((k) => k + 1);
+    viewer.camera.flyTo({ destination: alsoAoi || !aoi ? Cesium.Cartesian3.fromDegrees(100.6, 14.5, 2.2e6) : Cesium.Rectangle.fromDegrees(...(boundsArr(aoi.geometry) as [number, number, number, number])), duration: 1.2 });
+  };
+  const [confirmReset, setConfirmReset] = useState(false);
+
   // ---------- report ----------
   const exportReport = () => {
     if (!viewer) return;
@@ -261,6 +311,35 @@ ${report.map((s) => `<h2>${esc(s.title)}</h2><ul>${s.lines.map((x) => `<li>${esc
               {tl.icon}
             </button>
           ))}
+          <button
+            title={t('Quick NDVI for AOI')}
+            onClick={() => {
+              setTab('spectral');
+              setOpen(true);
+              actions.current.ndvi?.();
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded text-sm text-slate-300 hover:bg-navy-800"
+          >
+            🌿
+          </button>
+          <div className="relative">
+            <button
+              title={t('Reset map to the original view')}
+              onClick={() => setConfirmReset(!confirmReset)}
+              className={cx('flex h-8 w-8 items-center justify-center rounded text-base', confirmReset ? 'bg-warn/20 text-warn' : 'text-slate-300 hover:bg-navy-800')}
+            >
+              ↺
+            </button>
+            {confirmReset && (
+              <div className="absolute left-10 top-0 z-50 w-56 space-y-1.5 rounded border border-line bg-navy-850 p-2.5 shadow-xl">
+                <div className="text-xs font-semibold text-white">{t('Reset map')}</div>
+                <p className="text-[10px] leading-snug text-muted">{t('Removes all analysis results, imported layers, measurements and terrain shading, and returns to the Hybrid basemap.')}</p>
+                <Button variant="primary" className="w-full" onClick={() => { resetMap(false); setConfirmReset(false); }}>{t('Clear results (keep AOI)')}</Button>
+                <Button variant="danger" className="w-full" onClick={() => { resetMap(true); setConfirmReset(false); }}>{t('Clear everything incl. AOI')}</Button>
+                <Button className="w-full" onClick={() => setConfirmReset(false)}>{t('Cancel')}</Button>
+              </div>
+            )}
+          </div>
           <div className="my-1 h-px w-6 bg-line" />
           <button title={open ? t('Hide panel') : t('Show panel')} onClick={() => setOpen(!open)} className="flex h-8 w-8 items-center justify-center rounded text-slate-300 hover:bg-navy-800">
             {open ? '⟨' : '⟩'}

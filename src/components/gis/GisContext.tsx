@@ -49,6 +49,10 @@ export interface GisApi {
   sceneB: ImageryItem | null;
   setSceneA: (i: ImageryItem | null) => void;
   setSceneB: (i: ImageryItem | null) => void;
+  /** Incremented by the map reset button; panels clear their own results when it changes. */
+  resetKey: number;
+  /** Panels register named actions (e.g. 'ndvi') that the toolbar can trigger. */
+  registerAction: (name: string, fn: () => void) => () => void;
   report: ReportSection[];
   putReport: (s: ReportSection) => void;
 }

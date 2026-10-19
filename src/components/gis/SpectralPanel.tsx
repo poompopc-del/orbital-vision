@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../../i18n';
 import { Badge, Button, Field, Input, KV, Notice, Select, Spinner, cx } from '../ui';
 import {
@@ -11,13 +11,15 @@ import { fmtNum } from '../../lib/format';
 import { useWorkspace } from '../../store';
 import { useGis } from './GisContext';
 import { pcProvider, sceneLabel } from './sceneLayer';
+import { searchArchive, type ImageryItem } from '../../lib/stac';
+import { isoDay } from '../../lib/format';
 import Histogram from './Histogram';
 
 type Mode = 'index' | 'composite' | 'custom';
 
 export default function SpectralPanel() {
   const g = useGis();
-  const { aoi } = useWorkspace();
+  const { aoi, lastResults, setLastResults } = useWorkspace();
   const [which, setWhich] = useState<'A' | 'B'>('A');
   const scene = which === 'A' ? g.sceneA : g.sceneB;
   const [mode, setMode] = useState<Mode>('index');
@@ -59,26 +61,26 @@ export default function SpectralPanel() {
     return [...m.entries()];
   }, []);
 
-  const render = () => {
-    if (!scene) return;
+  const render = (sc: ImageryItem | null = scene, d: IndexDef = def, rg: [number, number] = range, cm: string = cmap, m: Mode = mode) => {
+    if (!sc) return;
     setErr('');
     try {
-      if (mode === 'index') {
-        const expr = indexExpression(scene, def);
-        g.putImagery('spectral', `${def.name} · ${sceneLabel(scene)}`, pcProvider(indexTileUrl(scene, expr, range, cmap), scene), {
-          meta: `${def.formula} · ${scene.id}`,
-          legend: { ramp: rampCss(cmap), range, note: `${t(def.legend)} ${t('Transparent = no data.')}` },
+      if (m === 'index') {
+        const expr = indexExpression(sc, d);
+        g.putImagery('spectral', `${d.name} · ${sceneLabel(sc)}`, pcProvider(indexTileUrl(sc, expr, rg, cm), sc), {
+          meta: `${d.formula} · ${sc.id}`,
+          legend: { ramp: rampCss(cm), range: rg, note: `${t(d.legend)} ${t('Transparent = no data.')}` },
         });
         if (thrOn) {
-          g.putImagery('spectral-mask', `${def.name} ${below ? '<' : '>'} ${thr} · ${scene.datetime.slice(0, 10)}`, pcProvider(maskTileUrl(scene, expr, thr, below, [0, 160, 255, 210]), scene), {
+          g.putImagery('spectral-mask', `${d.name} ${below ? '<' : '>'} ${thr} · ${sc.datetime.slice(0, 10)}`, pcProvider(maskTileUrl(sc, expr, thr, below, [0, 160, 255, 210]), sc), {
             meta: t('Threshold mask — user-set threshold, not a validated classification'),
-            legend: { items: [{ color: 'rgba(0,160,255,0.85)', label: `${def.name} ${below ? '<' : '>'} ${thr}` }] },
+            legend: { items: [{ color: 'rgba(0,160,255,0.85)', label: `${d.name} ${below ? '<' : '>'} ${thr}` }] },
           });
         } else g.removeLayer('spectral-mask');
       } else {
         const s2 = { ...st, max: st.max / brightness };
         const names = rgbNow.map((r) => bands[r]?.label ?? r).join(' / ');
-        g.putImagery('spectral', `RGB ${names} · ${sceneLabel(scene)}`, pcProvider(compositeTileUrl(scene, rgbNow, s2), scene), {
+        g.putImagery('spectral', `RGB ${names} · ${sceneLabel(sc)}`, pcProvider(compositeTileUrl(sc, rgbNow, s2), sc), {
           meta: `${names} · stretch ${s2.min.toFixed(3)}–${s2.max.toFixed(3)} reflectance · γ ${s2.gamma}`,
           legend: { items: [{ color: '#f2665a', label: `R = ${bands[rgbNow[0]]?.label} (${bands[rgbNow[0]]?.nm} nm)` }, { color: '#4fd18b', label: `G = ${bands[rgbNow[1]]?.label} (${bands[rgbNow[1]]?.nm} nm)` }, { color: '#4f8dff', label: `B = ${bands[rgbNow[2]]?.label} (${bands[rgbNow[2]]?.nm} nm)` }] },
         });
@@ -89,8 +91,8 @@ export default function SpectralPanel() {
     }
   };
 
-  const runStats = async () => {
-    if (!scene || !aoi) return;
+  const runStats = async (sc: ImageryItem | null = scene, d: IndexDef = def, rg: [number, number] = range) => {
+    if (!sc || !aoi) return;
     abort.current?.abort();
     const ac = new AbortController();
     abort.current = ac;
@@ -98,21 +100,21 @@ export default function SpectralPanel() {
     setErr('');
     setMaskArea(null);
     try {
-      const expr = indexExpression(scene, def);
-      const s = await indexSummary(scene, expr, aoi.geometry, range, ac.signal);
+      const expr = indexExpression(sc, d);
+      const s = await indexSummary(sc, expr, aoi.geometry, rg, ac.signal);
       setStats(s);
       if (thrOn) {
         const cond = below ? `(${expr})<${thr}` : `(${expr})>${thr}`;
-        const m = await aoiStatistics(scene, `where(${cond},1,0)`, aoi.geometry, { signal: ac.signal });
+        const m = await aoiStatistics(sc, `where(${cond},1,0)`, aoi.geometry, { signal: ac.signal });
         const valid = (m.validPercent ?? 100) / 100;
         setMaskArea({ frac: m.mean, km2: m.mean * areaKm2(aoi.geometry) * Math.min(1, valid), valid });
       }
       g.putReport({
         id: 'spectral',
-        title: `${def.name} — ${sceneLabel(scene)}`,
+        title: `${d.name} — ${sceneLabel(sc)}`,
         lines: [
-          `Formula: ${def.formula}`,
-          `Scene: ${scene.id} (${scene.collectionLabel})`,
+          `Formula: ${d.formula}`,
+          `Scene: ${sc.id} (${sc.collectionLabel})`,
           `AOI: ${aoi.name}, ${areaKm2(aoi.geometry).toFixed(2)} km²`,
           `Min / mean / max: ${s.stats.min.toFixed(3)} / ${s.stats.mean.toFixed(3)} / ${s.stats.max.toFixed(3)}`,
           s.clearMean != null ? `Clear-sky mean (SCL-masked): ${s.clearMean.toFixed(3)} · cloud/shadow ${(100 * (s.cloudFraction ?? 0)).toFixed(1)}%` : '',
@@ -126,6 +128,48 @@ export default function SpectralPanel() {
       setBusy('');
     }
   };
+
+  /** One click: pick the clearest recent Sentinel-2 scene over the AOI (or use scene A), show NDVI and its statistics. */
+  const quickNdvi = async () => {
+    setErr('');
+    if (!aoi) return setErr(t('Draw a rectangle AOI first.'));
+    const ndvi = INDICES.find((i) => i.id === 'ndvi')!;
+    let sc = g.sceneA && indexAvailability(g.sceneA, ndvi).ok ? g.sceneA : null;
+    if (!sc) {
+      setBusy(t('Finding the clearest recent Sentinel-2 scene…'));
+      try {
+        const found = await searchArchive({ aoi: aoi.geometry, collections: ['sentinel-2-l2a'], from: isoDay(new Date(Date.now() - 90 * 86400e3)), to: isoDay(new Date()), maxCloud: 30, limit: 30 });
+        const ok = found.filter((x) => x.source === 'planetary-computer' && (x.coveragePct ?? 0) >= 80).sort((a, b) => (a.cloudCover ?? 100) - (b.cloudCover ?? 100));
+        sc = ok[0] ?? null;
+        if (found.length) setLastResults([...found, ...lastResults.filter((r) => !found.some((f) => f.id === r.id))]);
+      } catch (e: any) {
+        setBusy('');
+        return setErr(e.message);
+      }
+      if (!sc) {
+        setBusy('');
+        return setErr(t('No Sentinel-2 scene with ≤ 30 % cloud covering the AOI in the last 90 days.'));
+      }
+      g.setSceneA(sc);
+    }
+    setWhich('A');
+    setMode('index');
+    pickIndex(ndvi);
+    render(sc, ndvi, ndvi.range, ndvi.colormap, 'index');
+    setBusy('');
+    await runStats(sc, ndvi, ndvi.range);
+  };
+  const quickRef = useRef(quickNdvi);
+  quickRef.current = quickNdvi;
+  useEffect(() => g.registerAction('ndvi', () => void quickRef.current()), [g.registerAction]);
+  // map reset: forget results shown in this panel
+  useEffect(() => {
+    if (!g.resetKey) return;
+    setStats(null);
+    setMaskArea(null);
+    setErr('');
+    setThrOn(false);
+  }, [g.resetKey]);
 
   const percentileStretch = async () => {
     if (!scene || !aoi) return;
@@ -159,6 +203,11 @@ export default function SpectralPanel() {
         ))}
       </div>
       {!scene && <Notice>{t('Pick scene A / B from “Identify imagery” or the Imagery Explorer results.')}</Notice>}
+
+      <Button variant="primary" className="w-full" onClick={() => void quickNdvi()} disabled={!!busy}>
+        🌿 {t('Quick NDVI for AOI')}
+      </Button>
+      <p className="-mt-1 text-[10px] text-muted">{t('Uses scene A, or finds the clearest Sentinel-2 scene of the last 90 days, then shows NDVI and its statistics.')}</p>
 
       <div className="grid grid-cols-3 gap-1">
         {(['index', 'composite', 'custom'] as Mode[]).map((m) => (
@@ -263,9 +312,9 @@ export default function SpectralPanel() {
       )}
 
       <div className="flex flex-wrap gap-1.5">
-        <Button variant="primary" onClick={render} disabled={!scene || (mode === 'index' ? !avail.ok : !cAvail.ok)}>{t('Show on map')}</Button>
+        <Button variant="primary" onClick={() => render()} disabled={!scene || (mode === 'index' ? !avail.ok : !cAvail.ok)}>{t('Show on map')}</Button>
         <Button onClick={percentileStretch} disabled={!scene || !aoi || !!busy || (mode === 'index' ? !avail.ok : !cAvail.ok)}>{t('2–98 % stretch (AOI)')}</Button>
-        {mode === 'index' && <Button onClick={runStats} disabled={!scene || !aoi || !avail.ok || !!busy}>{t('Statistics in AOI')}</Button>}
+        {mode === 'index' && <Button onClick={() => runStats()} disabled={!scene || !aoi || !avail.ok || !!busy}>{t('Statistics in AOI')}</Button>}
         {busy && <Button variant="danger" onClick={() => abort.current?.abort()}>{t('Cancel')}</Button>}
       </div>
       {!aoi && <p className="text-[11px] text-muted">{t('Draw a rectangle AOI to compute statistics.')}</p>}
