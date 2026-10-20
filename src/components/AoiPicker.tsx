@@ -23,7 +23,16 @@ export default function AoiPicker({ viewer, compact }: { viewer?: Cesium.Viewer 
   const [saving, setSaving] = useState(false);
   const [favName, setFavName] = useState('');
   const [favDesc, setFavDesc] = useState('');
-  const [showFavs, setShowFavs] = useState(false);
+  const [showFavs, setShowFavs] = useState(true);
+  const [renaming, setRenaming] = useState(false);
+  const [nameV, setNameV] = useState('');
+  const [favEdit, setFavEdit] = useState<string | null>(null);
+  const [favEditV, setFavEditV] = useState('');
+  const commitName = () => {
+    const nm = nameV.trim();
+    if (aoi && nm && nm !== aoi.name) setAoi({ ...aoi, name: nm });
+    setRenaming(false);
+  };
 
   // stop editing when the AOI changes from outside, the viewer goes away, or on unmount
   useEffect(() => () => stopEdit.current?.(), []);
@@ -135,7 +144,24 @@ export default function AoiPicker({ viewer, compact }: { viewer?: Cesium.Viewer 
         return (
           <div className={cx('rounded border border-cyan-400/30 bg-cyan-400/5 px-2.5 py-2', compact && 'py-1.5')}>
             <div className="label text-cyan-300">{t('Area of interest')}</div>
-            <div className="truncate text-xs text-white">{aoi.name}</div>
+            {renaming ? (
+              <Input
+                autoFocus
+                value={nameV}
+                onChange={(e) => setNameV(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitName();
+                  if (e.key === 'Escape') setRenaming(false);
+                }}
+                onBlur={commitName}
+                className="!py-0.5 text-xs"
+              />
+            ) : (
+              <button onClick={() => { setNameV(aoi.name); setRenaming(true); }} className="group flex w-full items-center gap-1 text-left text-xs text-white" title={t('Rename')}>
+                <span className="truncate">{aoi.name}</span>
+                <span className="text-muted group-hover:text-cyan-300">✎</span>
+              </button>
+            )}
             <div className="font-mono text-[10px] text-muted">
               {km2.toLocaleString(undefined, { maximumFractionDigits: 2 })} km² · {isRectangle(aoi.geometry) ? t('rectangle') : t('polygon')} · {aoi.source}
             </div>
@@ -186,11 +212,32 @@ export default function AoiPicker({ viewer, compact }: { viewer?: Cesium.Viewer 
             <ul className="max-h-40 overflow-y-auto border-t border-line scroll-thin">
               {favs.map((f) => (
                 <li key={f.id} className="flex items-center gap-1.5 border-b border-white/5 px-2 py-1 text-xs">
-                  <button onClick={() => apply(f.geometry, f.name, 'import')} className="min-w-0 flex-1 text-left">
-                    <div className="truncate text-slate-200">{f.name}</div>
-                    {f.description && <div className="truncate text-[10px] text-muted">{f.description}</div>}
-                  </button>
+                  {favEdit === f.id ? (
+                    <Input
+                      autoFocus
+                      value={favEditV}
+                      onChange={(e) => setFavEditV(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const nm = favEditV.trim() || f.name;
+                          const next = favs.map((x) => (x.id === f.id ? { ...x, name: nm } : x));
+                          setFavs(next);
+                          writeFavourites(next);
+                          setFavEdit(null);
+                        }
+                        if (e.key === 'Escape') setFavEdit(null);
+                      }}
+                      onBlur={() => setFavEdit(null)}
+                      className="!py-0.5 text-xs"
+                    />
+                  ) : (
+                    <button onClick={() => apply(f.geometry, f.name, 'import')} className="min-w-0 flex-1 text-left">
+                      <div className="truncate text-slate-200">{f.name}</div>
+                      {f.description && <div className="truncate text-[10px] text-muted">{f.description}</div>}
+                    </button>
+                  )}
                   <span className="font-mono text-[10px] text-muted">{areaKm2(f.geometry).toFixed(1)} km²</span>
+                  <button onClick={() => { setFavEdit(f.id); setFavEditV(f.name); }} className="text-muted hover:text-white" title={t('Rename')}>✎</button>
                   <button
                     onClick={() => {
                       const next = favs.filter((x) => x.id !== f.id);

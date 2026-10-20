@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
-import LocationBook from '../components/LocationBook';
 import CountryHighlight from '../components/CountryHighlight';
 import SatPicker from '../components/SatPicker';
 import PassClassNote from '../components/PassClassNote';
@@ -118,21 +117,7 @@ export default function PassTracker() {
   const winHours = (winTo.getTime() - winFrom.getTime()) / 3600e3;
   const winErr = !Number.isFinite(winHours) ? t('Invalid date') : winHours <= 0 ? t('End must be after start') : winHours > MAX_DAYS * 24 ? `${t('Maximum window is')} ${MAX_DAYS} ${t('days')}` : '';
   const [minEl, setMinEl] = useState(10);
-  const [geo, setGeoRaw] = useState<Observer | null>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('ov.passObserver.v1') || 'null');
-    } catch {
-      return null;
-    }
-  });
-  const setGeo = (o: Observer | null) => {
-    setGeoRaw(o);
-    try {
-      localStorage.setItem('ov.passObserver.v1', JSON.stringify(o));
-    } catch {
-      /* ignore */
-    }
-  };
+  const [geo, setGeo] = useState<Observer | null>(null);
   const [geoErr, setGeoErr] = useState('');
   const [passes, setPasses] = useState<VisiblePass[] | null>(null);
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
@@ -199,7 +184,7 @@ export default function PassTracker() {
     return () => clearInterval(i);
   }, []);
 
-  // picking a new area on the map / by search replaces a saved or GPS location
+  // picking a new area on the map / by search replaces the GPS location
   const firstAoi = useRef(true);
   useEffect(() => {
     if (firstAoi.current) {
@@ -466,8 +451,6 @@ export default function PassTracker() {
         <PassClassNote active="pass" />
 
         <Panel title={t('Observer location')}>
-          <LocationBook current={observer} onUse={setGeo} />
-          <div className="label mb-1 mt-3">{t('Or search / pick on the map')}</div>
           <AoiPicker viewer={viewer} compact />
           <div className="mt-2 flex items-center gap-1.5">
             <Button onClick={useMyLocation}>📍 {t('Use my location')}</Button>
