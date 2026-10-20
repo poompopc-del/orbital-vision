@@ -16,8 +16,8 @@ export default function PassClassNote({ active }: { active: 'pass' | 'opportunit
       {row('2', 'Imaging opportunity', 'Nominal swath could cover the AOI given documented sensor limits. Shown in Coverage Planner and Imaging view.', active === 'opportunity')}
       {row('3', 'Confirmed acquisition', 'Only a provider can confirm. Nothing on this page is confirmed — request it via New Acquisition.', false)}
       <div className="flex gap-3 pt-0.5 text-[11px]">
-        <Link to="/coverage" className="text-cyan-300 underline">{t('Coverage Planner')}</Link>
-        <Link to="/acquire" className="text-cyan-300 underline">{t('New Acquisition')}</Link>
+        <Link to="/track?tab=coverage" className="text-cyan-300 underline">{t('Coverage Planner')}</Link>
+        <Link to="/request?tab=new" className="text-cyan-300 underline">{t('New Acquisition')}</Link>
         <span className="text-muted">{t('Times: Thailand time (Asia/Bangkok, UTC+7)')}</span>
       </div>
     </div>

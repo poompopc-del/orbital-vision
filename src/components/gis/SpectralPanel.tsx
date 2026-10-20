@@ -130,11 +130,11 @@ export default function SpectralPanel() {
   };
 
   /** One click: pick the clearest recent Sentinel-2 scene over the AOI (or use scene A), show NDVI and its statistics. */
-  const quickNdvi = async () => {
+  const quickNdvi = async (o?: { scene?: ImageryItem }) => {
     setErr('');
     if (!aoi) return setErr(t('Draw a rectangle AOI first.'));
     const ndvi = INDICES.find((i) => i.id === 'ndvi')!;
-    let sc = g.sceneA && indexAvailability(g.sceneA, ndvi).ok ? g.sceneA : null;
+    let sc = o?.scene ?? (g.sceneA && indexAvailability(g.sceneA, ndvi).ok ? g.sceneA : null);
     if (!sc) {
       setBusy(t('Finding the clearest recent Sentinel-2 scene…'));
       try {
@@ -161,7 +161,7 @@ export default function SpectralPanel() {
   };
   const quickRef = useRef(quickNdvi);
   quickRef.current = quickNdvi;
-  useEffect(() => g.registerAction('ndvi', () => void quickRef.current()), [g.registerAction]);
+  useEffect(() => g.registerAction('ndvi', (o) => void quickRef.current(o)), [g.registerAction]);
   // map reset: forget results shown in this panel
   useEffect(() => {
     if (!g.resetKey) return;

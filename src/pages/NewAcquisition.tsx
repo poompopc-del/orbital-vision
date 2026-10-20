@@ -135,7 +135,7 @@ export default function NewAcquisition() {
         {step === 1 && (
           <Panel title={t('Acquisition method')}>
             <div className="space-y-2">
-              <Link to="/imagery" className="block rounded border border-line p-3 hover:border-cyan-400/40">
+              <Link to="/gis?tab=search" className="block rounded border border-line p-3 hover:border-cyan-400/40">
                 <div className="text-sm text-white">{t('Search existing imagery archives')}</div>
                 <div className="text-xs text-muted">{t('Fastest and often free — Sentinel-1/2 and Landsat are searchable now.')}</div>
               </Link>
@@ -143,7 +143,7 @@ export default function NewAcquisition() {
                 <div className="text-sm text-white">{t('Request a new satellite acquisition')}</div>
                 <div className="text-xs text-muted">{t('Prepare a tasking request for a commercial or agency provider.')}</div>
               </button>
-              <Link to="/providers" className="block rounded border border-line p-3 hover:border-cyan-400/40">
+              <Link to="/data?tab=providers" className="block rounded border border-line p-3 hover:border-cyan-400/40">
                 <div className="text-sm text-white">{t('Compare imagery providers')}</div>
                 <div className="text-xs text-muted">{t('Sensors, resolution classes, ordering methods and integration status.')}</div>
               </Link>
@@ -232,7 +232,7 @@ export default function NewAcquisition() {
                   <div className="mt-1 font-mono text-[10px] text-muted">{t('Price:')} {p.pricing}</div>
                 </button>
               ))}
-              <Notice>{t('Whether a provider can actually image this AOI in the requested window depends on their schedule, pointing limits and approval. Use the')} <Link to="/coverage" className="text-cyan-300 underline">{t('Coverage Planner')}</Link> {t('for orbital pass estimates.')} </Notice>
+              <Notice>{t('Whether a provider can actually image this AOI in the requested window depends on their schedule, pointing limits and approval. Use the')} <Link to="/track?tab=coverage" className="text-cyan-300 underline">{t('Coverage Planner')}</Link> {t('for orbital pass estimates.')} </Notice>
             </div>
           </Panel>
         )}
@@ -273,7 +273,7 @@ export default function NewAcquisition() {
                 </div>
               )}
               {msg && <Notice>{msg}</Notice>}
-              {req && <Link to="/orders" className="text-cyan-300 underline">{t('Track in Orders & Projects →')}</Link>}
+              {req && <Link to="/request?tab=list" className="text-cyan-300 underline">{t('Track in Orders & Projects →')}</Link>}
             </div>
           </Panel>
         )}

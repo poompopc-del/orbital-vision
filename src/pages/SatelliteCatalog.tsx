@@ -106,7 +106,7 @@ export default function SatelliteCatalog() {
                 {rows.map((s) => (
                   <tr
                     key={s.noradId}
-                    onClick={() => setParams({ sat: s.noradId })}
+                    onClick={() => setParams({ tab: 'catalog', sat: s.noradId })}
                     className={cx('cursor-pointer border-b border-white/5 hover:bg-navy-800/60', sel === s.noradId && 'bg-cyan-400/10')}
                   >
                     <td className="px-3 py-1.5 text-white">{s.name}</td>
@@ -129,7 +129,7 @@ export default function SatelliteCatalog() {
         <aside className="absolute inset-y-0 right-0 z-30 w-full max-w-[360px] overflow-y-auto border-l border-line bg-navy-900 p-4 shadow-2xl scroll-thin xl:static xl:z-auto">
           <div className="mb-2 flex justify-between">
             <span className="label">{t('Satellite record')}</span>
-            <button onClick={() => setParams({})} className="text-muted hover:text-white">✕</button>
+            <button onClick={() => setParams({ tab: 'catalog' })} className="text-muted hover:text-white">✕</button>
           </div>
           <SatDetails sat={selected} at={now} />
         </aside>

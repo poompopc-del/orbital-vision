@@ -3,6 +3,7 @@ import { t } from '../i18n';
 import type { ImageryItem } from '../lib/stac';
 import { fmtNum, fmtUtc } from '../lib/format';
 import { Badge, Button, cx } from './ui';
+import SceneDownload from './gis/SceneDownload';
 
 export default function ImageryCard({
   item,
@@ -66,6 +67,7 @@ export default function ImageryCard({
             </a>
           )}
         </div>
+        {item.source === 'planetary-computer' && <SceneDownload item={item} compact />}
       </div>
     </article>
   );

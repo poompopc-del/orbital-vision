@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Layout from './components/Layout';
+import Section from './components/Section';
+import Home from './pages/Home';
 import MissionControl from './pages/MissionControl';
 import ImageryExplorer from './pages/ImageryExplorer';
 import NewAcquisition from './pages/NewAcquisition';
@@ -16,6 +18,14 @@ import GisWorkspace from './pages/GisWorkspace';
 import { refreshOrbits } from './lib/orbitLoader';
 import { useLang } from './i18n';
 
+/** Old page URLs → new section + tab (other query params are kept). */
+function Moved({ to, tab }: { to: string; tab: string }) {
+  const loc = useLocation();
+  const p = new URLSearchParams(loc.search);
+  p.set('tab', tab);
+  return <Navigate to={`${to}?${p.toString()}`} replace />;
+}
+
 export default function App() {
   const lang = useLang((s) => s.lang);
   useEffect(() => {
@@ -24,19 +34,67 @@ export default function App() {
   return (
     <Routes key={lang}>
       <Route element={<Layout />}>
-        <Route index element={<MissionControl />} />
-        <Route path="imaging" element={<ImagingView />} />
-        <Route path="passes" element={<PassTracker />} />
-        <Route path="gis" element={<GisWorkspace />} />
-        <Route path="imagery" element={<ImageryExplorer />} />
-        <Route path="acquire" element={<NewAcquisition />} />
-        <Route path="catalog" element={<SatelliteCatalog />} />
-        <Route path="providers" element={<ProviderMarketplace />} />
-        <Route path="coverage" element={<CoveragePlanner />} />
-        <Route path="analysis" element={<ImageAnalysis />} />
-        <Route path="orders" element={<Orders />} />
-        <Route path="admin" element={<Admin />} />
-        <Route path="*" element={<MissionControl />} />
+        <Route index element={<Home />} />
+        <Route
+          path="track"
+          element={
+            <Section
+              tabs={[
+                { id: 'live', label: 'Live positions', hint: 'Where satellites are now (calculated orbits)', el: <MissionControl /> },
+                { id: 'passes', label: 'Passes over me', hint: 'When satellites rise above your horizon', el: <PassTracker /> },
+                { id: 'imaging', label: 'Imaging swaths', hint: 'Where imaging satellites can see now', el: <ImagingView /> },
+                { id: 'coverage', label: 'Imaging opportunities', hint: 'When a swath may cover your area', el: <CoveragePlanner /> },
+              ]}
+            />
+          }
+        />
+        <Route
+          path="gis"
+          element={
+            <Section
+              tabs={[
+                { id: 'map', label: 'Analysis map', hint: 'Tasks, indices, flood, change, terrain and dams on one map', el: <GisWorkspace /> },
+                { id: 'search', label: 'Search images (list)', hint: 'All archive images over the area as a list', el: <ImageryExplorer /> },
+                { id: 'compare', label: 'Compare two images', hint: 'Swipe between two scenes and measure', el: <ImageAnalysis /> },
+              ]}
+            />
+          }
+        />
+        <Route
+          path="request"
+          element={
+            <Section
+              tabs={[
+                { id: 'new', label: 'New request', el: <NewAcquisition /> },
+                { id: 'list', label: 'My requests & projects', el: <Orders /> },
+              ]}
+            />
+          }
+        />
+        <Route
+          path="data"
+          element={
+            <Section
+              tabs={[
+                { id: 'catalog', label: 'Satellite catalogue', el: <SatelliteCatalog /> },
+                { id: 'providers', label: 'Imagery providers', el: <ProviderMarketplace /> },
+                { id: 'admin', label: 'Administration', el: <Admin /> },
+              ]}
+            />
+          }
+        />
+        {/* old addresses */}
+        <Route path="imaging" element={<Moved to="/track" tab="imaging" />} />
+        <Route path="passes" element={<Moved to="/track" tab="passes" />} />
+        <Route path="coverage" element={<Moved to="/track" tab="coverage" />} />
+        <Route path="imagery" element={<Moved to="/gis" tab="search" />} />
+        <Route path="analysis" element={<Moved to="/gis" tab="compare" />} />
+        <Route path="acquire" element={<Moved to="/request" tab="new" />} />
+        <Route path="orders" element={<Moved to="/request" tab="list" />} />
+        <Route path="catalog" element={<Moved to="/data" tab="catalog" />} />
+        <Route path="providers" element={<Moved to="/data" tab="providers" />} />
+        <Route path="admin" element={<Moved to="/data" tab="admin" />} />
+        <Route path="*" element={<Home />} />
       </Route>
     </Routes>
   );

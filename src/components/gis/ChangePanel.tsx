@@ -10,9 +10,12 @@ import { useWorkspace } from '../../store';
 import type { ImageryItem } from '../../lib/stac';
 import { useGis } from './GisContext';
 import { imageProvider, pcProvider, sceneLabel } from './sceneLayer';
+import ResultDownloads from './ResultDownloads';
 import { compareWarnings } from './compareChecks';
 
 type Kind = 'ndvi' | 'ndwi' | 'mndwi' | 'ndbi' | 'dnbr' | 'sar' | 'general';
+
+const defaultThr = (k: Kind) => (k === 'sar' ? 3 : k === 'general' ? 0.05 : 0.15);
 
 const KINDS: { id: Kind; label: string }[] = [
   { id: 'ndvi', label: 'NDVI change (vegetation)' },
@@ -36,8 +39,11 @@ const DNBR_CLASSES = [
 export default function ChangePanel() {
   const g = useGis();
   const { aoi, lastResults } = useWorkspace();
-  const [kind, setKind] = useState<Kind>('ndvi');
-  const [thr, setThr] = useState(0.15);
+  const [kindState, setKind] = useState<Kind>('ndvi');
+  const [thrState, setThr] = useState(0.15);
+  const kind = kindState;
+  const thr = thrState;
+  const [resMeta, setResMeta] = useState<{ A: ImageryItem; B: ImageryItem; kind: Kind; thr: number; legend: { color: string; label: string }[] } | null>(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [res, setRes] = useState<Classified | null>(null);
@@ -48,12 +54,13 @@ export default function ChangePanel() {
   useEffect(() => {
     if (!g.resetKey) return;
     setRes(null);
+    setResMeta(null);
     setSeries(null);
     setSwipe(false);
     setErr('');
   }, [g.resetKey]);
 
-  const exprFor = (it: ImageryItem): { expr: string; range: [number, number] } => {
+  const exprFor = (it: ImageryItem, kind: Kind = kindState): { expr: string; range: [number, number] } => {
     if (kind === 'sar') return { expr: sarDbExpression('vv'), range: [-30, 5] };
     if (kind === 'general') {
       const r = refl(it, 'red'), gg = refl(it, 'green'), b = refl(it, 'blue');
@@ -63,7 +70,7 @@ export default function ChangePanel() {
     return { expr: indexExpression(it, def), range: [-1, 1] };
   };
 
-  const check = (it: ImageryItem | null): string | null => {
+  const check = (it: ImageryItem | null, kind: Kind = kindState): string | null => {
     if (!it) return t('Select scenes A (before) and B (after)');
     const k = sensorOf(it);
     if (kind === 'sar') return k === 's1' ? null : t('SAR change needs Sentinel-1 RTC scenes');
@@ -76,9 +83,17 @@ export default function ChangePanel() {
     return null;
   };
 
-  const run = async () => {
+  const run = async (o?: { A?: ImageryItem; B?: ImageryItem; kind?: Kind }) => {
+    const kind = o?.kind ?? kindState;
+    const thr = o?.kind ? defaultThr(o.kind) : thrState;
+    const A = o?.A ?? g.sceneA;
+    const B = o?.B ?? g.sceneB;
+    if (o?.kind) {
+      setKind(o.kind);
+      setThr(thr);
+    }
     if (!aoi || !A || !B) return;
-    const e = check(A) ?? check(B);
+    const e = check(A, kind) ?? check(B, kind);
     if (e) return setErr(e);
     abort.current?.abort();
     const ac = new AbortController();
@@ -88,7 +103,7 @@ export default function ChangePanel() {
     try {
       const grid = gridFor(aoi.geometry);
       const read = async (it: ImageryItem, lbl: string) => {
-        const { expr, range } = exprFor(it);
+        const { expr, range } = exprFor(it, kind);
         const r = await fetchRaster(it, expr, range, grid, ac.signal, (d, n) => setBusy(`${t('Reading')} ${lbl} ${d}/${n}`));
         if (sensorOf(it) === 's2') {
           const clear = await fetchRaster(it, S2_CLEAR_EXPR, [0, 1], grid, ac.signal);
@@ -125,6 +140,7 @@ export default function ChangePanel() {
       const prov = await imageProvider(out.imageUrl, out.grid.west, out.grid.south, out.grid.east, out.grid.north);
       g.putImagery('change', `${t('Change')} · ${t(KINDS.find((k) => k.id === kind)!.label)}`, prov, { meta: `${sceneLabel(A)} → ${sceneLabel(B)}`, legend });
       setRes(out);
+      setResMeta({ A, B, kind, thr, legend: (legend as any).items ?? [] });
       g.putReport({
         id: 'change',
         title: `Change detection — ${KINDS.find((k) => k.id === kind)!.label}`,
@@ -143,6 +159,10 @@ export default function ChangePanel() {
       setBusy('');
     }
   };
+
+  const runRef = useRef(run);
+  runRef.current = run;
+  useEffect(() => g.registerAction('change', (o) => void runRef.current(o)), [g.registerAction]);
 
   const toggleSwipe = () => {
     if (!A || !B) return;
@@ -213,7 +233,7 @@ export default function ChangePanel() {
       <p className="text-[10px] text-muted">{t('A lower threshold detects more change but also more noise. Land-cover classification change is not available (needs a classifier).')}</p>
       {warn.length > 0 && <Notice tone="warn">{warn.map((w) => <div key={w}>• {t(w)}</div>)}</Notice>}
       <div className="flex flex-wrap gap-1.5">
-        <Button variant="primary" onClick={run} disabled={!aoi || !A || !B || !!busy}>{t('Detect change')}</Button>
+        <Button variant="primary" onClick={() => run()} disabled={!aoi || !A || !B || !!busy}>{t('Detect change')}</Button>
         <Button variant={swipe ? 'active' : 'ghost'} onClick={toggleSwipe} disabled={!A || !B}>{t('Swipe A | B')}</Button>
         <Button onClick={runSeries} disabled={!aoi || !A || !!busy}>{t('Time series')}</Button>
         {busy && <Button variant="danger" onClick={() => abort.current?.abort()}>{t('Cancel')}</Button>}
@@ -240,8 +260,22 @@ export default function ChangePanel() {
             <Button onClick={() => downloadJson('change-summary.geojson', { type: 'Feature', geometry: aoi!.geometry, properties: { kind, threshold: kind === 'dnbr' ? 'Key & Benson 2006' : thr, before: A?.id, after: B?.id, areasKm2: res.areasKm2, noDataKm2: res.noDataKm2, validKm2: res.validKm2, rasterBounds: [res.grid.west, res.grid.south, res.grid.east, res.grid.north] } })}>
               {t('Export GeoJSON summary')}
             </Button>
-            <a href={res.pngUrl} download="change-mask.png"><Button>{t('Export PNG mask')}</Button></a>
           </div>
+          {resMeta && (
+            <ResultDownloads
+              title={t(KINDS.find((k) => k.id === resMeta.kind)!.label)}
+              before={resMeta.A}
+              after={resMeta.B}
+              result={res}
+              legend={resMeta.legend}
+              summaryLines={[
+                resMeta.kind === 'dnbr'
+                  ? DNBR_CLASSES.slice(1).map((c) => `${t(c.label)}: ${fmtNum(res.areasKm2[c.id] ?? 0, 2)} km²`).join(' · ')
+                  : `${t('Increase')}: ${fmtNum(res.areasKm2[1] ?? 0, 2)} km² · ${t('Decrease')}: ${fmtNum(res.areasKm2[2] ?? 0, 2)} km² (|Δ| ≥ ${resMeta.thr})`,
+                `${t('No data / cloud')}: ${fmtNum(res.noDataKm2, 2)} km²`,
+              ]}
+            />
+          )}
           <p className="mt-1 text-[10px] text-muted">{t('Values come from 8-bit tiles of server-side band math (precision ≈ range / 255). Treat small differences with caution.')}</p>
         </div>
       )}

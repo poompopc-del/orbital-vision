@@ -8,6 +8,7 @@ import { fmtNum } from '../../lib/format';
 import { useWorkspace } from '../../store';
 import { useGis } from './GisContext';
 import { imageProvider, sceneLabel } from './sceneLayer';
+import ResultDownloads from './ResultDownloads';
 import { compareWarnings } from './compareChecks';
 import type { ImageryItem } from '../../lib/stac';
 
@@ -23,12 +24,14 @@ const COLORS = {
 export default function FloodPanel() {
   const g = useGis();
   const { aoi } = useWorkspace();
-  const [method, setMethod] = useState<Method>('mndwi');
-  const [thr, setThr] = useState(0);
+  const [methodState, setMethod] = useState<Method>('mndwi');
+  const [thrState, setThr] = useState(0);
+  const method = methodState;
+  const thr = thrState;
   const [usePre, setUsePre] = useState(true);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
-  const [res, setRes] = useState<(Classified & { mode: 'single' | 'pair'; post: ImageryItem; pre: ImageryItem | null }) | null>(null);
+  const [res, setRes] = useState<(Classified & { mode: 'single' | 'pair'; post: ImageryItem; pre: ImageryItem | null; method: Method; thr: number; legendItems: { color: string; label: string }[] }) | null>(null);
   const abort = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -37,27 +40,36 @@ export default function FloodPanel() {
     setErr('');
   }, [g.resetKey]);
 
-  const post = g.sceneB ?? g.sceneA;
-  const pre = usePre && g.sceneB ? g.sceneA : null;
+  const postState = g.sceneB ?? g.sceneA;
+  const preState = usePre && g.sceneB ? g.sceneA : null;
+  const post = postState;
+  const pre = preState;
 
   const setM = (m: Method) => {
     setMethod(m);
     setThr(m === 'sar' ? SAR_WATER_DEFAULT_DB : 0);
   };
 
-  const validFor = (it: ImageryItem | null) => {
-    if (!it) return t('Select a scene first');
-    const k = sensorOf(it);
-    if (method === 'sar' && k !== 's1') return t('SAR water detection needs a Sentinel-1 RTC scene');
-    if (method !== 'sar' && k !== 's2' && k !== 'landsat') return t('Optical water indices need Sentinel-2 or Landsat');
-    return null;
-  };
-
-  const exprFor = (it: ImageryItem) => (method === 'sar' ? sarDbExpression('vv') : indexExpression(it, INDICES.find((i) => i.id === method)!));
-  const range: [number, number] = method === 'sar' ? [-30, 5] : [-1, 1];
-  const isWater = (v: number) => (method === 'sar' ? v < thr : v > thr);
-
-  const run = async () => {
+  const run = async (o?: { pre?: ImageryItem | null; post?: ImageryItem; method?: Method }) => {
+    const method = o?.method ?? methodState;
+    const thr = o?.method ? (o.method === 'sar' ? SAR_WATER_DEFAULT_DB : 0) : thrState;
+    const post = o?.post ?? postState;
+    const pre = o && 'pre' in o ? o.pre ?? null : preState;
+    if (o?.method) {
+      setMethod(o.method);
+      setThr(thr);
+    }
+    if (o && 'pre' in o) setUsePre(!!o.pre);
+    const validFor = (it: ImageryItem | null) => {
+      if (!it) return t('Select a scene first');
+      const k = sensorOf(it);
+      if (method === 'sar' && k !== 's1') return t('SAR water detection needs a Sentinel-1 RTC scene');
+      if (method !== 'sar' && k !== 's2' && k !== 'landsat') return t('Optical water indices need Sentinel-2 or Landsat');
+      return null;
+    };
+    const exprFor = (it: ImageryItem) => (method === 'sar' ? sarDbExpression('vv') : indexExpression(it, INDICES.find((i) => i.id === method)!));
+    const range: [number, number] = method === 'sar' ? [-30, 5] : [-1, 1];
+    const isWater = (v: number) => (method === 'sar' ? v < thr : v > thr);
     if (!aoi || !post) return;
     const e1 = validFor(post) ?? (pre ? validFor(pre) : null);
     if (e1) return setErr(e1);
@@ -111,7 +123,11 @@ export default function FloodPanel() {
           note: t('Classification from satellite data with a user-set threshold — not confirmation of flooding.'),
         },
       });
-      setRes({ ...out, mode: pre ? 'pair' : 'single', post, pre });
+      setRes({ ...out, mode: pre ? 'pair' : 'single', post, pre, method, thr, legendItems: (pre ? [
+        { color: 'rgb(27,58,138)', label: t('Permanent / pre-existing water') },
+        { color: 'rgb(30,144,255)', label: t('New water (possible flood)') },
+        { color: 'rgb(245,184,75)', label: t('Water before, not after (check)') },
+      ] : [{ color: 'rgb(30,144,255)', label: t('Water detected') }]).concat([{ color: 'rgb(128,128,128)', label: t('No data / cloud / low confidence') }]) });
       g.putReport({
         id: 'flood',
         title: `Flood / water mapping — ${methodLabel}`,
@@ -130,6 +146,10 @@ export default function FloodPanel() {
       setBusy('');
     }
   };
+
+  const runRef = useRef(run);
+  runRef.current = run;
+  useEffect(() => g.registerAction('flood', (o) => void runRef.current(o)), [g.registerAction]);
 
   const area = (id: number) => res?.areasKm2[id] ?? 0;
   const warn = pre && post ? compareWarnings(pre, post) : [];
@@ -164,7 +184,7 @@ export default function FloodPanel() {
       </div>
       {warn.length > 0 && <Notice tone="warn">{warn.map((w) => <div key={w}>• {t(w)}</div>)}</Notice>}
       <div className="flex gap-1.5">
-        <Button variant="primary" onClick={run} disabled={!aoi || !post || !!busy}>{t('Map water')}</Button>
+        <Button variant="primary" onClick={() => run()} disabled={!aoi || !post || !!busy}>{t('Map water')}</Button>
         {busy && <Button variant="danger" onClick={() => abort.current?.abort()}>{t('Cancel')}</Button>}
       </div>
       {!aoi && <p className="text-[11px] text-muted">{t('Draw a rectangle AOI first.')}</p>}
@@ -193,8 +213,8 @@ export default function FloodPanel() {
                   type: 'Feature',
                   geometry: aoi!.geometry,
                   properties: {
-                    method: method === 'sar' ? 'S1 RTC VV dB threshold' : `${method.toUpperCase()} threshold`,
-                    threshold: thr,
+                    method: res.method === 'sar' ? 'S1 RTC VV dB threshold' : `${res.method.toUpperCase()} threshold`,
+                    threshold: res.thr,
                     before: res.pre?.id ?? null,
                     after: res.post.id,
                     areasKm2: res.areasKm2,
@@ -208,9 +228,20 @@ export default function FloodPanel() {
             >
               {t('Export GeoJSON summary')}
             </Button>
-            <a href={res.pngUrl} download="flood-extent.png"><Button>{t('Export PNG mask')}</Button></a>
           </div>
-          <p className="mt-1 text-[10px] text-muted">{t('GeoTIFF export is not available in the browser yet; the PNG covers the bounds stored in the GeoJSON summary (EPSG:4326).')}</p>
+          <ResultDownloads
+            title={`${t('Flood map')} · ${res.method === 'sar' ? `Sentinel-1 VV < ${res.thr} dB` : `${res.method.toUpperCase()} > ${res.thr}`}`}
+            before={res.pre}
+            after={res.post}
+            result={res}
+            legend={res.legendItems}
+            summaryLines={[
+              res.mode === 'pair'
+                ? `${t('New water (possible flood)')}: ${fmtNum(area(2), 2)} km² · ${t('Permanent / pre-existing water')}: ${fmtNum(area(1), 2)} km²`
+                : `${t('Water detected')}: ${fmtNum(area(1), 2)} km²`,
+              `${t('No data / cloud')}: ${fmtNum(res.noDataKm2, 2)} km²`,
+            ]}
+          />
         </div>
       )}
     </div>

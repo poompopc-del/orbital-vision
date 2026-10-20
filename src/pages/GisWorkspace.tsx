@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
-import { Badge, Button, Select, cx } from '../components/ui';
+import { Badge, Button, cx } from '../components/ui';
 import { Cesium, drawOnGlobe, showAoi } from '../lib/cesium';
 import { LayerController, type BasemapId } from '../lib/basemaps';
 import { lineLengthKm, polygonAreaKm2, areaKm2 } from '../lib/geo';
@@ -20,9 +20,13 @@ import FloodPanel from '../components/gis/FloodPanel';
 import ChangePanel from '../components/gis/ChangePanel';
 import TerrainPanel from '../components/gis/TerrainPanel';
 import { sceneLabel } from '../components/gis/sceneLayer';
+import AutoScenes from '../components/gis/AutoScenes';
+import TaskWizard, { type TaskId } from '../components/gis/TaskWizard';
+import { useSearchParams } from 'react-router-dom';
 
-type Tab = 'layers' | 'aoi' | 'dams' | 'imagery' | 'spectral' | 'flood' | 'change' | 'terrain';
+type Tab = 'start' | 'layers' | 'aoi' | 'dams' | 'imagery' | 'spectral' | 'flood' | 'change' | 'terrain';
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'start', label: 'Start' },
   { id: 'layers', label: 'Layers' },
   { id: 'aoi', label: 'AOI' },
   { id: 'dams', label: 'Dams' },
@@ -44,11 +48,17 @@ const TOOLS: { id: MapTool | 'draw-rect'; label: string; icon: string }[] = [
 ];
 
 export default function GisWorkspace() {
-  const { aoi, setAoi, lastResults } = useWorkspace();
+  const { aoi, setAoi } = useWorkspace();
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
   const [controller, setController] = useState<LayerController | null>(null);
   const [basemap, setBasemap] = useState<BasemapId>('hybrid');
-  const [tab, setTab] = useState<Tab>('layers');
+  const [params] = useSearchParams();
+  const taskParam = params.get('task') as TaskId | null;
+  const [tab, setTab] = useState<Tab>(taskParam === 'dams' ? 'dams' : 'start');
+  useEffect(() => {
+    if (taskParam === 'dams') setTab('dams');
+    else if (taskParam) setTab('start');
+  }, [taskParam]);
   const [open, setOpen] = useState(true);
   const [tool, setTool] = useState<MapTool>('pan');
   const [layers, setLayers] = useState<LayerEntry[]>([]);
@@ -61,8 +71,8 @@ export default function GisWorkspace() {
   const [split, setSplit] = useState(0.5);
   const [cursor, setCursor] = useState<{ lat: number; lon: number } | null>(null);
   const [resetKey, setResetKey] = useState(0);
-  const actions = useRef<Record<string, () => void>>({});
-  const registerAction = useRef((name: string, fn: () => void) => {
+  const actions = useRef<Record<string, (opts?: any) => void>>({});
+  const registerAction = useRef((name: string, fn: (opts?: any) => void) => {
     actions.current[name] = fn;
     return () => {
       if (actions.current[name] === fn) delete actions.current[name];
@@ -163,6 +173,7 @@ export default function GisWorkspace() {
       setSceneB,
       resetKey,
       registerAction,
+      runAction: (name: string, opts?: any) => actions.current[name]?.(opts),
       report,
       putReport: (s: ReportSection) => setReport((r) => [...r.filter((x) => x.id !== s.id), s]),
     }),
@@ -294,7 +305,6 @@ ${report.map((s) => `<h2>${esc(s.title)}</h2><ul>${s.lines.map((x) => `<li>${esc
   };
 
   const swipeOn = layers.some((l) => l.id === 'swipe-a');
-  const pcResults = lastResults.filter((r) => r.source === 'planetary-computer');
 
   return (
     <GisCtx.Provider value={api}>
@@ -363,23 +373,17 @@ ${report.map((s) => `<h2>${esc(s.title)}</h2><ul>${s.lines.map((x) => `<li>${esc
                 </button>
               ))}
             </div>
-            {(tab === 'spectral' || tab === 'flood' || tab === 'change' || tab === 'imagery') && (
-              <div className="mt-2 grid grid-cols-2 gap-1.5">
-                {(['A', 'B'] as const).map((w) => (
-                  <Select
-                    key={w}
-                    value={(w === 'A' ? sceneA : sceneB)?.id ?? ''}
-                    onChange={(e) => (w === 'A' ? setSceneA : setSceneB)(pcResults.find((r) => r.id === e.target.value) ?? null)}
-                    title={w === 'A' ? t('Scene A (before)') : t('Scene B (after)')}
-                  >
-                    <option value="">{w}: {t('choose scene')}</option>
-                    {pcResults.map((r) => <option key={r.id} value={r.id}>{w}: {sceneLabel(r)}</option>)}
-                  </Select>
-                ))}
-              </div>
-            )}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3 scroll-thin">
+            <div className={tab === 'start' ? '' : 'hidden'}>
+              <TaskWizard initialTask={taskParam} goTab={(x) => setTab(x as Tab)} />
+            </div>
+            {(tab === 'spectral' || tab === 'flood' || tab === 'change' || tab === 'imagery') && (
+              <details open className="mb-3 rounded border border-line p-2">
+                <summary className="label cursor-pointer">{t('Images used for analysis')}</summary>
+                <div className="mt-2"><AutoScenes /></div>
+              </details>
+            )}
             <div className={tab === 'layers' ? '' : 'hidden'}><LayersPanel basemap={basemap} setBasemap={setBasemap} /></div>
             <div className={tab === 'aoi' ? '' : 'hidden'}>
               <AoiPicker viewer={viewer} />

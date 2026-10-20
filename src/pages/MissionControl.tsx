@@ -462,7 +462,7 @@ export default function MissionControl() {
               >
                 {t('Remove from selection')}
               </Button>
-              <Link to={`/catalog?sat=${selected.noradId}`} className="flex-1">
+              <Link to={`/data?tab=catalog&sat=${selected.noradId}`} className="flex-1">
                 <Button className="w-full">{t('Catalog record')}</Button>
               </Link>
             </div>

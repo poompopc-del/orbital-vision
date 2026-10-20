@@ -80,8 +80,8 @@ export default function Orders() {
             bodyClass="p-0"
           >
             {shown.length === 0 ? (
-              <div className="p-4 text-xs text-muted">{t('No requests yet. Create one in')} <Link to="/acquire" className="text-cyan-300 underline">{t('New Acquisition')}</Link> or save an archive scene from{' '}
-                <Link to="/imagery" className="text-cyan-300 underline">{t('Imagery Explorer')}</Link>.
+              <div className="p-4 text-xs text-muted">{t('No requests yet. Create one in')} <Link to="/request?tab=new" className="text-cyan-300 underline">{t('New Acquisition')}</Link> or save an archive scene from{' '}
+                <Link to="/gis?tab=search" className="text-cyan-300 underline">{t('Imagery Explorer')}</Link>.
               </div>
             ) : (
               <div className="overflow-x-auto scroll-thin">

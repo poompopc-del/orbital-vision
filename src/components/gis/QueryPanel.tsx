@@ -9,6 +9,7 @@ import { PROVIDERS } from '../../data/providers';
 import { fmtLatLon, fmtNum, fmtUtc, isoDay } from '../../lib/format';
 import { useWorkspace } from '../../store';
 import { useGis } from './GisContext';
+import SceneDownload from './SceneDownload';
 
 export default function QueryPanel() {
   const g = useGis();
@@ -137,13 +138,14 @@ export default function QueryPanel() {
                   <Button variant={g.sceneB?.id === it.id ? 'active' : 'ghost'} onClick={() => g.setSceneB(it)}>{t('Use as scene B')}</Button>
                   {it.selfHref && <a href={it.selfHref} target="_blank" rel="noreferrer"><Button>STAC ↗</Button></a>}
                 </div>
+                {it.source === 'planetary-computer' && <div className="mt-1"><SceneDownload item={it} compact /></div>}
               </li>
             ))}
           </ul>
           <div className="label mb-1 mt-3">{t('New acquisition — needs provider check')}</div>
           <p className="text-[11px] text-muted">
             {commercial.filter((p) => p.tasking).map((p) => p.shortName).join(', ')} — {t('availability, licence and price must be confirmed with the provider.')}{' '}
-            <Link to="/acquire" className="text-cyan-300 underline">{t('Prepare a request')}</Link>
+            <Link to="/request?tab=new" className="text-cyan-300 underline">{t('Prepare a request')}</Link>
           </p>
         </div>
       )}

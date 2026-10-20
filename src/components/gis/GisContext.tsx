@@ -52,7 +52,9 @@ export interface GisApi {
   /** Incremented by the map reset button; panels clear their own results when it changes. */
   resetKey: number;
   /** Panels register named actions (e.g. 'ndvi') that the toolbar can trigger. */
-  registerAction: (name: string, fn: () => void) => () => void;
+  registerAction: (name: string, fn: (opts?: any) => void) => () => void;
+  /** Run a registered action (used by the task wizard). */
+  runAction: (name: string, opts?: any) => void;
   report: ReportSection[];
   putReport: (s: ReportSection) => void;
 }
