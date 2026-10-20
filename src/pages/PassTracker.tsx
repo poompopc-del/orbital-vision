@@ -24,6 +24,20 @@ const MAX_DAYS = 14;
 const PALETTE = ['#22d3ee', '#f5b84b', '#c58bff', '#4fd18b', '#ff7a59', '#4f8dff', '#f472b6', '#a3e635'];
 const fmtTime = (d: Date) => d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
 const COLOR_KEY = 'ov.passColors.v1';
+const SET_KEY = 'ov.passSettings.v1';
+interface Saved {
+  fromV?: string; toV?: string; preset?: string | null; minEl?: number; hideDay?: boolean; showAll?: boolean;
+  picked?: string[]; sel?: string | null; scene?: '3d' | '2d' | 'columbus'; side?: 'both' | 'asc' | 'desc';
+  labels?: boolean; lead?: 'pass' | '10' | '30' | 'orbit'; lineW?: number; clean?: boolean; calculated?: boolean;
+  cam?: { lon: number; lat: number; h: number; heading: number; pitch: number };
+}
+const SAVED: Saved = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(SET_KEY) || '{}') ?? {};
+  } catch {
+    return {};
+  }
+})();
 const MAP_KEY = 'ov.passMap.v1';
 function loadMap(): { base: BasemapId; names: boolean } {
   try {
@@ -108,31 +122,33 @@ export default function PassTracker() {
   const { sats, status } = useOrbit();
   const { aoi, mySats } = useWorkspace();
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
-  const [fromV, setFromV] = useState(() => toInput(new Date()));
-  const [toV, setToV] = useState(() => toInput(new Date(Date.now() + 48 * 3600e3)));
-  const [preset, setPreset] = useState<string | null>(null);
+  // a relative preset ("next 24 h") is recomputed from the current time; a custom window is restored as typed
+  const savedPreset = SAVED.preset ? PRESETS.find((p) => p.id === SAVED.preset) : undefined;
+  const [fromV, setFromV] = useState(() => (savedPreset ? toInput(savedPreset.range()[0]) : SAVED.fromV ?? toInput(new Date())));
+  const [toV, setToV] = useState(() => (savedPreset ? toInput(savedPreset.range()[1]) : SAVED.toV ?? toInput(new Date(Date.now() + 48 * 3600e3))));
+  const [preset, setPreset] = useState<string | null>(savedPreset ? savedPreset.id : null);
   const [ran, setRan] = useState<{ from: Date; to: Date; at: number } | null>(null);
   const winFrom = fromInput(fromV);
   const winTo = fromInput(toV);
   const winHours = (winTo.getTime() - winFrom.getTime()) / 3600e3;
   const winErr = !Number.isFinite(winHours) ? t('Invalid date') : winHours <= 0 ? t('End must be after start') : winHours > MAX_DAYS * 24 ? `${t('Maximum window is')} ${MAX_DAYS} ${t('days')}` : '';
-  const [minEl, setMinEl] = useState(10);
+  const [minEl, setMinEl] = useState(SAVED.minEl ?? 10);
   const [geo, setGeo] = useState<Observer | null>(null);
   const [geoErr, setGeoErr] = useState('');
   const [passes, setPasses] = useState<VisiblePass[] | null>(null);
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
-  const [sel, setSel] = useState<string | null>(null);
+  const [sel, setSel] = useState<string | null>(SAVED.sel ?? null);
   const [now, setNow] = useState(Date.now());
-  const [hideDay, setHideDay] = useState(false);
-  const [showAll, setShowAll] = useState(true);
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [scene, setScene] = useState<'3d' | '2d' | 'columbus'>('3d');
-  const [side, setSide] = useState<'both' | 'asc' | 'desc'>('both');
-  const [labels, setLabels] = useState(true);
-  const [lead, setLead] = useState<'pass' | '10' | '30' | 'orbit'>('pass');
+  const [hideDay, setHideDay] = useState(SAVED.hideDay ?? false);
+  const [showAll, setShowAll] = useState(SAVED.showAll ?? true);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set(SAVED.picked ?? []));
+  const [scene, setScene] = useState<'3d' | '2d' | 'columbus'>(SAVED.scene ?? '3d');
+  const [side, setSide] = useState<'both' | 'asc' | 'desc'>(SAVED.side ?? 'both');
+  const [labels, setLabels] = useState(SAVED.labels ?? true);
+  const [lead, setLead] = useState<'pass' | '10' | '30' | 'orbit'>(SAVED.lead ?? 'pass');
   const [colors, setColors] = useState<Record<string, string>>(loadColors);
-  const [lineW, setLineW] = useState(2);
-  const [clean, setClean] = useState(false);
+  const [lineW, setLineW] = useState(SAVED.lineW ?? 2);
+  const [clean, setClean] = useState(SAVED.clean ?? false);
   const [isFull, setIsFull] = useState(false);
   const [countryOpen, setCountryOpen] = useState(false);
   const mapBox = useRef<HTMLDivElement>(null);
@@ -232,6 +248,7 @@ export default function PassTracker() {
       },
     });
     const k = `${observer.lat},${observer.lon}`;
+    if (!flown.current && camRef.current) flown.current = k; // first load: keep the restored camera view
     if (flown.current !== k) {
       flown.current = k; // renaming keeps the camera where it is
       viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(observer.lon, observer.lat, 9e6), duration: 1.2 });
@@ -348,6 +365,7 @@ export default function PassTracker() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewer, visKey, colorKey, lead, labels, sideOf, sel, lineW]);
 
+  const firstMorph = useRef(true);
   // lighter rendering: draw only when something changes (camera, data, or every 0.5 s of clock time)
   useEffect(() => {
     if (!viewer) return;
@@ -370,9 +388,14 @@ export default function PassTracker() {
   }, [viewer, scene]);
   useEffect(() => {
     if (!viewer) return;
-    if (scene === '2d') viewer.scene.morphTo2D(1);
-    else if (scene === 'columbus') viewer.scene.morphToColumbusView(1);
-    else viewer.scene.morphTo3D(1);
+    const M = Cesium.SceneMode;
+    const want = scene === '2d' ? M.SCENE2D : scene === 'columbus' ? M.COLUMBUS_VIEW : M.SCENE3D;
+    const d = firstMorph.current ? 0 : 1; // restoring after a refresh: switch instantly
+    firstMorph.current = false;
+    if (viewer.scene.mode === want) return;
+    if (scene === '2d') viewer.scene.morphTo2D(d);
+    else if (scene === 'columbus') viewer.scene.morphToColumbusView(d);
+    else viewer.scene.morphTo3D(d);
   }, [viewer, scene]);
 
   const savePng = () => {
@@ -421,18 +444,66 @@ export default function PassTracker() {
     a.click();
   };
 
-  const run = async () => {
-    if (!observer || !chosen.length) return;
-    setSel(null);
+  const run = async (restore = false) => {
+    if (!observer || !chosen.length || winErr) return;
+    if (!restore) {
+      setSel(null);
+      setPicked(new Set());
+    }
     setPasses(null);
     setBusy({ done: 0, total: chosen.length });
-    if (winErr) return;
+    calculated.current = true;
     setRan({ from: winFrom, to: winTo, at: Date.now() });
     const r = await findVisiblePassesBatched(chosen, observer, winFrom, winHours, minEl, (d, tt) => setBusy({ done: d, total: tt }));
     setPasses(r);
     setBusy(null);
     void logAudit('passes.visible', { sats: chosen.length, from: winFrom.toISOString(), to: winTo.toISOString(), minEl, passes: r.length });
   };
+
+  // remember every setting so a page refresh comes back the same
+  const calculated = useRef(!!SAVED.calculated);
+  const camRef = useRef(SAVED.cam);
+  const persist = () => {
+    try {
+      const o: Saved = {
+        fromV, toV, preset, minEl, hideDay, showAll, picked: [...picked], sel, scene, side, labels, lead, lineW, clean,
+        calculated: calculated.current, cam: camRef.current,
+      };
+      localStorage.setItem(SET_KEY, JSON.stringify(o));
+    } catch {
+      /* storage blocked */
+    }
+  };
+  useEffect(persist);
+  // camera: restore the last view, then keep track of where the user leaves it
+  useEffect(() => {
+    if (!viewer) return;
+    const c = camRef.current;
+    const restore = () =>
+      c &&
+      viewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(c.lon, c.lat, c.h), orientation: { heading: c.heading, pitch: c.pitch, roll: 0 } });
+    // a 2D / 2.5D restore morphs first, which resets the camera — apply the saved view after it
+    if (viewer.scene.mode === Cesium.SceneMode.MORPHING || (SAVED.scene && SAVED.scene !== '3d' && viewer.scene.mode === Cesium.SceneMode.SCENE3D)) {
+      const off = viewer.scene.morphComplete.addEventListener(() => {
+        off();
+        restore();
+      });
+    } else restore();
+    return viewer.camera.moveEnd.addEventListener(() => {
+      const p = viewer.camera.positionCartographic;
+      camRef.current = { lon: Cesium.Math.toDegrees(p.longitude), lat: Cesium.Math.toDegrees(p.latitude), h: p.height, heading: viewer.camera.heading, pitch: viewer.camera.pitch };
+      persist();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewer]);
+  // recalculate automatically after a refresh if passes had been calculated before
+  const autoRan = useRef(false);
+  useEffect(() => {
+    if (autoRan.current || !calculated.current || status !== 'ready' || !observer || !chosen.length || winErr) return;
+    autoRan.current = true;
+    void run(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, observer, chosen.length, winErr]);
 
   const useMyLocation = () => {
     setGeoErr('');
@@ -514,7 +585,7 @@ export default function PassTracker() {
             <label className="flex items-center gap-2 text-xs text-slate-300">
               <input type="checkbox" checked={hideDay} onChange={(e) => setHideDay(e.target.checked)} /> {t('Night passes only (sun below −6° at observer)')}
             </label>
-            <Button variant="primary" className="w-full" onClick={run} disabled={!observer || !chosen.length || !!busy || status !== 'ready' || !!winErr}>
+            <Button variant="primary" className="w-full" onClick={() => run()} disabled={!observer || !chosen.length || !!busy || status !== 'ready' || !!winErr}>
               {busy ? <><Spinner /> {t('Propagating')} {busy.done}/{busy.total}</> : t('Calculate passes')}
             </Button>
             {!observer && <p className="text-[11px] text-muted">{t('Select a location first.')}</p>}
