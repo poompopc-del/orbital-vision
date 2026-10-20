@@ -377,8 +377,15 @@ export default function PassTracker() {
 
   const savePng = () => {
     if (!viewer) return;
-    viewer.render();
-    const src = viewer.scene.canvas;
+    // the WebGL buffer is only readable right after a frame is drawn, so grab it inside postRender
+    // (calling render() directly is skipped in request-render mode, which gave a black image)
+    const off = viewer.scene.postRender.addEventListener(() => {
+      off();
+      composePng(viewer.scene.canvas);
+    });
+    viewer.scene.requestRender();
+  };
+  const composePng = (src: HTMLCanvasElement) => {
     const c = document.createElement('canvas');
     c.width = src.width;
     c.height = src.height;
