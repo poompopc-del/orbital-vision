@@ -30,6 +30,9 @@ export default function App() {
   const lang = useLang((s) => s.lang);
   useEffect(() => {
     void refreshOrbits();
+    // keep elements fresh while the page stays open (the loader only downloads when the cache is > 2 h old)
+    const i = setInterval(() => void refreshOrbits(), 30 * 60e3);
+    return () => clearInterval(i);
   }, []);
   return (
     <Routes key={lang}>
