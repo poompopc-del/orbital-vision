@@ -15,11 +15,11 @@ import SceneDownload from './SceneDownload';
 export type TaskId = 'flood' | 'vegetation' | 'urban' | 'latest' | 'dams';
 
 export const TASKS: { id: TaskId; icon: string; title: string; desc: string }[] = [
-  { id: 'flood', icon: '🌊', title: 'Flood', desc: 'Compare water before and after an event' },
-  { id: 'vegetation', icon: '🌾', title: 'Vegetation (NDVI)', desc: 'How green and healthy plants are' },
-  { id: 'urban', icon: '🏙', title: 'Urban growth', desc: 'Where buildings increased between two years' },
-  { id: 'latest', icon: '📷', title: 'Latest image', desc: 'Clearest recent satellite picture, ready to download' },
-  { id: 'dams', icon: '💧', title: 'Dams', desc: 'Reservoir storage from the Royal Irrigation Department' },
+  { id: 'flood', icon: '🌊', title: 'Flood mode', desc: 'Compare water before and after an event' },
+  { id: 'vegetation', icon: '🌾', title: 'Vegetation mode', desc: 'How green and healthy plants are' },
+  { id: 'urban', icon: '🏙', title: 'Urban growth mode', desc: 'Where buildings increased between two years' },
+  { id: 'latest', icon: '📷', title: 'Latest imagery mode', desc: 'Clearest recent satellite picture, ready to download' },
+  { id: 'dams', icon: '💧', title: 'Dam monitoring mode', desc: 'Reservoir storage from the Royal Irrigation Department' },
 ];
 
 const addDays = (d: string, n: number) => new Date(new Date(d).getTime() + n * 86400e3).toISOString().slice(0, 10);
@@ -121,7 +121,7 @@ export default function TaskWizard({ initialTask, goTab }: { initialTask?: TaskI
   return (
     <div className="space-y-3">
       <div>
-        <div className="label mb-1.5">{t('What do you want to do?')}</div>
+        <div className="label mb-1.5">{t('Mode')}</div>
         <div className="grid grid-cols-2 gap-1.5">
           {TASKS.map((x) => (
             <button
@@ -194,7 +194,7 @@ export default function TaskWizard({ initialTask, goTab }: { initialTask?: TaskI
       )}
 
       <Button variant="primary" className="w-full py-2 text-sm" onClick={start} disabled={busy || (task !== 'dams' && !aoi)}>
-        {busy ? <><Spinner /> {t('Working…')}</> : `${T.icon} ${task === 'dams' ? t('Open dams') : t('Start')}`}
+        {busy ? <><Spinner /> {t('Working…')}</> : `${T.icon} ${task === 'dams' ? t('Open dams') : t('Run mode')}`}
       </Button>
       {task !== 'dams' && !aoi && <p className="text-[11px] text-muted">{t('Choose an area first.')}</p>}
 
