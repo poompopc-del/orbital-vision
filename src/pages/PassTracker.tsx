@@ -668,7 +668,24 @@ export default function PassTracker() {
 
       <div ref={mapBox} className="relative min-h-[360px] flex-1 bg-ink-950">
         <GlobeHost onReady={setViewer} options={{ baseLayers: false }} />
-        <div className="absolute right-3 top-3 z-20 flex flex-wrap justify-end gap-1.5">
+        {/* one toolbar column: rows wrap instead of overlapping on narrow screens */}
+        <div className="pointer-events-none absolute left-3 right-3 top-3 z-20 flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-start justify-between gap-1.5">
+            {!clean ? (
+              <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-md border border-line bg-ink-950/85 p-1.5 backdrop-blur">
+          {(['3d', '2d', 'columbus'] as const).map((m) => (
+            <Button key={m} variant={scene === m ? 'active' : 'ghost'} onClick={() => setScene(m)}>
+              {m === '3d' ? '3D' : m === '2d' ? '2D' : t('2.5D')}
+            </Button>
+          ))}
+          <span className="mx-0.5 h-5 w-px bg-line" />
+          <Button variant={showAll ? 'active' : 'ghost'} onClick={() => setShowAll(true)}>{t('All passes')}</Button>
+          <Button variant={!showAll ? 'active' : 'ghost'} onClick={() => setShowAll(false)}>{t('Selected only')}</Button>
+          {!showAll && picked.size > 0 && <Button onClick={() => setPicked(new Set())}>{t('Clear')} ({picked.size})</Button>}
+          {passes && <span className="px-1 font-mono text-[10px] text-muted">{visiblePasses.length} {t('on map')}</span>}
+              </div>
+            ) : <span />}
+            <div className="pointer-events-auto ml-auto flex flex-wrap justify-end gap-1.5">
           <div className="flex items-center gap-1.5 rounded-md border border-line bg-ink-950/85 px-1.5 py-1 backdrop-blur">
             <span className="text-sm" title={t('Basemap')}>🗺</span>
             <Select value={mapCfg.base} onChange={(e) => setMapCfg({ ...mapCfg, base: e.target.value as BasemapId })} className="!w-auto !py-0.5 text-xs">
@@ -685,24 +702,10 @@ export default function PassTracker() {
           <Button title={t('Save the map as a PNG image')} onClick={savePng}>📷 {t('Save image')}</Button>
           <Button variant={clean ? 'active' : 'ghost'} onClick={() => setClean(!clean)}>{clean ? t('Show controls') : t('Hide controls')}</Button>
           <Button onClick={toggleFull}>{isFull ? `⤡ ${t('Exit full screen')}` : `⤢ ${t('Full screen')}`}</Button>
-        </div>
-        <div className="absolute right-3 top-14 z-20">
-          <CountryHighlight viewer={viewer} open={countryOpen} onClose={() => setCountryOpen(false)} />
-        </div>
-        {!clean && (<>
-        <div className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-1.5 rounded-md border border-line bg-ink-950/85 p-1.5 backdrop-blur">
-          {(['3d', '2d', 'columbus'] as const).map((m) => (
-            <Button key={m} variant={scene === m ? 'active' : 'ghost'} onClick={() => setScene(m)}>
-              {m === '3d' ? '3D' : m === '2d' ? '2D' : t('2.5D')}
-            </Button>
-          ))}
-          <span className="mx-0.5 h-5 w-px bg-line" />
-          <Button variant={showAll ? 'active' : 'ghost'} onClick={() => setShowAll(true)}>{t('All passes')}</Button>
-          <Button variant={!showAll ? 'active' : 'ghost'} onClick={() => setShowAll(false)}>{t('Selected only')}</Button>
-          {!showAll && picked.size > 0 && <Button onClick={() => setPicked(new Set())}>{t('Clear')} ({picked.size})</Button>}
-          {passes && <span className="px-1 font-mono text-[10px] text-muted">{visiblePasses.length} {t('on map')}</span>}
-        </div>
-        <div className="absolute left-3 top-14 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1.5 rounded-md border border-line bg-ink-950/85 p-1.5 backdrop-blur">
+            </div>
+          </div>
+          {!clean && (
+            <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 self-start rounded-md border border-line bg-ink-950/85 p-1.5 backdrop-blur">
           <span className="label px-1">{t('Sides')}</span>
           {([['both', 'Both'], ['desc', '↓ Descending'], ['asc', '↑ Ascending']] as const).map(([k, l]) => (
             <Button key={k} variant={side === k ? 'active' : 'ghost'} onClick={() => setSide(k)}>{t(l)}</Button>
@@ -719,8 +722,12 @@ export default function PassTracker() {
           {[1, 2, 3, 5].map((w) => (
             <Button key={w} variant={lineW === w ? 'active' : 'ghost'} onClick={() => setLineW(w)}>{w}</Button>
           ))}
+            </div>
+          )}
+          <div className="pointer-events-auto self-end">
+            <CountryHighlight viewer={viewer} open={countryOpen} onClose={() => setCountryOpen(false)} />
+          </div>
         </div>
-        </>)}
         {chosen.length > 0 && (
           <div className="absolute bottom-8 left-3 z-10 max-h-[40%] overflow-y-auto scroll-thin rounded-md border border-line bg-ink-950/85 p-2 backdrop-blur">
             <div className="label mb-1">{t('Line colour')}</div>
@@ -738,7 +745,7 @@ export default function PassTracker() {
           </div>
         )}
         {selPass && (
-          <div className="absolute right-3 top-3 z-10 w-[260px] rounded-md border border-line bg-navy-900/95 p-3 text-xs shadow-2xl">
+          <div className="absolute bottom-8 right-3 z-10 w-[260px] rounded-md border border-line bg-navy-900/95 p-3 text-xs shadow-2xl">
             <div className="mb-1 flex items-center justify-between">
               <span className="font-semibold text-white">{selPass.sat.name}</span>
               <button onClick={() => setSel(null)} className="text-muted hover:text-white">✕</button>
