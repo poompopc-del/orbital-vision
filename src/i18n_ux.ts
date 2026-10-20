@@ -193,4 +193,8 @@ export const TH_UX: Record<string, string> = {
   'Full screen': 'เต็มจอ',
   'Line width': 'ความหนาเส้น',
   'Line colour': 'สีเส้น (คลิกเพื่อเปลี่ยน)',
+  'Hill shade': 'แสงเงาภูเขา (Hill shade)',
+  'Plain (light)': 'พื้นเรียบ (สว่าง)',
+  'Plain (dark)': 'พื้นเรียบ (มืด)',
+  Names: 'ชื่อ/เขตแดน',
 };

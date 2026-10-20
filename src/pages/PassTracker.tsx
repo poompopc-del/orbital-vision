@@ -4,12 +4,13 @@ import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
 import SatPicker from '../components/SatPicker';
 import PassClassNote from '../components/PassClassNote';
-import { Badge, Button, Field, Input, Notice, Panel, Spinner, cx } from '../components/ui';
+import { Badge, Button, Field, Input, Notice, Panel, Select, Spinner, cx } from '../components/ui';
 import { Cesium, CYAN } from '../lib/cesium';
 import { setLiveClock, useSatPoints } from '../components/satLayer';
 import { centroid } from '../lib/geo';
 import { compass, findVisiblePassesBatched, type Observer, type VisiblePass } from '../lib/lookangles';
 import { groundTrack } from '../lib/orbit';
+import { BASEMAPS, LayerController, type BasemapId } from '../lib/basemaps';
 import { SENSOR_COLOR } from '../data/providers';
 import { useOrbit, useWorkspace } from '../store';
 import { fmtLatLon, fmtLocal, fmtNum } from '../lib/format';
@@ -22,6 +23,16 @@ const MAX_DAYS = 14;
 const PALETTE = ['#22d3ee', '#f5b84b', '#c58bff', '#4fd18b', '#ff7a59', '#4f8dff', '#f472b6', '#a3e635'];
 const fmtTime = (d: Date) => d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
 const COLOR_KEY = 'ov.passColors.v1';
+const MAP_KEY = 'ov.passMap.v1';
+function loadMap(): { base: BasemapId; names: boolean } {
+  try {
+    const v = JSON.parse(localStorage.getItem(MAP_KEY) || 'null');
+    if (v && BASEMAPS.some((b) => b.id === v.base)) return { base: v.base, names: !!v.names };
+  } catch {
+    /* ignore */
+  }
+  return { base: 'satellite', names: true };
+}
 function loadColors(): Record<string, string> {
   try {
     return JSON.parse(localStorage.getItem(COLOR_KEY) || '{}');
@@ -123,6 +134,23 @@ export default function PassTracker() {
   const [clean, setClean] = useState(false);
   const [isFull, setIsFull] = useState(false);
   const mapBox = useRef<HTMLDivElement>(null);
+  const [mapCfg, setMapCfg] = useState(loadMap);
+  const [ctl, setCtl] = useState<LayerController | null>(null);
+  useEffect(() => {
+    setCtl(viewer ? new LayerController(viewer) : null);
+  }, [viewer]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(MAP_KEY, JSON.stringify(mapCfg));
+    } catch {
+      /* ignore */
+    }
+    if (!ctl) return;
+    void (async () => {
+      await ctl.setBasemap(mapCfg.base);
+      if (mapCfg.base !== 'hybrid') await ctl.setOverlay('labels', mapCfg.names);
+    })();
+  }, [ctl, mapCfg]);
   const setColor = (id: string, c: string) =>
     setColors((o) => {
       const n = { ...o, [id]: c };
@@ -520,8 +548,20 @@ export default function PassTracker() {
       </aside>
 
       <div ref={mapBox} className="relative min-h-[360px] flex-1 bg-ink-950">
-        <GlobeHost onReady={setViewer} />
-        <div className="absolute right-3 top-3 z-20 flex gap-1.5">
+        <GlobeHost onReady={setViewer} options={{ baseLayers: false }} />
+        <div className="absolute right-3 top-3 z-20 flex flex-wrap justify-end gap-1.5">
+          <div className="flex items-center gap-1.5 rounded-md border border-line bg-ink-950/85 px-1.5 py-1 backdrop-blur">
+            <span className="text-sm" title={t('Basemap')}>🗺</span>
+            <Select value={mapCfg.base} onChange={(e) => setMapCfg({ ...mapCfg, base: e.target.value as BasemapId })} className="!w-auto !py-0.5 text-xs">
+              {BASEMAPS.map((b) => <option key={b.id} value={b.id} title={b.note}>{t(b.label)}</option>)}
+            </Select>
+            {mapCfg.base !== 'hybrid' && (
+              <label className="flex items-center gap-1 text-[11px] text-slate-200" title={t('Boundaries & place names')}>
+                <input type="checkbox" checked={mapCfg.names} onChange={(e) => setMapCfg({ ...mapCfg, names: e.target.checked })} />
+                {t('Names')}
+              </label>
+            )}
+          </div>
           <Button title={t('Save the map as a PNG image')} onClick={savePng}>📷 {t('Save image')}</Button>
           <Button variant={clean ? 'active' : 'ghost'} onClick={() => setClean(!clean)}>{clean ? t('Show controls') : t('Hide controls')}</Button>
           <Button onClick={toggleFull}>{isFull ? `⤡ ${t('Exit full screen')}` : `⤢ ${t('Full screen')}`}</Button>

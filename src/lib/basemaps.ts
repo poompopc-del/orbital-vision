@@ -2,7 +2,7 @@
 // that require attribution; Cesium shows each provider's credit automatically.
 import { Cesium, hasIon } from './cesium';
 
-export type BasemapId = 'satellite' | 'hybrid' | 'street' | 'topo' | 'osm';
+export type BasemapId = 'satellite' | 'hybrid' | 'street' | 'topo' | 'hillshade' | 'light' | 'dark' | 'osm';
 
 export interface BasemapDef {
   id: BasemapId;
@@ -15,6 +15,9 @@ export const BASEMAPS: BasemapDef[] = [
   { id: 'hybrid', label: 'Hybrid', note: 'Satellite + roads + boundaries & place names (Esri reference layers)' },
   { id: 'street', label: 'Street map', note: 'Esri World Street Map' },
   { id: 'topo', label: 'Terrain map', note: 'Esri World Topographic Map' },
+  { id: 'hillshade', label: 'Hill shade', note: 'Esri World Hillshade (relief only)' },
+  { id: 'light', label: 'Plain (light)', note: 'Esri Light Gray Canvas — clean background for tracks' },
+  { id: 'dark', label: 'Plain (dark)', note: 'Esri Dark Gray Canvas — clean background for tracks' },
   { id: 'osm', label: 'OpenStreetMap', note: '© OpenStreetMap contributors' },
 ];
 
@@ -52,6 +55,7 @@ export class LayerController {
   private base: Cesium.ImageryLayer[] = [];
   private overlays = new Map<OverlayId, Cesium.ImageryLayer>();
   private token = 0;
+  private autoOn = new Set<OverlayId>();
 
   constructor(viewer: Cesium.Viewer) {
     this.viewer = viewer;
@@ -64,6 +68,9 @@ export class LayerController {
       if (id === 'satellite' || id === 'hybrid') providers.push(await satelliteProvider());
       else if (id === 'street') providers.push(await esri('World_Street_Map'));
       else if (id === 'topo') providers.push(await esri('World_Topo_Map'));
+      else if (id === 'hillshade') providers.push(await esri('Elevation/World_Hillshade'));
+      else if (id === 'light') providers.push(await esri('Canvas/World_Light_Gray_Base'));
+      else if (id === 'dark') providers.push(await esri('Canvas/World_Dark_Gray_Base'));
       else providers.push(new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }));
     } catch {
       providers.push(new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }));
@@ -73,13 +80,20 @@ export class LayerController {
     this.base = providers.map((p, i) => this.viewer.imageryLayers.addImageryProvider(p, i));
     // hybrid = satellite with both reference overlays switched on
     if (id === 'hybrid') {
-      await this.setOverlay('roads', true);
-      await this.setOverlay('labels', true);
+      if (!this.overlays.has('roads')) this.autoOn.add('roads');
+      if (!this.overlays.has('labels')) this.autoOn.add('labels');
+      await this.setOverlay('roads', true, 1, true);
+      await this.setOverlay('labels', true, 1, true);
+    } else if (this.autoOn.size) {
+      // leaving hybrid: switch off the overlays hybrid itself turned on
+      for (const o of [...this.autoOn]) await this.setOverlay(o, false, 1, true);
+      this.autoOn.clear();
     }
     this.raiseOverlays();
   }
 
-  async setOverlay(id: OverlayId, on: boolean, alpha = 1): Promise<void> {
+  async setOverlay(id: OverlayId, on: boolean, alpha = 1, auto = false): Promise<void> {
+    if (!auto) this.autoOn.delete(id);
     const cur = this.overlays.get(id);
     if (!on) {
       if (cur) this.viewer.imageryLayers.remove(cur, true);
