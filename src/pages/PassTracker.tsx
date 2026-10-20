@@ -4,7 +4,7 @@ import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
 import SatPicker from '../components/SatPicker';
 import PassClassNote from '../components/PassClassNote';
-import { Badge, Button, Notice, Panel, Spinner, cx } from '../components/ui';
+import { Badge, Button, Field, Input, Notice, Panel, Spinner, cx } from '../components/ui';
 import { Cesium, CYAN } from '../lib/cesium';
 import { setLiveClock, useSatPoints } from '../components/satLayer';
 import { centroid } from '../lib/geo';
@@ -15,7 +15,23 @@ import { useOrbit, useWorkspace } from '../store';
 import { fmtLatLon, fmtLocal, fmtNum } from '../lib/format';
 import { logAudit } from '../lib/repo';
 
-const WINDOWS = [24, 48, 72];
+// datetime-local inputs are in Thailand time (UTC+7)
+const toInput = (d: Date) => new Date(d.getTime() + 7 * 3600e3).toISOString().slice(0, 16);
+const fromInput = (v: string) => new Date(`${v}:00+07:00`);
+const MAX_DAYS = 14;
+const startOfBkkDay = (offsetDays: number) => {
+  const d = new Date(Date.now() + 7 * 3600e3);
+  d.setUTCHours(0, 0, 0, 0);
+  return new Date(d.getTime() - 7 * 3600e3 + offsetDays * 86400e3);
+};
+const PRESETS: { id: string; label: string; range: () => [Date, Date] }[] = [
+  { id: 'now24', label: 'Next 24 h', range: () => [new Date(), new Date(Date.now() + 24 * 3600e3)] },
+  { id: 'now72', label: 'Next 3 days', range: () => [new Date(), new Date(Date.now() + 72 * 3600e3)] },
+  { id: 'today', label: 'Today', range: () => [startOfBkkDay(0), startOfBkkDay(1)] },
+  { id: 'tomorrow', label: 'Tomorrow', range: () => [startOfBkkDay(1), startOfBkkDay(2)] },
+  { id: 'week', label: 'Next 7 days', range: () => [new Date(), new Date(Date.now() + 7 * 86400e3)] },
+  { id: 'yesterday', label: 'Yesterday', range: () => [startOfBkkDay(-1), startOfBkkDay(0)] },
+];
 const MIN_ELS = [0, 10, 20, 30];
 
 function countdown(ms: number) {
@@ -62,7 +78,14 @@ export default function PassTracker() {
   const { sats, status } = useOrbit();
   const { aoi, mySats } = useWorkspace();
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
-  const [hours, setHours] = useState(48);
+  const [fromV, setFromV] = useState(() => toInput(new Date()));
+  const [toV, setToV] = useState(() => toInput(new Date(Date.now() + 48 * 3600e3)));
+  const [preset, setPreset] = useState<string | null>(null);
+  const [ran, setRan] = useState<{ from: Date; to: Date; at: number } | null>(null);
+  const winFrom = fromInput(fromV);
+  const winTo = fromInput(toV);
+  const winHours = (winTo.getTime() - winFrom.getTime()) / 3600e3;
+  const winErr = !Number.isFinite(winHours) ? t('Invalid date') : winHours <= 0 ? t('End must be after start') : winHours > MAX_DAYS * 24 ? `${t('Maximum window is')} ${MAX_DAYS} ${t('days')}` : '';
   const [minEl, setMinEl] = useState(10);
   const [geo, setGeo] = useState<Observer | null>(null);
   const [geoErr, setGeoErr] = useState('');
@@ -116,7 +139,12 @@ export default function PassTracker() {
     viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(observer.lon, observer.lat, 9e6), duration: 1.2 });
   }, [viewer, observer?.lat, observer?.lon, observer?.name]);
 
-  const shown = useMemo(() => (passes ?? []).filter((p) => p.los.getTime() > now && (!hideDay || p.sunAtObserver < -6)), [passes, now, hideDay]);
+  // a window that starts "now" drops passes as they finish; a chosen past/future window shows everything
+  const liveWindow = !!ran && ran.from.getTime() >= ran.at - 5 * 60e3 && ran.from.getTime() <= ran.at + 5 * 60e3;
+  const shown = useMemo(
+    () => (passes ?? []).filter((p) => (!liveWindow || p.los.getTime() > now) && (!hideDay || p.sunAtObserver < -6)),
+    [passes, now, hideDay, liveWindow],
+  );
   const keyOf = (p: VisiblePass) => `${p.sat.noradId}-${p.aos.getTime()}`;
   const selPass = sel ? (passes ?? []).find((p) => keyOf(p) === sel) ?? null : null;
   useSatPoints(viewer, chosen, selPass?.sat.noradId ?? null);
@@ -146,10 +174,12 @@ export default function PassTracker() {
     setSel(null);
     setPasses(null);
     setBusy({ done: 0, total: chosen.length });
-    const r = await findVisiblePassesBatched(chosen, observer, new Date(), hours, minEl, (d, tt) => setBusy({ done: d, total: tt }));
+    if (winErr) return;
+    setRan({ from: winFrom, to: winTo, at: Date.now() });
+    const r = await findVisiblePassesBatched(chosen, observer, winFrom, winHours, minEl, (d, tt) => setBusy({ done: d, total: tt }));
     setPasses(r);
     setBusy(null);
-    void logAudit('passes.visible', { sats: chosen.length, hours, minEl, passes: r.length });
+    void logAudit('passes.visible', { sats: chosen.length, from: winFrom.toISOString(), to: winTo.toISOString(), minEl, passes: r.length });
   };
 
   const useMyLocation = () => {
@@ -190,9 +220,40 @@ export default function PassTracker() {
 
         <Panel title={t('Settings')}>
           <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="label w-28">{t('Look-ahead window')}</span>
-              {WINDOWS.map((h) => <Button key={h} variant={hours === h ? 'active' : 'ghost'} onClick={() => setHours(h)}>{h} h</Button>)}
+            <div>
+              <div className="label mb-1">{t('Time window (Thailand time)')}</div>
+              <div className="flex flex-wrap gap-1">
+                {PRESETS.map((p) => (
+                  <Button
+                    key={p.id}
+                    variant={preset === p.id ? 'active' : 'ghost'}
+                    onClick={() => {
+                      const [a, b] = p.range();
+                      setFromV(toInput(a));
+                      setToV(toInput(b));
+                      setPreset(p.id);
+                    }}
+                  >
+                    {t(p.label)}
+                  </Button>
+                ))}
+              </div>
+              <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                <Field label={t('From')}>
+                  <Input type="datetime-local" value={fromV} onChange={(e) => { setFromV(e.target.value); setPreset(null); }} />
+                </Field>
+                <Field label={t('To')}>
+                  <Input type="datetime-local" value={toV} onChange={(e) => { setToV(e.target.value); setPreset(null); }} />
+                </Field>
+              </div>
+              {winErr ? (
+                <p className="mt-1 text-[11px] text-bad">{winErr}</p>
+              ) : (
+                <p className="mt-1 text-[10px] text-muted">
+                  {fmtNum(winHours, winHours < 48 ? 1 : 0)} {t('hours')}
+                  {winFrom.getTime() < Date.now() - 3 * 86400e3 || winTo.getTime() > Date.now() + 7 * 86400e3 ? ` · ${t('Far from today: orbital elements are less accurate, times may be off by several minutes.')}` : ''}
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="label w-28">{t('Min elevation')}</span>
@@ -201,7 +262,7 @@ export default function PassTracker() {
             <label className="flex items-center gap-2 text-xs text-slate-300">
               <input type="checkbox" checked={hideDay} onChange={(e) => setHideDay(e.target.checked)} /> {t('Night passes only (sun below −6° at observer)')}
             </label>
-            <Button variant="primary" className="w-full" onClick={run} disabled={!observer || !chosen.length || !!busy || status !== 'ready'}>
+            <Button variant="primary" className="w-full" onClick={run} disabled={!observer || !chosen.length || !!busy || status !== 'ready' || !!winErr}>
               {busy ? <><Spinner /> {t('Propagating')} {busy.done}/{busy.total}</> : t('Calculate passes')}
             </Button>
             {!observer && <p className="text-[11px] text-muted">{t('Select a location first.')}</p>}
@@ -209,8 +270,13 @@ export default function PassTracker() {
         </Panel>
 
         {passes && (
-          <Panel title={`${t('Upcoming passes')} (${shown.length})`} bodyClass="p-0">
-            {next && (
+          <Panel title={`${t('Passes')} (${shown.length})`} bodyClass="p-0">
+            {ran && (
+              <div className="border-b border-line px-3 py-1.5 font-mono text-[10px] text-muted">
+                {fmtLocal(ran.from)} → {fmtLocal(ran.to)} ({t('Thailand time')})
+              </div>
+            )}
+            {next && next.los.getTime() > now && (
               <div className="border-b border-line bg-cyan-400/5 px-3 py-2.5">
                 <div className="label text-cyan-300">{t('Next pass')}</div>
                 <div className="flex items-end justify-between gap-2">
@@ -244,7 +310,7 @@ export default function PassTracker() {
                         <td className={cx('font-mono', p.maxEl >= 45 ? 'text-ok' : p.maxEl < 20 ? 'text-muted' : '')}>{fmtNum(p.maxEl, 0)}°</td>
                         <td className="font-mono">{dur(p.durationS)}</td>
                         <td className="font-mono text-muted">{compass(p.aosAz)}→{compass(p.losAz)}</td>
-                        <td className="pr-3 font-mono text-cyan-300">{live ? t('now') : countdown(p.aos.getTime() - now)}</td>
+                        <td className={cx('pr-3 font-mono', p.los.getTime() < now ? 'text-muted' : 'text-cyan-300')}>{live ? t('now') : p.los.getTime() < now ? t('passed') : countdown(p.aos.getTime() - now)}</td>
                       </tr>
                     );
                   })}
