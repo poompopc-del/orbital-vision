@@ -168,4 +168,9 @@ export const TH_UX: Record<string, string> = {
   'Composing summary…': 'กำลังจัดทำแผ่นสรุป…',
   'Result over the after image': 'ผลวิเคราะห์ซ้อนบนภาพหลัง',
   'Source: Copernicus Sentinel / USGS Landsat via Microsoft Planetary Computer. Derived from satellite data — not confirmation of events on the ground.': 'ที่มา: Copernicus Sentinel / USGS Landsat ผ่าน Microsoft Planetary Computer เป็นผลวิเคราะห์จากภาพดาวเทียม ไม่ใช่การยืนยันเหตุการณ์จริง',
+  'Show all on map': 'แสดงทุกรอบบนแผนที่',
+  'All passes': 'แสดงทุกรอบ',
+  'Selected only': 'เฉพาะที่เลือก',
+  'on map': 'รอบบนแผนที่',
+  '2.5D': '2.5D (ระนาบ)',
 };

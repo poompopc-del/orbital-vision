@@ -19,6 +19,16 @@ import { logAudit } from '../lib/repo';
 const toInput = (d: Date) => new Date(d.getTime() + 7 * 3600e3).toISOString().slice(0, 16);
 const fromInput = (v: string) => new Date(`${v}:00+07:00`);
 const MAX_DAYS = 14;
+const PALETTE = ['#22d3ee', '#f5b84b', '#c58bff', '#4fd18b', '#ff7a59', '#4f8dff', '#f472b6', '#a3e635'];
+const fmtTime = (d: Date) => d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+const arrowCache = new Map<string, string>();
+function arrowIcon(color: string) {
+  if (!arrowCache.has(color)) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M10 1 L18 18 L10 13 L2 18 Z" fill="${color}" stroke="#0b1524" stroke-width="1.2"/></svg>`;
+    arrowCache.set(color, `data:image/svg+xml;base64,${btoa(svg)}`);
+  }
+  return arrowCache.get(color)!;
+}
 const startOfBkkDay = (offsetDays: number) => {
   const d = new Date(Date.now() + 7 * 3600e3);
   d.setUTCHours(0, 0, 0, 0);
@@ -94,6 +104,15 @@ export default function PassTracker() {
   const [sel, setSel] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [hideDay, setHideDay] = useState(false);
+  const [showAll, setShowAll] = useState(true);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [scene, setScene] = useState<'3d' | '2d' | 'columbus'>('3d');
+  const togglePick = (k: string) =>
+    setPicked((s0) => {
+      const n = new Set(s0);
+      n.has(k) ? n.delete(k) : n.add(k);
+      return n;
+    });
 
   useEffect(() => {
     const i = setInterval(() => setNow(Date.now()), 1000);
@@ -149,25 +168,74 @@ export default function PassTracker() {
   const selPass = sel ? (passes ?? []).find((p) => keyOf(p) === sel) ?? null : null;
   useSatPoints(viewer, chosen, selPass?.sat.noradId ?? null);
 
-  // selected pass ground track
+  // pass ground tracks on the map: every pass, or only the ticked ones (the selected pass is always drawn, thicker)
+  const visiblePasses = useMemo(
+    () => shown.filter((p) => showAll || picked.has(keyOf(p)) || keyOf(p) === sel),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shown, showAll, picked, sel],
+  );
+  const satColor = useMemo(() => {
+    const m = new Map<string, string>();
+    chosen.forEach((c, i) => m.set(c.noradId, PALETTE[i % PALETTE.length]));
+    return m;
+  }, [chosen]);
   useEffect(() => {
     if (!viewer) return;
-    const old = viewer.entities.getById('pass-track');
-    if (old) viewer.entities.remove(old);
-    const p = selPass;
-    if (!p) return;
-    const mins = Math.max(1, (p.los.getTime() - p.aos.getTime()) / 60000);
-    const tr = groundTrack(p.sat, p.aos, mins, 10);
-    viewer.entities.add({
-      id: 'pass-track',
-      polyline: {
-        positions: tr.map((x) => Cesium.Cartesian3.fromDegrees(x.lon, x.lat)),
-        width: 3,
-        material: Cesium.Color.fromCssColorString(SENSOR_COLOR[p.sat.mission?.sensor ?? 'unknown']),
-        arcType: Cesium.ArcType.GEODESIC,
-      },
+    const ds = new Cesium.CustomDataSource('pass-tracks');
+    visiblePasses.forEach((p) => {
+      const isSel = keyOf(p) === sel;
+      const mins = Math.max(1, (p.los.getTime() - p.aos.getTime()) / 60000);
+      const tr = groundTrack(p.sat, p.aos, mins, 10);
+      if (tr.length < 2) return;
+      const col = Cesium.Color.fromCssColorString(satColor.get(p.sat.noradId) ?? '#22d3ee');
+      ds.entities.add({
+        polyline: {
+          positions: tr.map((x) => Cesium.Cartesian3.fromDegrees(x.lon, x.lat)),
+          width: isSel ? 4 : 2,
+          material: isSel ? col : col.withAlpha(0.75),
+          arcType: Cesium.ArcType.GEODESIC,
+        },
+      });
+      // arrow head at the end shows the direction of travel
+      const a = tr[tr.length - 2], b = tr[tr.length - 1];
+      ds.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(b.lon, b.lat),
+        billboard: {
+          image: arrowIcon(satColor.get(p.sat.noradId) ?? '#22d3ee'),
+          rotation: -Math.atan2(b.lat - a.lat, (b.lon - a.lon) * Math.cos((b.lat * Math.PI) / 180)) + Math.PI / 2,
+          alignedAxis: Cesium.Cartesian3.UNIT_Z,
+          width: isSel ? 18 : 13,
+          height: isSel ? 18 : 13,
+        },
+      });
+      const mid = tr[Math.floor(tr.length / 2)];
+      ds.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(mid.lon, mid.lat),
+        label: {
+          text: `${p.sat.name} ${fmtTime(p.tca)}`,
+          font: `${isSel ? 12 : 10}px Inter, sans-serif`,
+          fillColor: Cesium.Color.WHITE,
+          showBackground: true,
+          backgroundColor: Cesium.Color.fromCssColorString('#0b1524').withAlpha(0.8),
+          pixelOffset: new Cesium.Cartesian2(0, -12),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, isSel ? 3e7 : 9e6),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
     });
-  }, [viewer, sel]);
+    void viewer.dataSources.add(ds);
+    return () => {
+      if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewer, visiblePasses, satColor]);
+
+  useEffect(() => {
+    if (!viewer) return;
+    if (scene === '2d') viewer.scene.morphTo2D(1);
+    else if (scene === 'columbus') viewer.scene.morphToColumbusView(1);
+    else viewer.scene.morphTo3D(1);
+  }, [viewer, scene]);
 
   const run = async () => {
     if (!observer || !chosen.length) return;
@@ -293,7 +361,15 @@ export default function PassTracker() {
               <table className="w-full min-w-[420px] text-left text-xs">
                 <thead className="label">
                   <tr className="border-b border-line">
-                    <th className="px-3 py-1.5">{t('Satellite')}</th><th>{t('Rise (local)')}</th><th>{t('Max el.')}</th><th>{t('Duration')}</th><th>{t('Direction')}</th><th className="pr-3">{t('In')}</th>
+                    <th className="pl-3">
+                      <input
+                        type="checkbox"
+                        title={t('Show all on map')}
+                        checked={showAll}
+                        onChange={(e) => setShowAll(e.target.checked)}
+                      />
+                    </th>
+                    <th className="px-2 py-1.5">{t('Satellite')}</th><th>{t('Rise (local)')}</th><th>{t('Max el.')}</th><th>{t('Duration')}</th><th>{t('Direction')}</th><th className="pr-3">{t('In')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -305,7 +381,13 @@ export default function PassTracker() {
                         onClick={() => setSel(keyOf(p))}
                         className={cx('cursor-pointer border-b border-white/5 hover:bg-navy-800/60', sel === keyOf(p) && 'bg-cyan-400/10', live && 'text-ok')}
                       >
-                        <td className="px-3 py-1.5 text-white">{p.sat.name}</td>
+                        <td className="pl-3" onClick={(e) => e.stopPropagation()}>
+                          <input type="checkbox" checked={showAll || picked.has(keyOf(p))} disabled={showAll} onChange={() => togglePick(keyOf(p))} />
+                        </td>
+                        <td className="px-2 py-1.5 text-white">
+                          <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ background: satColor.get(p.sat.noradId) }} />
+                          {p.sat.name}
+                        </td>
                         <td className="font-mono">{fmtLocal(p.aos)}</td>
                         <td className={cx('font-mono', p.maxEl >= 45 ? 'text-ok' : p.maxEl < 20 ? 'text-muted' : '')}>{fmtNum(p.maxEl, 0)}°</td>
                         <td className="font-mono">{dur(p.durationS)}</td>
@@ -326,6 +408,18 @@ export default function PassTracker() {
 
       <div className="relative min-h-[360px] flex-1">
         <GlobeHost onReady={setViewer} />
+        <div className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-1.5 rounded-md border border-line bg-ink-950/85 p-1.5 backdrop-blur">
+          {(['3d', '2d', 'columbus'] as const).map((m) => (
+            <Button key={m} variant={scene === m ? 'active' : 'ghost'} onClick={() => setScene(m)}>
+              {m === '3d' ? '3D' : m === '2d' ? '2D' : t('2.5D')}
+            </Button>
+          ))}
+          <span className="mx-0.5 h-5 w-px bg-line" />
+          <Button variant={showAll ? 'active' : 'ghost'} onClick={() => setShowAll(true)}>{t('All passes')}</Button>
+          <Button variant={!showAll ? 'active' : 'ghost'} onClick={() => setShowAll(false)}>{t('Selected only')}</Button>
+          {!showAll && picked.size > 0 && <Button onClick={() => setPicked(new Set())}>{t('Clear')} ({picked.size})</Button>}
+          {passes && <span className="px-1 font-mono text-[10px] text-muted">{visiblePasses.length} {t('on map')}</span>}
+        </div>
         {selPass && (
           <div className="absolute right-3 top-3 z-10 w-[260px] rounded-md border border-line bg-navy-900/95 p-3 text-xs shadow-2xl">
             <div className="mb-1 flex items-center justify-between">
