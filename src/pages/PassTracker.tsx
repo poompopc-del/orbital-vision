@@ -107,6 +107,9 @@ export default function PassTracker() {
   const [showAll, setShowAll] = useState(true);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [scene, setScene] = useState<'3d' | '2d' | 'columbus'>('3d');
+  const [side, setSide] = useState<'both' | 'asc' | 'desc'>('both');
+  const [labels, setLabels] = useState(true);
+  const [lead, setLead] = useState<'pass' | '10' | '30' | 'orbit'>('pass');
   const togglePick = (k: string) =>
     setPicked((s0) => {
       const n = new Set(s0);
@@ -160,9 +163,21 @@ export default function PassTracker() {
 
   // a window that starts "now" drops passes as they finish; a chosen past/future window shows everything
   const liveWindow = !!ran && ran.from.getTime() >= ran.at - 5 * 60e3 && ran.from.getTime() <= ran.at + 5 * 60e3;
+  // ascending (moving north) or descending (moving south) at closest approach
+  const sideOf = useMemo(() => {
+    const m = new Map<VisiblePass, 'asc' | 'desc'>();
+    (passes ?? []).forEach((p) => {
+      const tr = groundTrack(p.sat, new Date(p.tca.getTime() - 30e3), 1, 60);
+      m.set(p, tr.length >= 2 && tr[1].lat < tr[0].lat ? 'desc' : 'asc');
+    });
+    return m;
+  }, [passes]);
   const shown = useMemo(
-    () => (passes ?? []).filter((p) => (!liveWindow || p.los.getTime() > now) && (!hideDay || p.sunAtObserver < -6)),
-    [passes, now, hideDay, liveWindow],
+    () =>
+      (passes ?? []).filter(
+        (p) => (!liveWindow || p.los.getTime() > now) && (!hideDay || p.sunAtObserver < -6) && (side === 'both' || sideOf.get(p) === side),
+      ),
+    [passes, now, hideDay, liveWindow, side, sideOf],
   );
   const keyOf = (p: VisiblePass) => `${p.sat.noradId}-${p.aos.getTime()}`;
   const selPass = sel ? (passes ?? []).find((p) => keyOf(p) === sel) ?? null : null;
@@ -188,6 +203,24 @@ export default function PassTracker() {
       const tr = groundTrack(p.sat, p.aos, mins, 10);
       if (tr.length < 2) return;
       const col = Cesium.Color.fromCssColorString(satColor.get(p.sat.noradId) ?? '#22d3ee');
+      // lead / trail: where the satellite comes from and goes to (dashed)
+      const extra = lead === 'pass' ? 0 : lead === 'orbit' ? p.sat.periodMin / 2 : +lead;
+      if (extra > 0) {
+        const step = extra > 30 ? 30 : 15;
+        const before = groundTrack(p.sat, new Date(p.aos.getTime() - extra * 60e3), extra, step);
+        const after = groundTrack(p.sat, p.los, extra, step);
+        [before, after].forEach((seg) => {
+          if (seg.length < 2) return;
+          ds.entities.add({
+            polyline: {
+              positions: seg.map((x) => Cesium.Cartesian3.fromDegrees(x.lon, x.lat)),
+              width: isSel ? 2 : 1.5,
+              material: new Cesium.PolylineDashMaterialProperty({ color: col.withAlpha(isSel ? 0.8 : 0.5), dashLength: 12 }),
+              arcType: Cesium.ArcType.GEODESIC,
+            },
+          });
+        });
+      }
       ds.entities.add({
         polyline: {
           positions: tr.map((x) => Cesium.Cartesian3.fromDegrees(x.lon, x.lat)),
@@ -209,10 +242,10 @@ export default function PassTracker() {
         },
       });
       const mid = tr[Math.floor(tr.length / 2)];
-      ds.entities.add({
+      if (labels || isSel) ds.entities.add({
         position: Cesium.Cartesian3.fromDegrees(mid.lon, mid.lat),
         label: {
-          text: `${p.sat.name} ${fmtTime(p.tca)}`,
+          text: `${p.sat.name} ${sideOf.get(p) === 'desc' ? '↓' : '↑'} ${fmtTime(p.tca)}`,
           font: `${isSel ? 12 : 10}px Inter, sans-serif`,
           fillColor: Cesium.Color.WHITE,
           showBackground: true,
@@ -228,7 +261,7 @@ export default function PassTracker() {
       if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer, visiblePasses, satColor]);
+  }, [viewer, visiblePasses, satColor, lead, labels, sideOf]);
 
   useEffect(() => {
     if (!viewer) return;
@@ -391,7 +424,12 @@ export default function PassTracker() {
                         <td className="font-mono">{fmtLocal(p.aos)}</td>
                         <td className={cx('font-mono', p.maxEl >= 45 ? 'text-ok' : p.maxEl < 20 ? 'text-muted' : '')}>{fmtNum(p.maxEl, 0)}°</td>
                         <td className="font-mono">{dur(p.durationS)}</td>
-                        <td className="font-mono text-muted">{compass(p.aosAz)}→{compass(p.losAz)}</td>
+                        <td className="font-mono text-muted">
+                          <span className={cx('mr-1', sideOf.get(p) === 'desc' ? 'text-warn' : 'text-violet-300')} title={t(sideOf.get(p) === 'desc' ? 'Descending (north → south)' : 'Ascending (south → north)')}>
+                            {sideOf.get(p) === 'desc' ? '↓' : '↑'}
+                          </span>
+                          {compass(p.aosAz)}→{compass(p.losAz)}
+                        </td>
                         <td className={cx('pr-3 font-mono', p.los.getTime() < now ? 'text-muted' : 'text-cyan-300')}>{live ? t('now') : p.los.getTime() < now ? t('passed') : countdown(p.aos.getTime() - now)}</td>
                       </tr>
                     );
@@ -419,6 +457,19 @@ export default function PassTracker() {
           <Button variant={!showAll ? 'active' : 'ghost'} onClick={() => setShowAll(false)}>{t('Selected only')}</Button>
           {!showAll && picked.size > 0 && <Button onClick={() => setPicked(new Set())}>{t('Clear')} ({picked.size})</Button>}
           {passes && <span className="px-1 font-mono text-[10px] text-muted">{visiblePasses.length} {t('on map')}</span>}
+        </div>
+        <div className="absolute left-3 top-14 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1.5 rounded-md border border-line bg-ink-950/85 p-1.5 backdrop-blur">
+          <span className="label px-1">{t('Sides')}</span>
+          {([['both', 'Both'], ['desc', '↓ Descending'], ['asc', '↑ Ascending']] as const).map(([k, l]) => (
+            <Button key={k} variant={side === k ? 'active' : 'ghost'} onClick={() => setSide(k)}>{t(l)}</Button>
+          ))}
+          <span className="mx-0.5 h-5 w-px bg-line" />
+          <span className="label px-1">{t('Track')}</span>
+          {([['pass', 'Pass only'], ['10', '±10 min'], ['30', '±30 min'], ['orbit', '1 orbit']] as const).map(([k, l]) => (
+            <Button key={k} variant={lead === k ? 'active' : 'ghost'} onClick={() => setLead(k)}>{t(l)}</Button>
+          ))}
+          <span className="mx-0.5 h-5 w-px bg-line" />
+          <Button variant={labels ? 'active' : 'ghost'} onClick={() => setLabels(!labels)}>🏷 {t('Labels')}</Button>
         </div>
         {selPass && (
           <div className="absolute right-3 top-3 z-10 w-[260px] rounded-md border border-line bg-navy-900/95 p-3 text-xs shadow-2xl">
