@@ -3,6 +3,7 @@ import { t } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
 import LocationBook from '../components/LocationBook';
+import CountryHighlight from '../components/CountryHighlight';
 import SatPicker from '../components/SatPicker';
 import PassClassNote from '../components/PassClassNote';
 import { Badge, Button, Field, Input, Notice, Panel, Select, Spinner, cx } from '../components/ui';
@@ -148,6 +149,7 @@ export default function PassTracker() {
   const [lineW, setLineW] = useState(2);
   const [clean, setClean] = useState(false);
   const [isFull, setIsFull] = useState(false);
+  const [countryOpen, setCountryOpen] = useState(false);
   const mapBox = useRef<HTMLDivElement>(null);
   const [mapCfg, setMapCfg] = useState(loadMap);
   const [ctl, setCtl] = useState<LayerController | null>(null);
@@ -249,6 +251,7 @@ export default function PassTracker() {
       flown.current = k; // renaming keeps the camera where it is
       viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(observer.lon, observer.lat, 9e6), duration: 1.2 });
     }
+    viewer.scene.requestRender();
   }, [viewer, observer?.lat, observer?.lon, observer?.name]);
 
   // a window that starts "now" drops passes as they finish; a chosen past/future window shows everything
@@ -310,7 +313,7 @@ export default function PassTracker() {
               positions: seg.map((x) => Cesium.Cartesian3.fromDegrees(x.lon, x.lat)),
               width: isSel ? 2 : 1.5,
               material: new Cesium.PolylineDashMaterialProperty({ color: col.withAlpha(isSel ? 0.8 : 0.5), dashLength: 12 }),
-              arcType: Cesium.ArcType.GEODESIC,
+              arcType: Cesium.ArcType.NONE, // points are 10–30 s apart already; NONE is much cheaper to draw in 2D
             },
           });
         });
@@ -320,7 +323,7 @@ export default function PassTracker() {
           positions: tr.map((x) => Cesium.Cartesian3.fromDegrees(x.lon, x.lat)),
           width: isSel ? lineW + 2 : lineW,
           material: isSel ? col : col.withAlpha(0.75),
-          arcType: Cesium.ArcType.GEODESIC,
+          arcType: Cesium.ArcType.NONE, // points are 10–30 s apart already; NONE is much cheaper to draw in 2D
         },
       });
       // arrow head at the end shows the direction of travel
@@ -350,13 +353,36 @@ export default function PassTracker() {
         },
       });
     });
-    void viewer.dataSources.add(ds);
+    void viewer.dataSources.add(ds).then(() => !viewer.isDestroyed() && viewer.scene.requestRender());
     return () => {
-      if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
+      if (!viewer.isDestroyed()) {
+        viewer.dataSources.remove(ds, true);
+        viewer.scene.requestRender();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewer, visKey, colorKey, lead, labels, sideOf, sel, lineW]);
 
+  // lighter rendering: draw only when something changes (camera, data, or every 0.5 s of clock time)
+  useEffect(() => {
+    if (!viewer) return;
+    viewer.scene.requestRenderMode = true;
+    viewer.scene.maximumRenderTimeChange = 0.5;
+    viewer.scene.globe.tileCacheSize = 400;
+  }, [viewer]);
+  useEffect(() => {
+    if (!viewer) return;
+    const flat = scene !== '3d';
+    // atmosphere/fog do nothing on a flat map but still cost every frame; MSAA off makes panning smoother
+    viewer.scene.fog.enabled = !flat;
+    viewer.scene.globe.showGroundAtmosphere = !flat;
+    if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = !flat;
+    try {
+      (viewer.scene as any).msaaSamples = flat ? 1 : 4;
+    } catch {
+      /* not supported */
+    }
+  }, [viewer, scene]);
   useEffect(() => {
     if (!viewer) return;
     if (scene === '2d') viewer.scene.morphTo2D(1);
@@ -594,9 +620,13 @@ export default function PassTracker() {
               </label>
             )}
           </div>
+          <Button variant={countryOpen ? 'active' : 'ghost'} onClick={() => setCountryOpen(!countryOpen)}>🏳 {t('Countries')}</Button>
           <Button title={t('Save the map as a PNG image')} onClick={savePng}>📷 {t('Save image')}</Button>
           <Button variant={clean ? 'active' : 'ghost'} onClick={() => setClean(!clean)}>{clean ? t('Show controls') : t('Hide controls')}</Button>
           <Button onClick={toggleFull}>{isFull ? `⤡ ${t('Exit full screen')}` : `⤢ ${t('Full screen')}`}</Button>
+        </div>
+        <div className="absolute right-3 top-14 z-20">
+          <CountryHighlight viewer={viewer} open={countryOpen} onClose={() => setCountryOpen(false)} />
         </div>
         {!clean && (<>
         <div className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-1.5 rounded-md border border-line bg-ink-950/85 p-1.5 backdrop-blur">

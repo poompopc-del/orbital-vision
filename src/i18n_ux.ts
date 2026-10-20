@@ -211,4 +211,12 @@ export const TH_UX: Record<string, string> = {
   'Use and save': 'ใช้และติดดาว',
   'Enter latitude −90…90 and longitude −180…180 in decimal degrees': 'ใส่ละติจูด −90…90 และลองจิจูด −180…180 เป็นองศาทศนิยม',
   'Or search / pick on the map': 'หรือค้นหา / เลือกบนแผนที่',
+  'Highlight countries': 'ไฮไลท์ประเทศ',
+  'Loading country outlines…': 'กำลังโหลดขอบเขตประเทศ…',
+  'Search a country (Thai or English)': 'ค้นหาประเทศ (ไทยหรืออังกฤษ)',
+  Fill: 'สีพื้น',
+  Outline: 'เส้นขอบ',
+  Countries: 'ประเทศ',
+  'Borders: Natural Earth 1:50m (public domain), generalised — not for legal boundary use.': 'ขอบเขต: Natural Earth 1:50m (สาธารณสมบัติ) เป็นเส้นแบบย่อ ไม่ใช่เส้นเขตแดนทางกฎหมาย',
+  Thailand: 'ประเทศไทย',
 };
