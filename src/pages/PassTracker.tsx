@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
@@ -21,6 +21,14 @@ const fromInput = (v: string) => new Date(`${v}:00+07:00`);
 const MAX_DAYS = 14;
 const PALETTE = ['#22d3ee', '#f5b84b', '#c58bff', '#4fd18b', '#ff7a59', '#4f8dff', '#f472b6', '#a3e635'];
 const fmtTime = (d: Date) => d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+const COLOR_KEY = 'ov.passColors.v1';
+function loadColors(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(COLOR_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
 const arrowCache = new Map<string, string>();
 function arrowIcon(color: string) {
   if (!arrowCache.has(color)) {
@@ -110,6 +118,30 @@ export default function PassTracker() {
   const [side, setSide] = useState<'both' | 'asc' | 'desc'>('both');
   const [labels, setLabels] = useState(true);
   const [lead, setLead] = useState<'pass' | '10' | '30' | 'orbit'>('pass');
+  const [colors, setColors] = useState<Record<string, string>>(loadColors);
+  const [lineW, setLineW] = useState(2);
+  const [clean, setClean] = useState(false);
+  const [isFull, setIsFull] = useState(false);
+  const mapBox = useRef<HTMLDivElement>(null);
+  const setColor = (id: string, c: string) =>
+    setColors((o) => {
+      const n = { ...o, [id]: c };
+      try {
+        localStorage.setItem(COLOR_KEY, JSON.stringify(n));
+      } catch {
+        /* ignore */
+      }
+      return n;
+    });
+  useEffect(() => {
+    const h = () => setIsFull(document.fullscreenElement === mapBox.current);
+    document.addEventListener('fullscreenchange', h);
+    return () => document.removeEventListener('fullscreenchange', h);
+  }, []);
+  const toggleFull = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void mapBox.current?.requestFullscreen?.();
+  };
   const togglePick = (k: string) =>
     setPicked((s0) => {
       const n = new Set(s0);
@@ -189,15 +221,19 @@ export default function PassTracker() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [shown, showAll, picked, sel],
   );
+  const visKey = visiblePasses.map(keyOf).join('|');
+  const visRef = useRef(visiblePasses);
+  visRef.current = visiblePasses;
   const satColor = useMemo(() => {
     const m = new Map<string, string>();
-    chosen.forEach((c, i) => m.set(c.noradId, PALETTE[i % PALETTE.length]));
+    chosen.forEach((c, i) => m.set(c.noradId, colors[c.noradId] ?? PALETTE[i % PALETTE.length]));
     return m;
-  }, [chosen]);
+  }, [chosen, colors]);
+  const colorKey = [...satColor.entries()].join();
   useEffect(() => {
     if (!viewer) return;
     const ds = new Cesium.CustomDataSource('pass-tracks');
-    visiblePasses.forEach((p) => {
+    visRef.current.forEach((p) => {
       const isSel = keyOf(p) === sel;
       const mins = Math.max(1, (p.los.getTime() - p.aos.getTime()) / 60000);
       const tr = groundTrack(p.sat, p.aos, mins, 10);
@@ -224,7 +260,7 @@ export default function PassTracker() {
       ds.entities.add({
         polyline: {
           positions: tr.map((x) => Cesium.Cartesian3.fromDegrees(x.lon, x.lat)),
-          width: isSel ? 4 : 2,
+          width: isSel ? lineW + 2 : lineW,
           material: isSel ? col : col.withAlpha(0.75),
           arcType: Cesium.ArcType.GEODESIC,
         },
@@ -261,7 +297,7 @@ export default function PassTracker() {
       if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer, visiblePasses, satColor, lead, labels, sideOf]);
+  }, [viewer, visKey, colorKey, lead, labels, sideOf, sel, lineW]);
 
   useEffect(() => {
     if (!viewer) return;
@@ -269,6 +305,45 @@ export default function PassTracker() {
     else if (scene === 'columbus') viewer.scene.morphToColumbusView(1);
     else viewer.scene.morphTo3D(1);
   }, [viewer, scene]);
+
+  const savePng = () => {
+    if (!viewer) return;
+    viewer.render();
+    const src = viewer.scene.canvas;
+    const c = document.createElement('canvas');
+    c.width = src.width;
+    c.height = src.height;
+    const ctx = c.getContext('2d')!;
+    ctx.drawImage(src, 0, 0);
+    // legend + caption so the picture explains itself when sent on
+    const sc = Math.max(1, c.width / 1600);
+    const used = chosen.filter((x) => visiblePasses.some((p) => p.sat.noradId === x.noradId));
+    const lines = [
+      ...used.map((x) => ({ text: x.name, color: satColor.get(x.noradId)! })),
+      { text: `${observer?.name ?? ''} · ${ran ? `${fmtLocal(ran.from)} → ${fmtLocal(ran.to)} (UTC+7)` : ''}`, color: '' },
+      { text: `${visiblePasses.length} passes · min el ${minEl}° · ${side === 'both' ? 'asc+desc' : side === 'asc' ? 'ascending' : 'descending'} · SGP4 / CelesTrak TLE`, color: '' },
+    ];
+    ctx.font = `${13 * sc}px Inter, sans-serif`;
+    const lh = 19 * sc, pad = 10 * sc;
+    const w = Math.max(...lines.map((l) => ctx.measureText(l.text).width)) + pad * 2 + 22 * sc;
+    const h = lines.length * lh + pad * 2;
+    const y0 = c.height - h - 12 * sc;
+    ctx.fillStyle = 'rgba(11,21,36,0.85)';
+    ctx.fillRect(12 * sc, y0, w, h);
+    lines.forEach((l, i) => {
+      const y = y0 + pad + lh * i + lh * 0.7;
+      if (l.color) {
+        ctx.fillStyle = l.color;
+        ctx.fillRect(12 * sc + pad, y - 9 * sc, 14 * sc, 4 * sc);
+      }
+      ctx.fillStyle = l.color ? '#ffffff' : '#9fb0c8';
+      ctx.fillText(l.text, 12 * sc + pad + (l.color ? 22 * sc : 0), y);
+    });
+    const a = document.createElement('a');
+    a.download = `passes_${(observer?.name ?? 'map').replace(/[^\w-]+/g, '_')}_${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.png`;
+    a.href = c.toDataURL('image/png');
+    a.click();
+  };
 
   const run = async () => {
     if (!observer || !chosen.length) return;
@@ -444,8 +519,14 @@ export default function PassTracker() {
         </Notice>
       </aside>
 
-      <div className="relative min-h-[360px] flex-1">
+      <div ref={mapBox} className="relative min-h-[360px] flex-1 bg-ink-950">
         <GlobeHost onReady={setViewer} />
+        <div className="absolute right-3 top-3 z-20 flex gap-1.5">
+          <Button title={t('Save the map as a PNG image')} onClick={savePng}>📷 {t('Save image')}</Button>
+          <Button variant={clean ? 'active' : 'ghost'} onClick={() => setClean(!clean)}>{clean ? t('Show controls') : t('Hide controls')}</Button>
+          <Button onClick={toggleFull}>{isFull ? `⤡ ${t('Exit full screen')}` : `⤢ ${t('Full screen')}`}</Button>
+        </div>
+        {!clean && (<>
         <div className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-1.5 rounded-md border border-line bg-ink-950/85 p-1.5 backdrop-blur">
           {(['3d', '2d', 'columbus'] as const).map((m) => (
             <Button key={m} variant={scene === m ? 'active' : 'ghost'} onClick={() => setScene(m)}>
@@ -470,7 +551,29 @@ export default function PassTracker() {
           ))}
           <span className="mx-0.5 h-5 w-px bg-line" />
           <Button variant={labels ? 'active' : 'ghost'} onClick={() => setLabels(!labels)}>🏷 {t('Labels')}</Button>
+          <span className="mx-0.5 h-5 w-px bg-line" />
+          <span className="label px-1">{t('Line width')}</span>
+          {[1, 2, 3, 5].map((w) => (
+            <Button key={w} variant={lineW === w ? 'active' : 'ghost'} onClick={() => setLineW(w)}>{w}</Button>
+          ))}
         </div>
+        </>)}
+        {chosen.length > 0 && (
+          <div className="absolute bottom-8 left-3 z-10 max-h-[40%] overflow-y-auto scroll-thin rounded-md border border-line bg-ink-950/85 p-2 backdrop-blur">
+            <div className="label mb-1">{t('Line colour')}</div>
+            {chosen.map((x) => (
+              <label key={x.noradId} className="flex cursor-pointer items-center gap-2 py-0.5 text-xs text-white">
+                <input
+                  type="color"
+                  value={satColor.get(x.noradId)}
+                  onChange={(e) => setColor(x.noradId, e.target.value)}
+                  className="h-5 w-7 cursor-pointer rounded border border-line bg-transparent p-0"
+                />
+                {x.name}
+              </label>
+            ))}
+          </div>
+        )}
         {selPass && (
           <div className="absolute right-3 top-3 z-10 w-[260px] rounded-md border border-line bg-navy-900/95 p-3 text-xs shadow-2xl">
             <div className="mb-1 flex items-center justify-between">

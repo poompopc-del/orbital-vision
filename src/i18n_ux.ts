@@ -185,4 +185,12 @@ export const TH_UX: Record<string, string> = {
   '±30 min': '±30 นาที',
   '1 orbit': '1 รอบวงโคจร',
   Labels: 'ป้ายชื่อ',
+  'Save the map as a PNG image': 'บันทึกแผนที่เป็นรูป PNG',
+  'Save image': 'บันทึกรูป',
+  'Show controls': 'แสดงแถบควบคุม',
+  'Hide controls': 'ซ่อนแถบควบคุม',
+  'Exit full screen': 'ออกจากเต็มจอ',
+  'Full screen': 'เต็มจอ',
+  'Line width': 'ความหนาเส้น',
+  'Line colour': 'สีเส้น (คลิกเพื่อเปลี่ยน)',
 };
