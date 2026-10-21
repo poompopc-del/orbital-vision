@@ -6,7 +6,7 @@ import GlobeHost from '../components/GlobeHost';
 import { Button, Notice, Panel, Spinner, cx } from '../components/ui';
 import { Cesium } from '../lib/cesium';
 import {
-  aoiForPlace, extractPlaces, FEEDS, fetchNews, loadPins, placeArticles, placeKey, PRECISION_COLOR, PRECISION_TH, readArticle, savePins,
+  aoiForPlace, extractPlaces, FEEDS, loadGaz, fetchNews, loadPins, placeArticles, placeKey, PRECISION_COLOR, PRECISION_TH, readArticle, savePins,
   type FeedState, type NewsArticle, type NewsPlace, type NewsSnapshot,
 } from '../lib/newsflood';
 import { thProvince } from '../lib/provinces';
@@ -401,6 +401,7 @@ function AddLink() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const add = async () => {
+    await loadGaz().catch(() => null);
     if (!/^https?:\/\//.test(url.trim())) return setMsg(L('ใส่ลิงก์ที่ขึ้นต้นด้วย http(s)://', 'Enter an http(s):// link'));
     setBusy(true);
     setMsg('');

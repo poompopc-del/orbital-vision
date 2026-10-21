@@ -105,11 +105,11 @@ export default async function handler(req, res) {
       const days = Math.min(7, Math.max(1, +req.query.days || 3));
       const q = '(น้ำท่วม OR อุทกภัย OR flood OR flooding) sourcecountry:thailand';
       const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q)}&mode=artlist&format=json&maxrecords=150&sort=datedesc&timespan=${days}d`;
-      let r = await get(url, 25000);
+      let r = await get(url, 15000).catch((e) => ({ ok: false, status: 0, text: String(e) }));
       // GDELT allows one request per 5 s per IP; shared serverless IPs hit that — wait and retry once
       if (r.status === 429) {
-        await new Promise((ok) => setTimeout(ok, 6000));
-        r = await get(url, 20000);
+        await new Promise((ok) => setTimeout(ok, 5500));
+        r = await get(url, 12000).catch((e) => ({ ok: false, status: 0, text: String(e) }));
       }
       if (!r.ok) return res.status(502).json({ error: `upstream HTTP ${r.status}`, source: url, fetchedAt: now, sample: r.text.slice(0, 200) });
       let j;

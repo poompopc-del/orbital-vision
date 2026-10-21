@@ -156,8 +156,20 @@ export function extractPlaces(text: string): PlaceRef[] {
   const provs = [...new Set(ms.filter((m) => m.kind === 'p').map((m) => m.en!))];
   const used = new Set<Mark>();
   const refs: PlaceRef[] = [];
-  const provinceFor = (from: number, within = 90) => {
+  // province for a district: the next one named within ~90 characters, or the story's only one;
+  // with the gazetteer loaded, the province (among those the story names) where that district exists
+  const provinceFor = (from: number, amp?: string, tam?: string, within = 90) => {
     const p = ms.find((m) => m.kind === 'p' && m.at >= from && m.at - from <= within);
+    if (gazNow && (amp || tam)) {
+      const order = [...(p ? [p.en!] : []), ...provs.filter((x) => x !== p?.en)];
+      const ok = order.find((en) => exists(gazNow!, en, amp, tam));
+      if (ok) {
+        const pm = ms.find((m) => m.kind === 'p' && m.en === ok && m.at >= from);
+        if (pm) used.add(pm);
+        return ok;
+      }
+      return null;
+    }
     if (p) {
       used.add(p);
       return p.en!;
@@ -168,13 +180,13 @@ export function extractPlaces(text: string): PlaceRef[] {
     if (used.has(m) || m.kind === 'p') return;
     if (m.kind === 't') {
       const a = ms.slice(i + 1).find((x) => x.kind === 'a' && x.at - m.end <= 40);
-      const p = provinceFor(a ? a.end : m.end);
+      const p = provinceFor(a ? a.end : m.end, a?.name, m.name);
       if (!p) return;
       used.add(m);
       if (a) used.add(a);
       refs.push({ province: p, tambon: m.name, amphoe: a?.name, precision: 'tambon', quote: t.slice(m.at, Math.min(t.length, (a ?? m).end + 40)).trim().slice(0, 120) });
     } else {
-      const p = provinceFor(m.end);
+      const p = provinceFor(m.end, m.name);
       if (!p) return;
       used.add(m);
       refs.push({ province: p, amphoe: m.name, precision: 'amphoe', quote: t.slice(m.at, Math.min(t.length, m.end + 40)).trim().slice(0, 120) });
@@ -242,10 +254,11 @@ interface Gaz {
   a: [string, number, number, number, number, number, number, number][];
 }
 let gazP: Promise<Gaz> | null = null;
-const loadGaz = () =>
-  (gazP ??= fetch('/gazetteer-th.json').then((r) => {
+let gazNow: Gaz | null = null;
+export const loadGaz = () =>
+  (gazP ??= fetch('/gazetteer-th.json').then(async (r) => {
     if (!r.ok) throw new Error(`gazetteer HTTP ${r.status}`);
-    return r.json();
+    return (gazNow = await r.json()) as Gaz;
   }).catch((e) => {
     gazP = null;
     throw e;
@@ -269,6 +282,12 @@ function fromGaz(g: Gaz, ref: PlaceRef): (GeoHit & { level: 'tambon' | 'amphoe' 
   return null;
 }
 
+function exists(g: Gaz, provEn: string, amp?: string, tam?: string) {
+  const ref: PlaceRef = { province: provEn, amphoe: amp, tambon: tam, precision: tam ? 'tambon' : 'amphoe', quote: '' };
+  const h = fromGaz(g, ref);
+  return !!h && (!tam || h.level === 'tambon' || !!amp);
+}
+
 export const GAZ_LABEL = 'ทำเนียบตำบล/อำเภอ (OpenGISData-Thailand)';
 
 /** Locate a place. The result must lie inside the named province; otherwise null. */
@@ -283,6 +302,9 @@ export async function geocode(ref: PlaceRef, provinces: Province[]): Promise<Geo
   const g = await loadGaz().catch(() => null);
   const hit = g ? fromGaz(g, ref) : null;
   if (hit) return { ...hit, via: GAZ_LABEL, level: hit.level };
+  // the gazetteer lists every tambon and amphoe, so a miss means the name/province pair in the
+  // story does not exist — do not guess. Nominatim is used only when the gazetteer is unavailable.
+  if (g) return null;
   if (key in geoCache) return geoCache[key] ? { ...geoCache[key]!, via: 'OpenStreetMap Nominatim' } : null;
   let out: GeoHit = null;
   const isBkk = ref.province === 'Bangkok';
@@ -367,6 +389,7 @@ function focus(text: string, title: string) {
 export async function fetchNews(days: number, onFeed: (s: FeedState) => void, onProgress: (msg: string) => void, readFull = 30): Promise<NewsSnapshot> {
   const states: FeedState[] = [];
   const all: NewsArticle[] = [];
+  await loadGaz().catch(() => null);
   await Promise.all(
     FEEDS.map(async (f) => {
       const st: FeedState = { id: f.id, label: f.labelTh, status: 'loading', count: 0 };
