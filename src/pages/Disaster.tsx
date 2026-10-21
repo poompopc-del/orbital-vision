@@ -217,7 +217,7 @@ export function DisasterMap() {
         {loading && (
           <Panel>
             <div className="space-y-0.5 text-[11px]">
-              {REGISTRY.filter((r) => r.via !== '—').map((r) => {
+              {REGISTRY.filter((r) => r.via !== '—' && r.id !== 'rid').map((r) => {
                 const s = live[r.id];
                 return <div key={r.id} className="flex items-center justify-between"><span className="text-slate-300">{r.name}</span><span className={s?.status === 'ok' ? 'text-ok' : s?.status === 'error' ? 'text-bad' : 'text-muted'}>{s ? (s.status === 'loading' ? '…' : s.status === 'ok' ? `✓ ${s.count}` : '✕') : '…'}</span></div>;
               })}
@@ -310,7 +310,7 @@ function DetailPanel({ e, onClose }: { e: DEvent; onClose: () => void }) {
     try {
       setBusy(L('อ่านสิ่งปกคลุมดิน…', 'Reading land cover…'));
       setLc(await landCoverShares(a.geometry, ac.signal).catch(() => null));
-      const daysSince = Math.max(7, Math.ceil((Date.now() - new Date(e.time).getTime()) / 86400e3) + 1);
+      const daysSince = Math.max(14, Math.ceil((Date.now() - new Date(e.time).getTime()) / 86400e3) + 1);
       const r = await runMonitor(a, Math.min(daysSince, 60), (m) => setBusy(m), ac.signal);
       addRun(r);
       setRun(r);
@@ -407,6 +407,10 @@ export function DisasterSources() {
   const L = useL();
   const { snap, live, loading, load, days } = useDisaster();
   const states = snap ? { ...snap.states, ...live } : live;
+  useEffect(() => {
+    if (!snap && !loading) void load(days);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <div className="h-full overflow-y-auto scroll-thin">
       <div className="mx-auto max-w-6xl space-y-3 p-4">

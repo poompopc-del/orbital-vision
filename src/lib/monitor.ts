@@ -459,6 +459,17 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
         } else tried.push('no radar reference scene');
       } else tried.push('no new radar scene in the period');
     }
+    // radar first (water) found nothing usable → try optical as well when the sensor is automatic
+    if (!A && wantSar && a.sensor === 'auto') {
+      progress('ลองภาพ Sentinel-2 แทน…');
+      const b = await clearestOptical(aoi, w.after[0], w.after[1], null, signal);
+      if (b && b.cloud <= 0.5) {
+        const aa = await clearestOptical(aoi, w.before[0], w.before[1], b.it, signal);
+        if (aa && aa.cloud <= 0.5) {
+          A = aa.it; B = b.it; aCloud = aa.cloud; bCloud = b.cloud; sensor = 'optical';
+        } else tried.push(aa ? `optical reference too cloudy over the AOI (${Math.round(aa.cloud * 100)}%)` : 'no optical reference scene');
+      } else tried.push(b ? `latest optical scene too cloudy over the AOI (${Math.round(b.cloud * 100)}%)` : 'no new optical scene in the period');
+    }
     if (!A || !B) {
       return { ...base, reason: tried.join('; ') || 'no usable imagery' };
     }

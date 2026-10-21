@@ -71,13 +71,21 @@ export default async function handler(req, res) {
       },
       air4thai: () => 'https://air4thai.pcd.go.th/services/getNewAQI_JSON.php',
       tmd: () => 'https://data.tmd.go.th/api/WeatherWarningNews/v2/?uid=api&ukey=api12345&format=json',
-      cems: () => 'https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations/?limit=200',
+      cems: () => 'https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations-info/?limit=200',
     };
     if (!map[src]) return res.status(400).json({ error: 'unknown src', allowed: ['firms', ...Object.keys(map)] });
     const url = map[src]();
-    let r = await get(url, 25000, src === 'gdacs' || src === 'cems' ? { Accept: 'application/json' } : {}).catch((e) => ({ ok: false, status: 0, text: String(e && e.message) }));
+    let r = await get(url, src === 'gdacs' ? 55000 : 25000, src === 'gdacs' || src === 'cems' ? { Accept: 'application/json' } : {}).catch((e) => ({ ok: false, status: 0, text: String(e && e.message) }));
     // Air4Thai sometimes answers only over plain http
     if (!r.ok && src === 'air4thai') r = await get(url.replace('https:', 'http:')).catch((e) => ({ ok: false, status: 0, text: String(e && e.message) }));
+    if (!r.ok && src === 'air4thai') r = await get('http://air4thai.com/forweb/getAQI_JSON.php').catch((e) => ({ ok: false, status: 0, text: String(e && e.message) }));
+    // CEMS: the listing path has moved before — try the known variants
+    if (src === 'cems' && (!r.ok || /mandatory/i.test(r.text))) {
+      for (const alt of ['https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/activations/?limit=200', 'https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations/?limit=200&code=']) {
+        const t = await get(alt, 20000, { Accept: 'application/json' }).catch(() => null);
+        if (t && t.ok && !/mandatory/i.test(t.text)) { r = t; break; }
+      }
+    }
     if (!r.ok) return res.status(502).json({ error: `upstream HTTP ${r.status}`, source: url, fetchedAt: now, sample: r.text.slice(0, 300) });
     let body = r.text;
     if (src === 'gdacs') {
