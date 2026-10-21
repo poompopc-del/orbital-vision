@@ -545,16 +545,24 @@ function buildDisasterReport(snap: Snapshot, o: { title: string; lang: 'th' | 'e
 
   // 2 summary + map
   const bullets: string[] = [];
+  const down = (id: string) => snap.states[id]?.status !== 'ok';
+  const na = (name: string) => L(`${name}: ไม่มีข้อมูล — แหล่งข้อมูลเข้าถึงไม่ได้ในรอบนี้ (ไม่ได้แปลว่าไม่มีเหตุการณ์)`, `${name}: no data — source unavailable this time (does not mean no events)`);
   const fl = by('flood').filter((e) => e.source === 'thaiwater_wl');
-  if (o.hazards.has('flood')) bullets.push(L(`สถานีวัดระดับน้ำ “ล้นตลิ่ง” ${fl.length} สถานี ใน ${new Set(fl.map((e) => e.province)).size} จังหวัด${fl.length ? ` (มากที่สุด: ${top(fl).slice(0, 3).map(([p, n]) => `${prov(p)} ${n}`).join(', ')})` : ''} — ThaiWater`, `${fl.length} water-level stations over their banks in ${new Set(fl.map((e) => e.province)).size} provinces — ThaiWater`));
-  if (o.hazards.has('storm')) bullets.push(L(`ฝนหนักมาก ≥ 90.1 มม./24 ชม. ${by('storm').filter((e) => e.source === 'thaiwater_rain').length} สถานี — ThaiWater`, `${by('storm').filter((e) => e.source === 'thaiwater_rain').length} stations with ≥ 90.1 mm / 24 h — ThaiWater`));
-  if (o.hazards.has('drought')) bullets.push(L(`สถานี “น้ำน้อยวิกฤติ” ${by('drought').length} สถานี — ThaiWater`, `${by('drought').length} stations at critically low water — ThaiWater`));
-  if (o.hazards.has('fire')) bullets.push(L(`จุดความร้อน VIIRS ในไทย ${hotTh.length} จุด (กลุ่ม ≥ 3 จุด: ${by('fire').length} กลุ่ม) — NASA FIRMS · จำนวนจุดไม่ใช่ขนาดพื้นที่เผาไหม้`, `${hotTh.length} VIIRS hotspots in Thailand (${by('fire').length} clusters ≥ 3) — NASA FIRMS · counts are not burned area`));
-  if (o.hazards.has('quake')) {
+  if (o.hazards.has('flood') && down('thaiwater_wl')) bullets.push(na('ThaiWater water level'));
+  else if (o.hazards.has('flood')) bullets.push(L(`สถานีวัดระดับน้ำ “ล้นตลิ่ง” ${fl.length} สถานี ใน ${new Set(fl.map((e) => e.province)).size} จังหวัด${fl.length ? ` (มากที่สุด: ${top(fl).slice(0, 3).map(([p, n]) => `${prov(p)} ${n}`).join(', ')})` : ''} — ThaiWater`, `${fl.length} water-level stations over their banks in ${new Set(fl.map((e) => e.province)).size} provinces — ThaiWater`));
+  if (o.hazards.has('storm') && down('thaiwater_rain')) bullets.push(na('ThaiWater rainfall'));
+  else if (o.hazards.has('storm')) bullets.push(L(`ฝนหนักมาก ≥ 90.1 มม./24 ชม. ${by('storm').filter((e) => e.source === 'thaiwater_rain').length} สถานี — ThaiWater`, `${by('storm').filter((e) => e.source === 'thaiwater_rain').length} stations with ≥ 90.1 mm / 24 h — ThaiWater`));
+  if (o.hazards.has('drought') && down('thaiwater_wl')) bullets.push(na('ThaiWater water level'));
+  else if (o.hazards.has('drought')) bullets.push(L(`สถานี “น้ำน้อยวิกฤติ” ${by('drought').length} สถานี — ThaiWater`, `${by('drought').length} stations at critically low water — ThaiWater`));
+  if (o.hazards.has('fire') && down('firms')) bullets.push(na('NASA FIRMS'));
+  else if (o.hazards.has('fire')) bullets.push(L(`จุดความร้อน VIIRS ในไทย ${hotTh.length} จุด (กลุ่ม ≥ 3 จุด: ${by('fire').length} กลุ่ม) — NASA FIRMS · จำนวนจุดไม่ใช่ขนาดพื้นที่เผาไหม้`, `${hotTh.length} VIIRS hotspots in Thailand (${by('fire').length} clusters ≥ 3) — NASA FIRMS · counts are not burned area`));
+  if (o.hazards.has('quake') && down('usgs')) bullets.push(na('USGS'));
+  else if (o.hazards.has('quake')) {
     const q = by('quake').sort((a, b) => +(b.details.magnitude ?? 0) - +(a.details.magnitude ?? 0));
     bullets.push(L(`แผ่นดินไหวขนาด ≥ 2.5 ในไทย ${q.length} ครั้ง${q[0] ? ` ใหญ่สุด ${q[0].severityText} (${prov(q[0].province)})` : ''} — USGS`, `${q.length} earthquakes ≥ M2.5 in Thailand${q[0] ? `, largest ${q[0].severityText}` : ''} — USGS`));
   }
-  if (o.hazards.has('air')) bullets.push(L(`สถานี PM2.5 เกิน 75 µg/m³ ${by('air').length} สถานี — คพ. (Air4Thai)`, `${by('air').length} PM2.5 stations above 75 µg/m³ — PCD Air4Thai`));
+  if (o.hazards.has('air') && down('air4thai')) bullets.push(na('Air4Thai PM2.5'));
+  else if (o.hazards.has('air')) bullets.push(L(`สถานี PM2.5 เกิน 75 µg/m³ ${by('air').length} สถานี — คพ. (Air4Thai)`, `${by('air').length} PM2.5 stations above 75 µg/m³ — PCD Air4Thai`));
   const tmdB = snap.bulletins.filter((b) => b.source === 'tmd');
   if (tmdB.length) bullets.push(L(`ประกาศกรมอุตุนิยมวิทยาที่มีผล: ${tmdB.map((b) => b.text.split(' — ')[0]).join(' ; ')}`, `TMD warnings in force: ${tmdB.length}`));
   const tb: BBox = { west: 97.3, east: 105.7, south: 5.5, north: 20.6 };
