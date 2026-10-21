@@ -10,8 +10,10 @@ import {
   aoiFromPolygon, aoiInfo, confTh, deleteImages, getImage, isDue, lastRunOf, levelTh, loadAois, loadRuns, methodText, narrative, PURPOSES, rai, REGIONS, runMonitor, saveAois, saveRuns,
   type MonitorAoi, type MonitorRun, type Purpose, type Region, type SensorMode,
 } from '../lib/monitor';
-import { borderLines, lineLength, NEIGHBOURS, tilesAlong, type Neighbour, type Tile } from '../lib/border';
+import { borderLines, boundarySource, lineLength, NEIGHBOURS, tilesAlong, type Neighbour, type Tile } from '../lib/border';
+import { roughCentre } from '../lib/extent';
 import { loadCountries } from '../lib/countries';
+import { onBoundaryChange } from '../lib/boundary';
 import { imageProvider } from '../components/gis/sceneLayer';
 import { buildReportHtml, hotspotsCsv, resultsGeoJson } from '../lib/report';
 import { downloadJson } from '../lib/geo';
@@ -102,7 +104,10 @@ export function MonitorWatch() {
   const [borderNb, setBorderNb] = useState<Neighbour>('KHM');
   const [tileSrc, setTileSrc] = useState<{ lines: [number, number][][]; size: number; nb: Neighbour; geom: GeoJSON.Polygon | GeoJSON.MultiPolygon | null } | null>(null);
   const [tileShift, setTileShift] = useState(0);
-  const tiles: Tile[] = useMemo(() => (tileSrc ? tilesAlong(tileSrc.lines, tileSrc.size, tileSrc.nb, { shift: tileShift, neighbour: tileSrc.geom }) : []), [tileSrc, tileShift]);
+  const tiles: Tile[] = useMemo(
+    () => (tileSrc ? tilesAlong(tileSrc.lines, tileSrc.size, tileSrc.nb, { shift: tileShift, neighbour: tileSrc.geom, neighbourCentre: tileSrc.geom ? roughCentre(tileSrc.geom) : null }) : []),
+    [tileSrc, tileShift],
+  );
   const showBorderTiles = async (nb: Neighbour, size = tileSrc?.size ?? 10) => {
     const lines = await borderLines(nb);
     if (!lines.length) throw new Error('No shared border found in Natural Earth data');
@@ -672,8 +677,23 @@ function BorderPanel({
           {picked.size > 12 && <p className="mt-1 text-[10px] text-warn">{L('ตรวจทีละหลายช่องใช้เวลานาน (ราว 20–60 วินาทีต่อช่อง) แนะนำเริ่มจากจุดที่สนใจก่อน', 'Many tiles take a while (≈20–60 s each); start with the stretches that matter most.')}</p>}
         </>
       )}
-      <p className="mt-2 text-[10px] leading-relaxed text-muted">{L('แนวชายแดนจาก Natural Earth 1:50m เป็นเส้นโดยประมาณ (คลาดได้ระดับร้อยเมตรถึงกิโลเมตร) ไม่ใช่เส้นเขตแดนตามกฎหมายหรือ MOU ใช้เพื่อวางช่องเฝ้าระวังเท่านั้น ช่องครอบคลุมทั้งสองฝั่งแนว', 'Border from Natural Earth 1:50m is approximate (hundreds of metres to km off) — not the legal or MOU boundary. Used only to lay out watch tiles; tiles cover both sides of the line.')}</p>
+      <BoundaryNote />
     </Panel>
+  );
+}
+
+function BoundaryNote() {
+  const L = useL();
+  const [src, setSrc] = useState<{ custom: boolean; name?: string }>({ custom: false });
+  useEffect(() => {
+    const f = () => void boundarySource().then(setSrc);
+    f();
+    return onBoundaryChange(f);
+  }, []);
+  return src.custom ? (
+    <p className="mt-2 text-[10px] leading-relaxed text-ok">{L(`แนวชายแดนจากไฟล์ที่นำเข้า (${src.name}) — ใช้เป็นหลัก · เก็บในเบราว์เซอร์นี้เท่านั้น`, `Border from the imported file (${src.name}) — used as primary · kept in this browser only`)}</p>
+  ) : (
+    <p className="mt-2 text-[10px] leading-relaxed text-muted">{L('แนวชายแดนจาก Natural Earth 1:50m เป็นเส้นโดยประมาณ (คลาดได้ระดับร้อยเมตรถึงกิโลเมตร) ไม่ใช่เส้นเขตแดนตามกฎหมายหรือ MOU · นำเข้าไฟล์เส้นเขตแดนที่ต้องการใช้ได้ที่แผงมุมขวาบนของแผนที่', 'Border from Natural Earth 1:50m is approximate — not the legal or MOU line · import your own boundary file from the map panel (top right)')}</p>
   );
 }
 

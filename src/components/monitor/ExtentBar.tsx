@@ -6,6 +6,7 @@ import { useLang } from '../../i18n';
 import { Cesium } from '../../lib/cesium';
 import { loadCountries } from '../../lib/countries';
 import { borderLines, NEIGHBOURS, type Neighbour } from '../../lib/border';
+import { clearBoundary, getBoundary, importBoundary, onBoundaryChange, type CustomBoundary } from '../../lib/boundary';
 import { bboxOfCoords, bboxOfGeometry, borderFocusRect, outsideShare, overviewRect, roughCentre, THAILAND_BBOX_FALLBACK, type BBox4 } from '../../lib/extent';
 import { cx } from '../ui';
 
@@ -35,6 +36,27 @@ export default function ExtentBar({
   const [thBox, setThBox] = useState<BBox4>(THAILAND_BBOX_FALLBACK);
   const [srcOk, setSrcOk] = useState<boolean | null>(null);
   const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState<CustomBoundary | null>(null);
+  const [impBusy, setImpBusy] = useState(false);
+  const [impErr, setImpErr] = useState('');
+  useEffect(() => {
+    const load = () => void getBoundary().then(setCustom);
+    load();
+    return onBoundaryChange(load);
+  }, []);
+  const doImport = async (f: File) => {
+    setImpBusy(true);
+    setImpErr('');
+    try {
+      await importBoundary(f.name, await f.text());
+      void apply(mode);
+    } catch (e: any) {
+      setImpErr(e?.message ?? String(e));
+    } finally {
+      setImpBusy(false);
+    }
+  };
+  const landLines = (b: CustomBoundary | null) => (b ? ['KHM', 'LAO', 'MMR', 'MYS'].flatMap((k) => b.lines[k] ?? []) : []);
 
   useEffect(() => {
     loadCountries()
@@ -60,7 +82,7 @@ export default function ExtentBar({
 
   const apply = async (m: ExtentMode = mode, instant = false) => {
     if (m === 'overview') {
-      onLines([]);
+      onLines(landLines(await getBoundary()));
       const r = overviewRect(thBox);
       fly(r, instant);
       void measure(r);
@@ -134,10 +156,25 @@ export default function ExtentBar({
               'This is the share of the screen only — not accuracy or area checked · the map is never stretched to reach a share',
             )}
           </p>
-          <p className="text-[10px] leading-relaxed text-muted">
-            {L('เส้นเขตแดน: Natural Earth 1:50m (สาธารณสมบัติ) เป็นเส้นโดยประมาณ ไม่ใช่เส้นตามกฎหมาย/MOU และบางช่วงยังเป็นพื้นที่พิพาท', 'Boundary: Natural Earth 1:50m (public domain), approximate — not the legal/MOU line; some stretches are disputed')}
-            {srcOk === false && <span className="text-warn"> · {L('โหลดเส้นเขตแดนไม่ได้ ใช้กรอบประเทศไทยสำรอง', 'outlines unavailable — fallback extent used')}</span>}
-          </p>
+          <div className="rounded border border-line p-1.5 text-[10px] leading-relaxed">
+            {custom ? (
+              <>
+                <div className="text-ok">✓ {L('ใช้เส้นเขตแดนจากไฟล์ที่นำเข้าเป็นหลัก', 'Using the imported boundary file')}</div>
+                <div className="text-slate-300">{custom.name} · {L('นำเข้า', 'imported')} {custom.importedAt.slice(0, 10)}</div>
+                <div className="text-muted">{NEIGHBOURS.map((n) => `${L(n.th, n.en)} ${Math.round(custom.lengthKm[n.id] ?? 0).toLocaleString()} ${L('กม.', 'km')}`).join(' · ')}</div>
+                <div className="text-muted">{L('เก็บไว้ในเบราว์เซอร์นี้เท่านั้น ไม่ได้อัปโหลดขึ้นเว็บ · ประเทศที่ไม่มีในไฟล์จะใช้ Natural Earth แทน', 'Kept in this browser only, never uploaded · neighbours missing from the file fall back to Natural Earth')}</div>
+                <button className="mt-0.5 text-bad hover:underline" onClick={() => void clearBoundary().then(() => apply(mode))}>{L('เลิกใช้ไฟล์นี้ (กลับไปใช้ Natural Earth)', 'Stop using this file')}</button>
+              </>
+            ) : (
+              <div className="text-muted">{L('เส้นเขตแดน: Natural Earth 1:50m (สาธารณสมบัติ) เป็นเส้นโดยประมาณ ไม่ใช่เส้นตามกฎหมาย/MOU และบางช่วงยังเป็นพื้นที่พิพาท', 'Boundary: Natural Earth 1:50m (public domain), approximate — not the legal/MOU line; some stretches are disputed')}</div>
+            )}
+            {srcOk === false && <div className="text-warn">{L('โหลดเส้นขอบประเทศไม่ได้ ใช้กรอบประเทศไทยสำรอง', 'outlines unavailable — fallback extent used')}</div>}
+            <label className={cx('mt-1 inline-block cursor-pointer rounded border border-line px-2 py-0.5 hover:border-cyan-400/50', impBusy && 'opacity-50')}>
+              {impBusy ? L('กำลังนำเข้า…', 'Importing…') : custom ? L('นำเข้าไฟล์ใหม่แทน', 'Replace file') : L('นำเข้าเส้นเขตแดน (GeoJSON)', 'Import boundary (GeoJSON)')}
+              <input type="file" accept=".geojson,.json,application/geo+json,application/json" className="hidden" disabled={impBusy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void doImport(f); }} />
+            </label>
+            {impErr && <div className="text-bad">{impErr}</div>}
+          </div>
         </div>
       )}
     </div>

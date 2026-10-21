@@ -3,6 +3,7 @@
 // Natural Earth borders are generalised (errors of hundreds of metres to kilometres) and are NOT
 // the legal boundary — the tiles are a convenient way to cover the border zone, nothing more.
 import { loadCountries, type Country } from './countries';
+import { getBoundary } from './boundary';
 
 export type Neighbour = 'KHM' | 'MYS' | 'MMR' | 'LAO';
 export const NEIGHBOURS: { id: Neighbour; region: 'TH-KH' | 'TH-MY' | 'TH-MM' | 'TH-LA'; th: string; en: string }[] = [
@@ -15,8 +16,21 @@ export const NEIGHBOURS: { id: Neighbour; region: 'TH-KH' | 'TH-MY' | 'TH-MM' | 
 const rings = (c: Country): GeoJSON.Position[][] => (c.geometry.type === 'Polygon' ? [c.geometry.coordinates[0]] : c.geometry.coordinates.map((p) => p[0]));
 const key = (p: GeoJSON.Position) => `${p[0].toFixed(4)},${p[1].toFixed(4)}`;
 
-/** Polylines (lon/lat) of the land border shared by Thailand and the neighbour. */
+/** Which boundary is in use: an imported file (preferred) or Natural Earth. */
+export async function boundarySource(): Promise<{ custom: boolean; name?: string; importedAt?: string }> {
+  const b = await getBoundary();
+  return b ? { custom: true, name: b.name, importedAt: b.importedAt } : { custom: false };
+}
+
+/** Polylines (lon/lat) of the land border with the neighbour — from the imported boundary file when
+ *  there is one, otherwise from Natural Earth. */
 export async function borderLines(n: Neighbour): Promise<[number, number][][]> {
+  const b = await getBoundary();
+  if (b?.lines[n]?.length) return b.lines[n];
+  return naturalEarthLines(n);
+}
+
+async function naturalEarthLines(n: Neighbour): Promise<[number, number][][]> {
   const all = await loadCountries();
   const th = all.find((c) => c.id === 'THA');
   const nb = all.find((c) => c.id === n);
@@ -86,6 +100,8 @@ export interface TileOpts {
   shift?: number;
   /** neighbour outline, used to tell which side of the line is the neighbour's */
   neighbour?: GeoJSON.Polygon | GeoJSON.MultiPolygon | null;
+  /** fallback when the outline cannot tell the side */
+  neighbourCentre?: [number, number] | null;
 }
 
 /**
@@ -117,10 +133,16 @@ export function tilesAlong(lines: [number, number][][], sizeKm: number, prefix: 
             const ex = ((b[0] - a[0]) * kx) / d, ey = ((b[1] - a[1]) * KM_LAT) / d;
             let nx = -ey, ny = ex;
             if (opts.neighbour) {
-              const probe = 1.5; // km
-              const pIn = inside(c[0] + (nx * probe) / kx, c[1] + (ny * probe) / KM_LAT, opts.neighbour);
-              const qIn = inside(c[0] - (nx * probe) / kx, c[1] - (ny * probe) / KM_LAT, opts.neighbour);
-              if (!pIn && qIn) { nx = -nx; ny = -ny; }
+              // vote over several probe distances (the boundary file and the outline may differ by
+              // a few km); if still undecided, use the direction of the neighbour's centre
+              let vote = 0;
+              for (const probe of [1.5, 4, 8]) {
+                const pIn = inside(c[0] + (nx * probe) / kx, c[1] + (ny * probe) / KM_LAT, opts.neighbour);
+                const qIn = inside(c[0] - (nx * probe) / kx, c[1] - (ny * probe) / KM_LAT, opts.neighbour);
+                vote += Number(pIn) - Number(qIn);
+              }
+              if (vote === 0 && opts.neighbourCentre) vote = Math.sign((opts.neighbourCentre[0] - c[0]) * kx * nx + (opts.neighbourCentre[1] - c[1]) * KM_LAT * ny);
+              if (vote < 0) { nx = -nx; ny = -ny; }
             }
             const off = (shift * sizeKm) / 2;
             cc = [c[0] + (nx * off) / kx, c[1] + (ny * off) / KM_LAT];
