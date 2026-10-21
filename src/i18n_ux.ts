@@ -219,4 +219,11 @@ export const TH_UX: Record<string, string> = {
   Countries: 'ประเทศ',
   'Borders: Natural Earth 1:50m (public domain), generalised — not for legal boundary use.': 'ขอบเขต: Natural Earth 1:50m (สาธารณสมบัติ) เป็นเส้นแบบย่อ ไม่ใช่เส้นเขตแดนทางกฎหมาย',
   Thailand: 'ประเทศไทย',
+  'Monitor areas': 'เฝ้าระวังพื้นที่',
+  'Area watchlist': 'รายการเฝ้าระวัง',
+  'Monitoring report': 'รายงาน',
+  'Border, forest and disaster areas checked against new imagery': 'พื้นที่ชายแดน ป่า และภัยพิบัติ ตรวจกับภาพใหม่',
+  'OPP-style report from the latest results': 'รายงานแบบ OPP จากผลล่าสุด',
+  'Border & area watch mode': 'โหมดเฝ้าระวังชายแดนและพื้นที่',
+  'Weekly change checks along the Cambodia, Malaysia and Myanmar borders, forests and disaster areas — with an OPP-style report.': 'ตรวจการเปลี่ยนแปลงรายสัปดาห์ตามแนวชายแดนกัมพูชา มาเลเซีย เมียนมา ป่าไม้ และพื้นที่ภัยพิบัติ พร้อมออกรายงานแบบ OPP',
 };

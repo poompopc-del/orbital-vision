@@ -5,6 +5,7 @@ import { areaKm2 } from '../lib/geo';
 import { Badge } from '../components/ui';
 
 const MAIN = [
+  { to: '/monitor?tab=watch', code: 'WATCH', icon: '🛡', title: 'Border & area watch mode', desc: 'Weekly change checks along the Cambodia, Malaysia and Myanmar borders, forests and disaster areas — with an OPP-style report.' },
   { to: '/gis?task=flood', code: 'FLOOD', icon: '🌊', title: 'Flood mode', desc: 'Pick an area and the flood date — radar images before and after are found for you and water is mapped.' },
   { to: '/gis?task=vegetation', code: 'NDVI', icon: '🌾', title: 'Vegetation mode', desc: 'NDVI from the clearest recent Sentinel-2 image of your area, with statistics.' },
   { to: '/gis?task=urban', code: 'NDBI', icon: '🏙', title: 'Urban growth mode', desc: 'Compare built-up areas (NDBI) between two years.' },

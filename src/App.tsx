@@ -15,6 +15,7 @@ import Admin from './pages/Admin';
 import ImagingView from './pages/ImagingView';
 import PassTracker from './pages/PassTracker';
 import GisWorkspace from './pages/GisWorkspace';
+import { MonitorReport, MonitorWatch } from './pages/Monitor';
 import { refreshOrbits } from './lib/orbitLoader';
 import { useLang } from './i18n';
 
@@ -59,6 +60,17 @@ export default function App() {
                 { id: 'map', label: 'Analysis map', hint: 'Tasks, indices, flood, change, terrain and dams on one map', el: <GisWorkspace /> },
                 { id: 'search', label: 'Search images (list)', hint: 'All archive images over the area as a list', el: <ImageryExplorer /> },
                 { id: 'compare', label: 'Compare two images', hint: 'Swipe between two scenes and measure', el: <ImageAnalysis /> },
+              ]}
+            />
+          }
+        />
+        <Route
+          path="monitor"
+          element={
+            <Section
+              tabs={[
+                { id: 'watch', label: 'Area watchlist', hint: 'Border, forest and disaster areas checked against new imagery', el: <MonitorWatch /> },
+                { id: 'report', label: 'Monitoring report', hint: 'OPP-style report from the latest results', el: <MonitorReport /> },
               ]}
             />
           }

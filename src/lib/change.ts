@@ -220,3 +220,10 @@ export function valuesInAoi(aoi: GeoJSON.Polygon, r: Raster): number[] {
     }
   return out;
 }
+
+/** Pixel centre lon/lat and ground area (km²) for a grid cell — used for hotspot extraction. */
+export function cellLonLat(g: Grid, row: number, col: number): [number, number] {
+  const [lon, lat] = pixelLatLon(g, row, col);
+  return [lon, lat];
+}
+export const cellAreaKm2 = (g: Grid, lat: number) => pixelArea(lat, g.z) / 1e6;
