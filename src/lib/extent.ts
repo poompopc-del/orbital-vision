@@ -28,23 +28,21 @@ export function overviewRect(th: BBox4, marginDeg = 1.0): BBox4 {
 }
 
 /**
- * Frame for a border: the border line's extent (padded) moved toward the neighbour.
- * `share` 0.5 centres the border line; higher values put more of the neighbour's side on screen
- * while the line (and the Thai side next to it) stays inside the frame.
+ * Frame for a border. `share` 0.5 centres the border line; sliding toward 0 moves the frame into
+ * Thailand (toward `thai`), toward 1 into the neighbour (toward `neighbour`). The frame keeps its
+ * size, so it reads as a pan; the shift is capped so the border line stays on screen near the edge.
  */
-export function borderFocusRect(line: BBox4, towards: [number, number], share: number, padFrac = 0.25, minSizeDeg = 0.6): BBox4 {
+export function borderFocusRect(line: BBox4, neighbour: [number, number], thai: [number, number], share: number, padFrac = 0.25, minSizeDeg = 0.6): BBox4 {
   const [w, s, e, n] = line;
   const cx = (w + e) / 2, cy = (s + n) / 2;
-  const lw = (e - w) / 2, lh = (n - s) / 2;
-  const f = Math.min(0.95, Math.abs(share - 0.5) * 2); // 0 = centred … 0.95 = strongest emphasis
-  const sign = share >= 0.5 ? 1 : -1; // toward the neighbour, or toward Thailand
-  // the frame grows with the emphasis so the far side gains room; the line always stays inside
-  const grow = 1 + 1.5 * f;
-  const hw = Math.max(lw * (1 + 2 * padFrac), minSizeDeg / 2) * grow;
-  const hh = Math.max(lh * (1 + 2 * padFrac), minSizeDeg / 2) * grow;
-  const dx = towards[0] - cx, dy = towards[1] - cy;
+  const hw = Math.max(((e - w) / 2) * (1 + 2 * padFrac), minSizeDeg / 2);
+  const hh = Math.max(((n - s) / 2) * (1 + 2 * padFrac), minSizeDeg / 2);
+  const f = Math.min(1, Math.abs(share - 0.5) * 2); // 0 = centred … 1 = furthest
+  const target = share >= 0.5 ? neighbour : thai;
+  const dx = target[0] - cx, dy = target[1] - cy;
   const len = Math.hypot(dx, dy) || 1;
-  const ox = sign * (dx / len) * (hw - lw) * f, oy = sign * (dy / len) * (hh - lh) * f;
+  // largest pan that still keeps part of the line inside: 90% of the frame half-size along each axis
+  const ox = (dx / len) * f * hw * 0.9, oy = (dy / len) * f * hh * 0.9;
   return [cx + ox - hw, cy + oy - hh, cx + ox + hw, cy + oy + hh];
 }
 

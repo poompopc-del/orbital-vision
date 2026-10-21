@@ -59,8 +59,9 @@ export default function ExtentBar({ viewer, customRect, onLines }: { viewer: Ces
       onLines(lines);
       const cs = await loadCountries().catch(() => null);
       const n = cs?.find((c) => c.id === nb);
-      if (!lines.length || !n) return;
-      const r = borderFocusRect(bboxOfCoords(lines.flat()), roughCentre(n.geometry), share);
+      const th = cs?.find((c) => c.id === 'THA');
+      if (!lines.length || !n || !th) return;
+      const r = borderFocusRect(bboxOfCoords(lines.flat()), roughCentre(n.geometry), roughCentre(th.geometry), share);
       fly(r);
       void measure(r);
     } else if (customRect) {
@@ -102,8 +103,9 @@ export default function ExtentBar({ viewer, customRect, onLines }: { viewer: Ces
                 </select>
               </div>
               <div>
-                <div className="flex justify-between text-muted"><span>{L('เน้นฝั่งไทย', 'Thai side')}</span><span>{L('เน้นฝั่งประเทศเพื่อนบ้าน', 'Neighbour side')}</span></div>
-                <input type="range" min={0.2} max={0.95} step={0.05} value={share} onChange={(e) => setShare(+e.target.value)} className="w-full" />
+                <div className="flex justify-between text-muted"><span>◀ {L('เข้าไปฝั่งไทย', 'into Thailand')}</span><span>{L(`เข้าไปฝั่ง${NEIGHBOURS.find((x) => x.id === nb)?.th ?? ''}`, `into ${NEIGHBOURS.find((x) => x.id === nb)?.en ?? ''}`)} ▶</span></div>
+                <input type="range" min={0} max={1} step={0.05} value={share} onChange={(e) => setShare(+e.target.value)} className="w-full" />
+                <div className="flex justify-between text-[10px] text-muted"><button className="hover:text-white" onClick={() => setShare(0)}>{L('ฝั่งไทยสุด', 'Thai side')}</button><button className="hover:text-white" onClick={() => setShare(0.5)}>{L('กึ่งกลางแนว', 'centre')}</button><button className="hover:text-white" onClick={() => setShare(1)}>{L('ฝั่งเพื่อนบ้านสุด', 'neighbour side')}</button></div>
               </div>
             </>
           )}
