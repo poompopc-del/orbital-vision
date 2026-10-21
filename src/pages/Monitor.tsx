@@ -393,6 +393,7 @@ export function MonitorWatch() {
           <WatchList
             selId={selId}
             onSelect={(id) => {
+              setEdit(null);
               setSelId(id);
               const a = aois.find((x) => x.id === id);
               if (a && viewer) flyToPolygon(viewer, a.geometry);
