@@ -7,8 +7,5 @@
       "source": "/((?!api/|cesiumStatic/|assets/).*)",
       "destination": "/index.html"
     }
-  ],
-  "regions": [
-    "sin1"
   ]
 }
