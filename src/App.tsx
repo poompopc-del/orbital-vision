@@ -17,6 +17,7 @@ import PassTracker from './pages/PassTracker';
 import GisWorkspace from './pages/GisWorkspace';
 import { MonitorReport, MonitorWatch } from './pages/Monitor';
 import { DisasterMap, DisasterReport, DisasterSources } from './pages/Disaster';
+import { NewsFloodMap, NewsFloodReport } from './pages/NewsFlood';
 import { refreshOrbits } from './lib/orbitLoader';
 import { useLang } from './i18n';
 
@@ -71,6 +72,8 @@ export default function App() {
             <Section
               tabs={[
                 { id: 'map', label: 'Disaster map', hint: 'Floods, fire, earthquakes, storms, drought and PM2.5 from open data', el: <DisasterMap /> },
+                { id: 'news', label: 'Flood news', hint: 'Flood stories located on the map and checked with the latest satellite images', el: <NewsFloodMap /> },
+                { id: 'newsreport', label: 'Flood news report', hint: 'Report: news + latest image + flood analysis per place', el: <NewsFloodReport /> },
                 { id: 'sources', label: 'Data sources', hint: 'Provider registry and connection health', el: <DisasterSources /> },
                 { id: 'report', label: 'Situation report', hint: 'Report from the latest data', el: <DisasterReport /> },
               ]}
