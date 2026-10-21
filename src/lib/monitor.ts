@@ -31,6 +31,8 @@ export interface MonitorAoi {
   createdAt: string;
   notes?: string;
   active: boolean;
+  /** when the box was last moved/resized — results before this used the old box */
+  editedAt?: string;
 }
 
 export interface SceneMeta {

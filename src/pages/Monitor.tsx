@@ -58,6 +58,25 @@ const statusOf = (r?: MonitorRun) => (!r ? 'new' : r.status !== 'ok' ? (r.status
 
 // ---------------------------------------------------------------- page: watchlist
 
+// ---------------------------------------------------------------- box editing (move / resize)
+
+type BB = [number, number, number, number]; // w, s, e, n
+const bboxOf = (g: GeoJSON.Polygon): BB => {
+  const xs = g.coordinates[0].map((c) => c[0]), ys = g.coordinates[0].map((c) => c[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+};
+/** Map a polygon from its own bbox onto a new bbox (move + stretch; keeps the shape of border tiles / drawn areas). */
+const remap = (g: GeoJSON.Polygon, nb: BB): GeoJSON.Polygon => {
+  const [w, s, e, n] = bboxOf(g);
+  const sx = (nb[2] - nb[0]) / Math.max(e - w, 1e-12), sy = (nb[3] - nb[1]) / Math.max(n - s, 1e-12);
+  return { type: 'Polygon', coordinates: g.coordinates.map((r) => r.map(([x, y]) => [+(nb[0] + (x - w) * sx).toFixed(6), +(nb[1] + (y - s) * sy).toFixed(6)])) };
+};
+const bbKm = (b: BB) => {
+  const lat = (b[1] + b[3]) / 2;
+  return { w: (b[2] - b[0]) * 111.32 * Math.cos((lat * Math.PI) / 180), h: (b[3] - b[1]) * 110.574 };
+};
+type Handle = 'c' | 'nw' | 'ne' | 'se' | 'sw' | 'n' | 'e' | 's' | 'w';
+
 export function MonitorWatch() {
   const L = useL();
   const lang = useLang((s) => s.lang);
@@ -76,6 +95,30 @@ export function MonitorWatch() {
   const sel = aois.find((a) => a.id === selId) ?? null;
   const due = aois.filter((a) => isDue(a, runs));
 
+  // box editing: the live box is kept in a ref so dragging does not re-render React
+  const [edit, setEdit] = useState<{ id: string; orig: GeoJSON.Polygon; b: BB } | null>(null);
+  const live = useRef<BB | null>(null);
+  const editRef = useRef(edit);
+  editRef.current = edit;
+  const startEdit = (a: MonitorAoi) => {
+    const b = bboxOf(a.geometry);
+    live.current = b;
+    setEdit({ id: a.id, orig: a.geometry, b });
+    setSelId(a.id);
+    if (viewer) flyToPolygon(viewer, a.geometry);
+  };
+  const saveEdit = () => {
+    if (!edit || !live.current) return;
+    const g = remap(edit.orig, live.current);
+    setAois((l) => l.map((a) => (a.id === edit.id ? { ...a, geometry: g, editedAt: new Date().toISOString() } : a)));
+    setEdit(null);
+  };
+  const nudge = (b: BB) => {
+    live.current = b;
+    setEdit((e) => (e ? { ...e, b } : e));
+    viewer?.scene.requestRender();
+  };
+
   // ---- map: AOIs coloured by last result, border line, candidate tiles
   useEffect(() => {
     if (!viewer) return;
@@ -91,6 +134,7 @@ export function MonitorWatch() {
       });
     });
     aois.forEach((a, i) => {
+      if (a.id === edit?.id) return;
       const st = statusOf(lastRunOf(a.id, runs));
       const col = Cesium.Color.fromCssColorString(LEVEL_COLOR[st]);
       const ring = a.geometry.coordinates[0];
@@ -110,13 +154,109 @@ export function MonitorWatch() {
     return () => {
       if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
     };
-  }, [viewer, aois, runs, selId, tiles, picked, borderLinesState]);
+  }, [viewer, aois, runs, selId, tiles, picked, borderLinesState, edit?.id]);
+
+  // ---- edit box + handles (positions follow the live ref)
+  useEffect(() => {
+    if (!viewer || !edit) return;
+    const ds = new Cesium.CustomDataSource('monitor-edit');
+    const cur = () => live.current ?? edit.b;
+    const ring = () => {
+      const g = remap(edit.orig, cur());
+      return g.coordinates[0].map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y));
+    };
+    ds.entities.add({ id: 'edit:c', polygon: { hierarchy: new Cesium.CallbackProperty(() => new Cesium.PolygonHierarchy(ring()), false) as any, material: Cesium.Color.CYAN.withAlpha(0.18), height: 0 } });
+    ds.entities.add({ polyline: { positions: new Cesium.CallbackProperty(() => {
+      const [w, s0, e, n] = cur();
+      return Cesium.Cartesian3.fromDegreesArray([w, s0, e, s0, e, n, w, n, w, s0]);
+    }, false) as any, width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.CYAN, dashLength: 12 }) } });
+    const at: Record<Exclude<Handle, 'c'>, (b: BB) => [number, number]> = {
+      nw: (b) => [b[0], b[3]], ne: (b) => [b[2], b[3]], se: (b) => [b[2], b[1]], sw: (b) => [b[0], b[1]],
+      n: (b) => [(b[0] + b[2]) / 2, b[3]], s: (b) => [(b[0] + b[2]) / 2, b[1]], e: (b) => [b[2], (b[1] + b[3]) / 2], w: (b) => [b[0], (b[1] + b[3]) / 2],
+    };
+    (Object.keys(at) as (keyof typeof at)[]).forEach((k) =>
+      ds.entities.add({
+        id: `edit:${k}`,
+        position: new Cesium.CallbackProperty(() => Cesium.Cartesian3.fromDegrees(...at[k](cur())), false) as any,
+        point: { pixelSize: k.length === 2 ? 13 : 10, color: Cesium.Color.WHITE, outlineColor: Cesium.Color.CYAN, outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      }),
+    );
+    ds.entities.add({
+      id: 'edit:cc',
+      position: new Cesium.CallbackProperty(() => {
+        const b = cur();
+        return Cesium.Cartesian3.fromDegrees((b[0] + b[2]) / 2, (b[1] + b[3]) / 2);
+      }, false) as any,
+      point: { pixelSize: 16, color: Cesium.Color.CYAN, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: { text: '✥', font: '14px sans-serif', fillColor: Cesium.Color.BLACK, disableDepthTestDistance: Number.POSITIVE_INFINITY, verticalOrigin: Cesium.VerticalOrigin.CENTER },
+    });
+    void viewer.dataSources.add(ds);
+    viewer.scene.requestRender();
+    return () => {
+      if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewer, edit?.id]);
+
+  // ---- dragging
+  useEffect(() => {
+    if (!viewer) return;
+    const h = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    const ll = (pos: Cesium.Cartesian2): [number, number] | null => {
+      const c = viewer.camera.pickEllipsoid(pos, viewer.scene.globe.ellipsoid);
+      if (!c) return null;
+      const g = Cesium.Cartographic.fromCartesian(c);
+      return [Cesium.Math.toDegrees(g.longitude), Cesium.Math.toDegrees(g.latitude)];
+    };
+    let drag: { k: Handle; p0: [number, number]; b0: BB } | null = null;
+    h.setInputAction((e: any) => {
+      if (!editRef.current) return;
+      const picks = viewer.scene.drillPick(e.position, 5);
+      const ids = picks.map((p: any) => p?.id?.id as string | undefined).filter((x): x is string => !!x && x.startsWith('edit:'));
+      // prefer a handle over the box body
+      const id = ids.find((x) => x !== 'edit:c') ?? ids[0];
+      const p0 = ll(e.position);
+      if (!id || !p0) return;
+      const k = id.slice(5);
+      drag = { k: (k === 'cc' ? 'c' : k) as Handle, p0, b0: live.current ?? editRef.current.b };
+      viewer.scene.screenSpaceCameraController.enableInputs = false;
+    }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+    h.setInputAction((e: any) => {
+      if (!drag) return;
+      const p = ll(e.endPosition);
+      if (!p) return;
+      const [dx, dy] = [p[0] - drag.p0[0], p[1] - drag.p0[1]];
+      let [w, s0, ee, n] = drag.b0;
+      const MIN = 0.003; // ~300 m
+      if (drag.k === 'c') [w, s0, ee, n] = [w + dx, s0 + dy, ee + dx, n + dy];
+      else {
+        if (drag.k.includes('w')) w = Math.min(w + dx, ee - MIN);
+        if (drag.k.includes('e')) ee = Math.max(ee + dx, w + MIN);
+        if (drag.k.includes('s')) s0 = Math.min(s0 + dy, n - MIN);
+        if (drag.k.includes('n')) n = Math.max(n + dy, s0 + MIN);
+      }
+      live.current = [w, s0, ee, n];
+      viewer.scene.requestRender();
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+    h.setInputAction(() => {
+      if (!drag) return;
+      drag = null;
+      viewer.scene.screenSpaceCameraController.enableInputs = true;
+      const b = live.current;
+      if (b) setEdit((x) => (x ? { ...x, b } : x));
+    }, Cesium.ScreenSpaceEventType.LEFT_UP);
+    return () => {
+      if (!viewer.isDestroyed()) viewer.scene.screenSpaceCameraController.enableInputs = true;
+      h.destroy();
+    };
+  }, [viewer]);
 
   // click: toggle a candidate tile or select an AOI
   useEffect(() => {
     if (!viewer) return;
     const h = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     h.setInputAction((e: any) => {
+      if (editRef.current) return;
       const p = viewer.scene.pick(e.position);
       const id: string | undefined = p?.id?.id;
       if (!id) return;
@@ -262,10 +402,26 @@ export function MonitorWatch() {
           />
         )}
 
-        {sel && panel === 'list' && <AoiDetail aoi={sel} onRun={() => runList([sel])} busy={!!busy} lang={lang} />}
+        {edit && sel && sel.id === edit.id && (
+          <EditPanel
+            b={edit.b}
+            orig={bboxOf(edit.orig)}
+            onSave={saveEdit}
+            onCancel={() => setEdit(null)}
+            onSet={nudge}
+          />
+        )}
+        {sel && panel === 'list' && !edit && <AoiDetail aoi={sel} onRun={() => runList([sel])} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} />}
       </aside>
       <div className="relative min-h-[360px] flex-1">
         <GlobeHost onReady={setViewer} />
+        {edit && (
+          <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 rounded-md border border-cyan-400 bg-ink-950/90 px-3 py-1.5 text-xs text-cyan-100">
+            {L('ลากจุดกลาง ✥ เพื่อย้าย · ลากจุดมุม/ขอบเพื่อย่อขยาย', 'Drag ✥ to move · drag corners/edges to resize')}
+            <Button variant="primary" onClick={saveEdit}>{L('บันทึก', 'Save')}</Button>
+            <Button onClick={() => setEdit(null)}>{L('ยกเลิก', 'Cancel')}</Button>
+          </div>
+        )}
         <div className="absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 p-2 text-[11px] text-slate-200 backdrop-blur">
           {[['significant', L('เปลี่ยนแปลงมีนัยสำคัญ', 'Significant change')], ['minor', L('เล็กน้อย', 'Minor')], ['none', L('ไม่พบ', 'None')], ['insufficient', L('ข้อมูลไม่พอ', 'Insufficient data')], ['new', L('ยังไม่ตรวจ', 'Not checked')]].map(([k, l]) => (
             <div key={k} className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: LEVEL_COLOR[k] }} />{l}</div>
@@ -474,6 +630,7 @@ function AoiDetail({ aoi, onRun, busy, lang }: { aoi: MonitorAoi; onRun: () => v
         </div>
         <div className="flex flex-wrap gap-1">
           <Button variant="primary" disabled={busy} onClick={onRun}>{L('ตรวจตอนนี้', 'Check now')}</Button>
+          <Button disabled={busy} onClick={onEdit}>{L('✥ ย้าย / ปรับขนาดกรอบ', '✥ Move / resize box')}</Button>
           <Button onClick={() => upd({ active: !aoi.active })}>{aoi.active ? L('พักการตรวจ', 'Pause') : L('เปิดการตรวจ', 'Resume')}</Button>
           <Button variant="danger" onClick={() => setAois((l) => l.filter((a) => a.id !== aoi.id))}>{L('ลบพื้นที่', 'Remove')}</Button>
         </div>
@@ -492,6 +649,7 @@ function AoiDetail({ aoi, onRun, busy, lang }: { aoi: MonitorAoi; onRun: () => v
             <div className="mt-1 text-[10px]">{L('ลองเพิ่มช่วงเวลาที่ตรวจเป็น 30–60 วัน หรือเปลี่ยนเป็นเรดาร์', 'Try a 30–60 day window or switch to radar.')}</div>
           </Notice>
         )}
+        {run && aoi.editedAt && run.at < aoi.editedAt && <Notice tone="warn">{L('ผลนี้ตรวจด้วยกรอบก่อนแก้ไข กด “ตรวจตอนนี้” เพื่อตรวจกรอบใหม่', 'This result used the box before it was edited — run a new check')}</Notice>}
         {run && run.status === 'ok' && run.stats && (
           <div className="space-y-1.5">
             <div className="flex flex-wrap gap-1">
