@@ -157,6 +157,8 @@ export function DisasterMap() {
   };
 
   const states = snap ? { ...snap.states, ...live } : live;
+  const MAIN_SRC: Partial<Record<Hazard, string>> = { flood: 'thaiwater_wl', drought: 'thaiwater_wl', fire: 'firms', quake: 'usgs', storm: 'thaiwater_rain', air: 'air4thai' };
+  const srcDown = (h: Hazard) => !!snap && !!MAIN_SRC[h] && states[MAIN_SRC[h]!]?.status === 'error';
   const okN = Object.values(states).filter((s) => s.status === 'ok').length;
   const badN = Object.values(states).filter((s) => s.status === 'error').length;
 
@@ -191,7 +193,7 @@ export function DisasterMap() {
                 >
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: h.color }} />
                   <span className="flex-1">{h.icon} {L(h.th, h.en)}</span>
-                  <span className="font-mono">{counts[h.id] ?? 0}</span>
+                  <span className="font-mono" title={srcDown(h.id) ? L('แหล่งข้อมูลหลักเข้าถึงไม่ได้', 'Main source unavailable') : undefined}>{srcDown(h.id) ? '—' : counts[h.id] ?? 0}</span>
                 </button>
               );
             })}
