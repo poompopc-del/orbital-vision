@@ -4,7 +4,7 @@
 //   ?src=gdacs                    GDACS event list (last 60 days) around Thailand
 //   ?src=air4thai                 Pollution Control Department station AQI / PM2.5
 //   ?src=tmd                      Thai Meteorological Department weather warnings (public demo key)
-//   ?src=cems                     Copernicus EMS rapid-mapping activations feed (RSS)
+//   ?src=cems                     Copernicus EMS rapid-mapping public activations (JSON)
 // Responses carry the upstream URL and fetch time; upstream data is passed through unaltered
 // except for the FIRMS geographic trim.
 const BBOX = { w: 96.5, s: 4.5, e: 106.5, n: 21.5 };
@@ -69,13 +69,15 @@ export default async function handler(req, res) {
         const d = (x) => x.toISOString().slice(0, 10);
         return `https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=EQ;TC;FL;DR;WF;VO&fromDate=${d(from)}&toDate=${d(to)}&alertlevel=Green;Orange;Red`;
       },
-      air4thai: () => 'http://air4thai.pcd.go.th/services/getNewAQI_JSON.php',
+      air4thai: () => 'https://air4thai.pcd.go.th/services/getNewAQI_JSON.php',
       tmd: () => 'https://data.tmd.go.th/api/WeatherWarningNews/v2/?uid=api&ukey=api12345&format=json',
-      cems: () => 'https://emergency.copernicus.eu/mapping/activations-rapid/feed',
+      cems: () => 'https://rapidmapping.emergency.copernicus.eu/backend/dashboard-api/public-activations/?limit=200',
     };
     if (!map[src]) return res.status(400).json({ error: 'unknown src', allowed: ['firms', ...Object.keys(map)] });
     const url = map[src]();
-    const r = await get(url, 25000, src === 'gdacs' ? { Accept: 'application/json' } : {});
+    let r = await get(url, 25000, src === 'gdacs' || src === 'cems' ? { Accept: 'application/json' } : {}).catch((e) => ({ ok: false, status: 0, text: String(e && e.message) }));
+    // Air4Thai sometimes answers only over plain http
+    if (!r.ok && src === 'air4thai') r = await get(url.replace('https:', 'http:')).catch((e) => ({ ok: false, status: 0, text: String(e && e.message) }));
     if (!r.ok) return res.status(502).json({ error: `upstream HTTP ${r.status}`, source: url, fetchedAt: now, sample: r.text.slice(0, 300) });
     let body = r.text;
     if (src === 'gdacs') {
