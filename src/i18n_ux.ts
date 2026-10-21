@@ -226,4 +226,13 @@ export const TH_UX: Record<string, string> = {
   'OPP-style report from the latest results': 'รายงานแบบ OPP จากผลล่าสุด',
   'Border & area watch mode': 'โหมดเฝ้าระวังชายแดนและพื้นที่',
   'Weekly change checks along the Cambodia, Malaysia and Myanmar borders, forests and disaster areas — with an OPP-style report.': 'ตรวจการเปลี่ยนแปลงรายสัปดาห์ตามแนวชายแดนกัมพูชา มาเลเซีย เมียนมา ป่าไม้ และพื้นที่ภัยพิบัติ พร้อมออกรายงานแบบ OPP',
+  Disasters: 'ภัยพิบัติ',
+  'Disaster map': 'แผนที่ภัยพิบัติ',
+  'Data sources': 'แหล่งข้อมูล',
+  'Situation report': 'รายงานสถานการณ์',
+  'Floods, fire, earthquakes, storms, drought and PM2.5 from open data': 'น้ำท่วม ไฟป่า แผ่นดินไหว พายุ ภัยแล้ง และ PM2.5 จากข้อมูลเปิด',
+  'Provider registry and connection health': 'ทะเบียนแหล่งข้อมูลและสถานะการเชื่อมต่อ',
+  'Report from the latest data': 'รายงานจากข้อมูลล่าสุด',
+  'Disaster situation mode': 'โหมดสถานการณ์ภัยพิบัติ',
+  'Floods, hotspots, earthquakes, heavy rain, drought and PM2.5 across Thailand from open agency data — with a situation report.': 'น้ำล้นตลิ่ง จุดความร้อน แผ่นดินไหว ฝนหนัก น้ำน้อยวิกฤติ และ PM2.5 ทั่วประเทศจากข้อมูลเปิดของหน่วยงาน พร้อมรายงานสถานการณ์',
 };

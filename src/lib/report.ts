@@ -4,17 +4,17 @@
 import { getImage, narrative, rai, confTh, levelTh, PURPOSES, REGIONS, type MonitorAoi, type MonitorRun } from './monitor';
 import { areaKm2, centroid } from './geo';
 
-type Lang = 'th' | 'en';
-type BBox = { west: number; south: number; east: number; north: number };
+export type Lang = 'th' | 'en';
+export type BBox = { west: number; south: number; east: number; north: number };
 
 const ESRI = 'https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export';
-const esri = (b: BBox, w: number, h: number) => `${ESRI}?bbox=${b.west},${b.south},${b.east},${b.north}&bboxSR=4326&imageSR=4326&size=${w},${h}&format=jpg&f=image`;
+export const esri = (b: BBox, w: number, h: number) => `${ESRI}?bbox=${b.west},${b.south},${b.east},${b.north}&bboxSR=4326&imageSR=4326&size=${w},${h}&format=jpg&f=image`;
 
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
-const f1 = (v: number, d = 1) => v.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+export const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+export const f1 = (v: number, d = 1) => v.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
 
 /** Expand a bbox to the given width/height ratio (degrees, plate carrée) with padding. */
-function fit(b: BBox, ratio: number, pad = 0.15): BBox {
+export function fit(b: BBox, ratio: number, pad = 0.15): BBox {
   let w = (b.east - b.west) * (1 + pad * 2), h = (b.north - b.south) * (1 + pad * 2);
   w = Math.max(w, 0.02); h = Math.max(h, 0.02);
   if (w / h > ratio) h = w / ratio;
@@ -29,15 +29,15 @@ const bboxOfPoly = (g: GeoJSON.Polygon): BBox => {
 const union = (bs: BBox[]): BBox => ({ west: Math.min(...bs.map((b) => b.west)), east: Math.max(...bs.map((b) => b.east)), south: Math.min(...bs.map((b) => b.south)), north: Math.max(...bs.map((b) => b.north)) });
 
 /** % position of lon/lat inside a frame bbox. */
-const px = (f: BBox, lon: number, lat: number) => [((lon - f.west) / (f.east - f.west)) * 100, ((f.north - lat) / (f.north - f.south)) * 100];
-const placed = (f: BBox, b: BBox) => {
+export const px = (f: BBox, lon: number, lat: number) => [((lon - f.west) / (f.east - f.west)) * 100, ((f.north - lat) / (f.north - f.south)) * 100];
+export const placed = (f: BBox, b: BBox) => {
   const [l, t] = px(f, b.west, b.north);
   const [r, bt] = px(f, b.east, b.south);
   return `left:${l}%;top:${t}%;width:${r - l}%;height:${bt - t}%`;
 };
 const polyPath = (f: BBox, g: GeoJSON.Polygon) => g.coordinates[0].map(([x, y], i) => `${i ? 'L' : 'M'}${px(f, x, y)[0].toFixed(3)},${px(f, x, y)[1].toFixed(3)}`).join(' ') + 'Z';
 
-function scaleBar(f: BBox, frameWidthMm: number) {
+export function scaleBar(f: BBox, frameWidthMm: number) {
   const lat = (f.north + f.south) / 2;
   const km = (f.east - f.west) * 111.32 * Math.cos((lat * Math.PI) / 180);
   const target = km / 5;
@@ -45,11 +45,11 @@ function scaleBar(f: BBox, frameWidthMm: number) {
   const pct = (nice / km) * 100;
   return `<div class="scale"><div class="bar" style="width:${(pct * frameWidthMm) / 100}mm"></div><span>${nice} km</span></div>`;
 }
-const NORTH = `<svg class="north" viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#0b1524" stroke="#fff" stroke-width="1.5"/><path d="M20 6 L27 28 L20 23 L13 28 Z" fill="#fff"/><text x="20" y="38" text-anchor="middle" font-size="8" fill="#fff" font-weight="700">N</text></svg>`;
+export const NORTH = `<svg class="north" viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#0b1524" stroke="#fff" stroke-width="1.5"/><path d="M20 6 L27 28 L20 23 L13 28 Z" fill="#fff"/><text x="20" y="38" text-anchor="middle" font-size="8" fill="#fff" font-weight="700">N</text></svg>`;
 
-const zulu = (d: Date) => `${String(d.getUTCDate()).padStart(2, '0')} ${['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][d.getUTCMonth()]} ${d.getUTCFullYear()} / ${String(d.getUTCHours()).padStart(2, '0')}${String(d.getUTCMinutes()).padStart(2, '0')}Z`;
-const MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-const dmy = (s?: string) => {
+export const zulu = (d: Date) => `${String(d.getUTCDate()).padStart(2, '0')} ${['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][d.getUTCMonth()]} ${d.getUTCFullYear()} / ${String(d.getUTCHours()).padStart(2, '0')}${String(d.getUTCMinutes()).padStart(2, '0')}Z`;
+export const MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+export const dmy = (s?: string) => {
   if (!s) return '—';
   const d = new Date(s);
   return `${String(d.getUTCDate()).padStart(2, '0')} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
@@ -185,8 +185,15 @@ export async function buildReportHtml(inp: ReportInput): Promise<string> {
   <li>Esri World Imagery (basemap) · Natural Earth (country outlines)</li></ul>
   ${footer(pg)}</section>`);
 
+  return reportShell(inp.title, inp.lang, pages);
+}
+
+/** Printable 16:9 report document (shared by the monitoring and disaster reports). */
+export function reportShell(title: string, lang: Lang, pages: string[]): string {
+  const th = lang === 'th';
+  const L = (a: string, b: string) => (th ? a : b);
   const font = th ? "'Sarabun'" : "'Inter'";
-  return `<!doctype html><html lang="${inp.lang}"><head><meta charset="utf-8"><title>${esc(inp.title)}</title>
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${esc(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
 @page{size:297mm 167mm;margin:0}

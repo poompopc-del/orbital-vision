@@ -9,7 +9,7 @@
 //  • confidence is derived from cloud-free coverage, scene geometry and time gap, and is shown
 import { classify, cellAreaKm2, cellLonLat, fetchRaster, gridFor, type ClassDef, type Classified, type Raster } from './change';
 import { pickBestScene } from './autoscene';
-import { indexExpression, indexSummary, INDICES, PC_DATA, S2_CLEAR_EXPR, sarDbExpression, sensorOf } from './spectral';
+import { aoiStatistics, indexExpression, indexSummary, INDICES, S2_CLEAR_EXPR, sarDbExpression, sensorOf } from './spectral';
 import { renderScene } from './export';
 import { areaKm2, centroid } from './geo';
 import type { ImageryItem, StacCollectionId } from './stac';
@@ -334,6 +334,39 @@ async function clearestOptical(aoi: GeoJSON.Polygon, from: string, to: string, m
 // ---- ESA WorldCover 2021 (10 m) land-cover mask, read through the Planetary Computer data API
 const WC_ALLOW: Partial<Record<Purpose, number[]>> = { clearing: [10, 20] }; // tree cover, shrubland
 const WC_DENY: Partial<Record<Purpose, number[]>> = { construction: [40, 50] }; // cropland, built-up
+
+async function worldCoverItem(aoi: GeoJSON.Polygon, signal?: AbortSignal): Promise<ImageryItem | null> {
+  const r = await fetch('https://planetarycomputer.microsoft.com/api/stac/v1/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ collections: ['esa-worldcover'], intersects: aoi, limit: 4, sortby: [{ field: 'properties.datetime', direction: 'desc' }] }),
+    signal,
+  });
+  if (!r.ok) return null;
+  const feats: any[] = (await r.json()).features ?? [];
+  const f = feats.find((x) => String(x.properties?.datetime ?? x.properties?.start_datetime ?? '').startsWith('2021')) ?? feats[0];
+  return f ? ({ id: f.id, collection: 'esa-worldcover' } as unknown as ImageryItem) : null;
+}
+
+/** Share of the AOI in key ESA WorldCover 2021 classes (km²) — context for impact assessment. */
+export async function landCoverShares(aoi: GeoJSON.Polygon, signal?: AbortSignal): Promise<{ label: string; labelTh: string; km2: number }[] | null> {
+  const it = await worldCoverItem(aoi, signal).catch(() => null);
+  if (!it) return null;
+  const total = areaKm2(aoi);
+  const classes = [
+    { c: 40, label: 'Cropland', labelTh: 'พื้นที่เกษตร' },
+    { c: 50, label: 'Built-up', labelTh: 'สิ่งปลูกสร้าง / ชุมชน' },
+    { c: 10, label: 'Tree cover', labelTh: 'ป่าไม้' },
+    { c: 80, label: 'Permanent water', labelTh: 'แหล่งน้ำถาวร' },
+  ];
+  const out = [];
+  for (const k of classes) {
+    // values 2 (class) / 1 (other) avoid the nodata=0 convention; mean − 1 = fraction
+    const st = await aoiStatistics(it, `where(map==${k.c},2,1)`, aoi, { signal }).catch(() => null);
+    if (st) out.push({ label: k.label, labelTh: k.labelTh, km2: Math.max(0, st.mean - 1) * total });
+  }
+  return out.length ? out : null;
+}
 
 async function landCoverMask(aoi: GeoJSON.Polygon, purpose: Purpose, grid: ReturnType<typeof gridFor>, signal?: AbortSignal): Promise<Float32Array | null> {
   const allow = WC_ALLOW[purpose], deny = WC_DENY[purpose];

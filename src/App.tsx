@@ -16,6 +16,7 @@ import ImagingView from './pages/ImagingView';
 import PassTracker from './pages/PassTracker';
 import GisWorkspace from './pages/GisWorkspace';
 import { MonitorReport, MonitorWatch } from './pages/Monitor';
+import { DisasterMap, DisasterReport, DisasterSources } from './pages/Disaster';
 import { refreshOrbits } from './lib/orbitLoader';
 import { useLang } from './i18n';
 
@@ -60,6 +61,18 @@ export default function App() {
                 { id: 'map', label: 'Analysis map', hint: 'Tasks, indices, flood, change, terrain and dams on one map', el: <GisWorkspace /> },
                 { id: 'search', label: 'Search images (list)', hint: 'All archive images over the area as a list', el: <ImageryExplorer /> },
                 { id: 'compare', label: 'Compare two images', hint: 'Swipe between two scenes and measure', el: <ImageAnalysis /> },
+              ]}
+            />
+          }
+        />
+        <Route
+          path="disaster"
+          element={
+            <Section
+              tabs={[
+                { id: 'map', label: 'Disaster map', hint: 'Floods, fire, earthquakes, storms, drought and PM2.5 from open data', el: <DisasterMap /> },
+                { id: 'sources', label: 'Data sources', hint: 'Provider registry and connection health', el: <DisasterSources /> },
+                { id: 'report', label: 'Situation report', hint: 'Report from the latest data', el: <DisasterReport /> },
               ]}
             />
           }
