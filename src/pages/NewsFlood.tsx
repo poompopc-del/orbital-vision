@@ -133,6 +133,24 @@ const FEED_TH: Record<string, string> = { gnews: 'สำนักข่าว', 
 const levelColor = (r?: MonitorRun) => (!r ? '#64748b' : r.status !== 'ok' ? '#94a3b8' : r.level === 'significant' ? '#ef4444' : r.level === 'minor' ? '#f5b84b' : '#4fd18b');
 const levelText = (r?: MonitorRun) => (!r ? 'ยังไม่วิเคราะห์' : r.status !== 'ok' ? 'ภาพไม่พอ' : r.level === 'significant' ? 'พบน้ำใหม่ชัดเจน' : r.level === 'minor' ? 'พบน้ำใหม่เล็กน้อย' : 'ไม่พบน้ำใหม่');
 
+/** Was the image taken before the stories? Then "no new water" cannot contradict the news. */
+function timing(run: MonitorRun | undefined, arts: (NewsArticle | undefined)[]) {
+  const img = run?.status === 'ok' ? run.B?.datetime : undefined;
+  const first = arts.map((a) => a?.published).filter(Boolean).sort()[0];
+  if (!img || !first) return null;
+  const days = Math.round((new Date(first).getTime() - new Date(img).getTime()) / 86400e3);
+  return { img: img.slice(0, 10), news: first.slice(0, 10), days, before: days >= 1 };
+}
+function timingText(t: NonNullable<ReturnType<typeof timing>>, th: boolean) {
+  return t.before
+    ? th
+      ? `ภาพล่าสุดถ่ายวันที่ ${t.img} ก่อนข่าวแรก (${t.news}) ${t.days} วัน — ภาพนี้อาจยังไม่เห็นน้ำท่วมตามข่าว ผล “ไม่พบ” จึงไม่ได้หักล้างข่าว รอภาพรอบถัดไป`
+      : `Latest image ${t.img} is ${t.days} day(s) before the first story (${t.news}); it may not show the reported flood — "none" does not contradict the news.`
+    : th
+      ? `ภาพถ่ายวันที่ ${t.img} หลังหรือใกล้วันที่ข่าวแรก (${t.news})`
+      : `Image ${t.img} is on/after the first story (${t.news}).`;
+}
+
 // ---------------------------------------------------------------- analysis
 
 async function analysePlace(p: NewsPlace, progress: (m: string) => void, signal?: AbortSignal) {
@@ -342,7 +360,7 @@ export function NewsFloodMap() {
                     <span className="block truncate text-[12px] text-white">{p.labelTh}</span>
                     <span className="block text-[10px] text-muted">{PRECISION_TH[p.precision]} · {p.articleIds.length} {L('ข่าว', 'stories')} · {ago(latest)}</span>
                   </span>
-                  <span className="shrink-0 rounded px-1 text-[10px]" style={{ color: levelColor(r) }}>{levelText(r)}</span>
+                  <span className="shrink-0 rounded px-1 text-right text-[10px]" style={{ color: levelColor(r) }}>{levelText(r)}{timing(r, p.articleIds.map((id) => artById.get(id)))?.before && <span className="block text-warn">{L('ภาพเก่ากว่าข่าว', 'image predates news')}</span>}</span>
                 </button>
               );
             })}
@@ -520,6 +538,10 @@ function PlacePanel({ p, articles, onClose, onPin, pinning }: { p: NewsPlace; ar
           </Sec>
           <Sec n="2" t={L('ผลวิเคราะห์น้ำท่วม', 'Flood analysis')}>
             <ul className="list-disc pl-4">{narrative(run, 'th').map((x) => <li key={x}>{x}</li>)}</ul>
+            {(() => {
+              const t = timing(run, articles);
+              return t ? <p className={cx('text-[10px]', t.before ? 'text-warn' : 'text-ok')}>{timingText(t, true)}</p> : null;
+            })()}
             {run.note && <p className="text-[10px] text-warn">{run.note}</p>}
             <p className="text-[10px] text-muted">{L('วิเคราะห์เมื่อ', 'Analysed')} {tTime(run.at)} · {run.method}</p>
           </Sec>
@@ -658,6 +680,7 @@ async function buildNewsReport(inp: { title: string; lang: 'th' | 'en'; snap: Ne
   const none = items.filter((x) => x.run?.status === 'ok' && x.run.level === 'none').length;
   const insuff = items.filter((x) => x.run && x.run.status !== 'ok').length;
   const notRun = items.filter((x) => !x.run).length;
+  const older = items.filter((x) => timing(x.run, x.p.articleIds.map((id) => arts.get(id)))?.before).length;
   const footer = (pg: number) => `<div class="foot"><span>${esc(inp.title)}</span><span class="warn">${L('ตำแหน่งได้จากชื่อสถานที่ในข่าว · ผลจากภาพดาวเทียมแบบเปิด ยังไม่ผ่านการตรวจสอบภาคพื้นดิน', 'Places from place names in news · results from open imagery, not ground-verified')}</span><span>${pg}</span></div>`;
   const pages: string[] = [];
   const precTh = (k: string) => (th ? PRECISION_TH[k as keyof typeof PRECISION_TH] : k);
@@ -670,6 +693,7 @@ async function buildNewsReport(inp: { title: string; lang: 'th' | 'en'; snap: Ne
   <h2>${L('ภาพรวมรายงาน', 'Product Overview')}</h2>
   <p>– ${L(`ข่าวน้ำท่วม ${inp.snap.articles.length} ชิ้นจาก ${outlets.size} แหล่ง ระบุตำแหน่งได้ ${inp.snap.places.length} แห่ง (ในรายงาน ${items.length} แห่ง)`, `${inp.snap.articles.length} flood stories from ${outlets.size} sources located to ${inp.snap.places.length} places (${items.length} in this report)`)}</p>
   <p>– ${L(`ภาพดาวเทียม: พบน้ำใหม่ ${found} แห่ง · ไม่พบ ${none} แห่ง · ภาพไม่พอ ${insuff} แห่ง · ยังไม่วิเคราะห์ ${notRun} แห่ง`, `Imagery: new water at ${found} · none at ${none} · insufficient imagery ${insuff} · not analysed ${notRun}`)}</p>
+  ${older ? `<p>– ${L(`${older} แห่งมีภาพดาวเทียมล่าสุดถ่ายก่อนวันที่ข่าว ผลของพื้นที่เหล่านี้ยังยืนยันหรือหักล้างข่าวไม่ได้ ต้องรอภาพรอบถัดไป`, `${older} place(s) have their latest image from before the news; those results can neither confirm nor rule out the reported flooding`)}</p>` : ''}
   <div class="disc">${L('ตำแหน่งในรายงานนี้อ่านจากชื่อตำบล/อำเภอ/จังหวัดที่เขียนในข่าว หรือปักหมุดโดยผู้ใช้ และผลวิเคราะห์มาจากภาพดาวเทียมแบบเปิด (Copernicus Sentinel) โดยอัตโนมัติ ยังไม่ผ่านการตรวจสอบภาคพื้นดิน ใช้ประกอบการวางแผนเท่านั้น', 'Locations were read from place names written in the stories or pinned by the user; imagery results are automatic from open Copernicus Sentinel data and not ground-verified. For planning support only.')}</div>
   ${footer(1)}</section>`);
 
@@ -679,7 +703,7 @@ async function buildNewsReport(inp: { title: string; lang: 'th' | 'en'; snap: Ne
   const ov = fit(allB, 120 / 128, 0.25);
   const rows = items.slice(0, 14).map(({ p, n, run }) => {
     const latest = p.articleIds.map((id) => arts.get(id)?.published ?? '').sort().pop();
-    return `<tr><td class="c">${n}</td><td>${esc(p.labelTh)}<br><span style="color:#666;font-size:7pt">${esc(precTh(p.precision))}</span></td><td class="c">${p.articleIds.length}</td><td class="mono c">${dmy(latest || undefined)}</td><td class="c lv-${run?.status === 'ok' ? run.level : 'x'}">${esc(res(run))}${run?.status === 'ok' && run.level !== 'none' ? `<br>${f1((run.stats?.interestKm2 ?? 0) * 100)} ha` : ''}</td></tr>`;
+    return `<tr><td class="c">${n}</td><td>${esc(p.labelTh)}<br><span style="color:#666;font-size:7pt">${esc(precTh(p.precision))}</span></td><td class="c">${p.articleIds.length}</td><td class="mono c">${dmy(latest || undefined)}</td><td class="c lv-${run?.status === 'ok' ? run.level : 'x'}">${esc(res(run))}${run?.status === 'ok' && run.level !== 'none' ? `<br>${f1((run.stats?.interestKm2 ?? 0) * 100)} ha` : ''}${timing(run, p.articleIds.map((id) => arts.get(id)))?.before ? `<br><span style="color:#b45309;font-size:7pt">${L('ภาพก่อนวันข่าว', 'image before news')} ${dmy(run?.B?.datetime)}</span>` : ''}</td></tr>`;
   }).join('');
   const marks = items.map(({ p, n }) => {
     const [x, y] = px(ov, p.lon, p.lat);
@@ -701,7 +725,8 @@ async function buildNewsReport(inp: { title: string; lang: 'th' | 'en'; snap: Ne
     const frame = fit(b, 190 / 128, 0.08);
     const news = p.articleIds.map((id) => arts.get(id)!).filter(Boolean).slice(0, 4);
     const newsHtml = news.map((a) => `<div class="nw">${a.image ? `<img src="${esc(a.image)}" referrerpolicy="no-referrer" onerror="this.remove()" alt=""/>` : ''}<div><b>${esc(a.title)}</b><span>${esc(a.outlet)} · ${dmy(a.published ?? undefined)}</span></div></div>`).join('');
-    const bullets = run ? narrative(run, inp.lang).map((x) => `<li>${esc(x)}</li>`).join('') : `<li>${L('ยังไม่ได้วิเคราะห์ภาพดาวเทียม', 'Not analysed')}</li>`;
+    const tm = timing(run, p.articleIds.map((id) => arts.get(id)));
+    const bullets = (run ? narrative(run, inp.lang).map((x) => `<li>${esc(x)}</li>`).join('') : `<li>${L('ยังไม่ได้วิเคราะห์ภาพดาวเทียม', 'Not analysed')}</li>`) + (tm ? `<li style="color:${tm.before ? '#b45309' : '#166534'}">${esc(timingText(tm, th))}</li>` : '');
     const hs = (run?.hotspots ?? []).slice(0, 8).map((h) => {
       const [x, y] = px(frame, h.lon, h.lat);
       return `<div class="hs" style="left:${x}%;top:${y}%">${h.n}</div>`;
