@@ -595,7 +595,58 @@ function BorderPanel({
 
 // ---------------------------------------------------------------- AOI detail
 
-function AoiDetail({ aoi, onRun, busy, lang }: { aoi: MonitorAoi; onRun: () => void; busy: boolean; lang: 'th' | 'en' }) {
+function EditPanel({ b, orig, onSave, onCancel, onSet }: { b: BB; orig: BB; onSave: () => void; onCancel: () => void; onSet: (b: BB) => void }) {
+  const L = useL();
+  const km = bbKm(b);
+  const cx0 = (b[0] + b[2]) / 2, cy0 = (b[1] + b[3]) / 2;
+  const [lat, setLat] = useState(cy0.toFixed(5));
+  const [lon, setLon] = useState(cx0.toFixed(5));
+  const [wk, setWk] = useState(km.w.toFixed(2));
+  const [hk, setHk] = useState(km.h.toFixed(2));
+  useEffect(() => {
+    setLat(cy0.toFixed(5));
+    setLon(cx0.toFixed(5));
+    setWk(km.w.toFixed(2));
+    setHk(km.h.toFixed(2));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [b.join(',')]);
+  const apply = () => {
+    const la = +lat, lo = +lon, w = Math.max(0.3, +wk), h = Math.max(0.3, +hk);
+    if (![la, lo, w, h].every(Number.isFinite)) return;
+    const dx = w / 2 / (111.32 * Math.cos((la * Math.PI) / 180)), dy = h / 2 / 110.574;
+    onSet([lo - dx, la - dy, lo + dx, la + dy]);
+  };
+  const scale = (f: number) => {
+    const dx = ((b[2] - b[0]) * f) / 2, dy = ((b[3] - b[1]) * f) / 2;
+    onSet([cx0 - dx, cy0 - dy, cx0 + dx, cy0 + dy]);
+  };
+  return (
+    <Panel title={L('แก้ไขกรอบพื้นที่', 'Edit area box')}>
+      <p className="text-[11px] text-slate-300">{L('ลากบนแผนที่ หรือพิมพ์ค่าแล้วกด “ใช้ค่านี้”', 'Drag on the map, or type values and press “Apply”')}</p>
+      <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+        <Field label={L('ละติจูดกลาง', 'Centre lat')}><Input value={lat} onChange={(e) => setLat(e.target.value)} className="!py-1 font-mono text-xs" /></Field>
+        <Field label={L('ลองจิจูดกลาง', 'Centre lon')}><Input value={lon} onChange={(e) => setLon(e.target.value)} className="!py-1 font-mono text-xs" /></Field>
+        <Field label={L('กว้าง (กม.)', 'Width (km)')}><Input value={wk} onChange={(e) => setWk(e.target.value)} className="!py-1 font-mono text-xs" /></Field>
+        <Field label={L('สูง (กม.)', 'Height (km)')}><Input value={hk} onChange={(e) => setHk(e.target.value)} className="!py-1 font-mono text-xs" /></Field>
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        <Button onClick={apply}>{L('ใช้ค่านี้', 'Apply')}</Button>
+        <Button onClick={() => scale(0.8)}>{L('ย่อ −20%', 'Shrink 20%')}</Button>
+        <Button onClick={() => scale(1.25)}>{L('ขยาย +25%', 'Grow 25%')}</Button>
+        <Button onClick={() => onSet(orig)}>{L('กลับเป็นกรอบเดิม', 'Reset')}</Button>
+      </div>
+      <div className="mt-1.5 font-mono text-[10px] text-muted">{km.w.toFixed(2)} × {km.h.toFixed(2)} km · {(km.w * km.h).toFixed(1)} km² ({(km.w * km.h * 625).toFixed(0)} {L('ไร่', 'rai')})</div>
+      {km.w * km.h > 400 && <p className="text-[10px] text-warn">{L('กรอบใหญ่กว่า 400 km² จะวิเคราะห์ช้าและรายละเอียดลดลง', 'Boxes over 400 km² are slower and coarser')}</p>}
+      <p className="mt-1 text-[10px] text-muted">{L('ผลตรวจครั้งก่อนจะยังเก็บไว้ แต่ระบุว่าใช้กรอบเดิม ควรกด “ตรวจตอนนี้” ใหม่หลังบันทึก', 'Earlier results are kept but marked as using the old box; run a new check after saving')}</p>
+      <div className="mt-2 flex gap-1.5">
+        <Button variant="primary" onClick={onSave}>{L('บันทึกกรอบ', 'Save box')}</Button>
+        <Button onClick={onCancel}>{L('ยกเลิก', 'Cancel')}</Button>
+      </div>
+    </Panel>
+  );
+}
+
+function AoiDetail({ aoi, onRun, onEdit, busy, lang }: { aoi: MonitorAoi; onRun: () => void; onEdit: () => void; busy: boolean; lang: 'th' | 'en' }) {
   const L = useL();
   const { runs, setAois, removeRun } = useMonitor();
   const mine = runs.filter((r) => r.aoiId === aoi.id);
