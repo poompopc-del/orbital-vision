@@ -604,7 +604,7 @@ function OverlayOnImage({ src, img, ov }: { src: string; img: BBox; ov: BBox }) 
 
 export function NewsFloodReport() {
   const L = useL();
-  const { snap, runOf, lcOf, load, loading, days } = useNews();
+  const { snap, runOf, lcOf, load, loading, days, progress } = useNews();
   const runs = useMonitor((s) => s.runs);
   const [title, setTitle] = useState('รายงานพื้นที่น้ำท่วมจากข่าวและภาพดาวเทียม');
   const [lang, setLang] = useState<'th' | 'en'>('th');
@@ -654,6 +654,7 @@ export function NewsFloodReport() {
           <Button variant={lang === 'en' ? 'active' : 'ghost'} onClick={() => setLang('en')}>English</Button>
           <label className="ml-2 flex items-center gap-1 text-[11px] text-slate-200"><input type="checkbox" checked={onlyAnalysed} onChange={(e) => setOnlyAnalysed(e.target.checked)} />{L('เฉพาะตำแหน่งที่วิเคราะห์ภาพแล้ว', 'Only analysed places')}</label>
         </div>
+        {!snap && progress && <p className="text-[10px] text-cyan-300">{progress}</p>}
         <p className="text-[11px] text-muted">{snap ? L(`ข่าว ${snap.articles.length} ชิ้น · ตำแหน่งในรายงาน ${places.length} แห่ง · ดึงข่าวเมื่อ ${tTime(snap.fetchedAt)}`, `${snap.articles.length} stories · ${places.length} places · fetched ${tTime(snap.fetchedAt)}`) : L('กำลังดึงข่าว…', 'Loading…')}</p>
       </div>
       <div className="mt-3 flex gap-2">
@@ -771,13 +772,14 @@ async function buildNewsReport(inp: { title: string; lang: 'th' | 'en'; snap: Ne
   <table class="kf small"><thead><tr><th>${L('แหล่งข่าว', 'News feed')}</th><th>${L('สถานะ', 'Status')}</th><th>${L('จำนวน', 'Items')}</th><th>${L('ดึงเมื่อ', 'Fetched')}</th></tr></thead><tbody>${feedRows}</tbody></table>
   <h2>${L('วิธีการ', 'Method')}</h2><ul class="lim">
   <li>${L('คัดข่าวที่มีคำว่า น้ำท่วม/อุทกภัย/น้ำล้นตลิ่ง/น้ำป่า แล้วอ่านเนื้อข่าวจากเว็บต้นทาง ตัดข่าวซ้ำด้วยพาดหัว', 'Stories containing flood terms; full text read from the publisher; duplicates removed by headline')}</li>
-  <li>${L('อ่านชื่อ ต./อ./จ. ในข่าว แล้วค้นพิกัดด้วย OpenStreetMap Nominatim ยอมรับเฉพาะผลที่อยู่ในจังหวัดที่ข่าวระบุ ข่าวที่กล่าวถึงมากกว่า 4 จังหวัดโดยไม่มีระดับอำเภอ (เช่น ประกาศเตือนภัย) ไม่ถูกนำมาระบุตำแหน่ง', 'Tambon/amphoe/province names geocoded with Nominatim and accepted only inside the named province; stories naming over 4 provinces without districts (e.g. warnings) are not located')}</li>
-  <li>${L('กรอบวิเคราะห์: ระดับตำบล ±4 กม. ระดับอำเภอ ±8 กม. หมุด ±3 กม. รอบจุด · ตรวจน้ำใหม่ด้วยเรดาร์ Sentinel-1 (VV < −18 dB) หรือ Sentinel-2 (MNDWI) เทียบภาพก่อนหน้า 14 วัน', 'Box ±4 km (tambon), ±8 km (amphoe), ±3 km (pin); new water from Sentinel-1 (VV < −18 dB) or Sentinel-2 (MNDWI) vs. a reference image')}</li></ul>
+  <li>${L('อ่านชื่อ ต./อ./จ. ในข่าว แล้วเทียบกับทำเนียบตำบล 7,367 แห่งและอำเภอ 928 แห่ง (OpenGISData-Thailand) รับเฉพาะชื่อที่มีอยู่จริงในจังหวัดที่ข่าวระบุ ถ้าไม่พบจะไม่เดาตำแหน่ง ข่าวที่กล่าวถึงมากกว่า 4 จังหวัดโดยไม่มีระดับอำเภอ (เช่น ประกาศเตือนภัย) ไม่ถูกนำมาระบุตำแหน่ง', 'Tambon/amphoe/province names matched against the 7,367-tambon / 928-amphoe gazetteer (OpenGISData-Thailand), accepted only where the name exists in the named province — no guessing; stories naming over 4 provinces without districts (e.g. warnings) are not located')}</li>
+  <li>${L('กรอบวิเคราะห์: ระดับตำบลใช้ขอบเขตตำบล (±2–6 กม.) ระดับอำเภอ ±8 กม. รอบที่ตั้งอำเภอ หมุด ±3 กม. · ตรวจน้ำใหม่ด้วยเรดาร์ Sentinel-1 (VV < −18 dB) หรือ Sentinel-2 (MNDWI) เทียบกับภาพอ้างอิงก่อนหน้า', 'Box: tambon extent (±2–6 km), ±8 km around an amphoe centre, ±3 km around a pin; new water from Sentinel-1 (VV < −18 dB) or Sentinel-2 (MNDWI) against an earlier reference image')}</li>
+  <li>${L('เทียบวันที่ภาพกับวันที่ข่าว ถ้าภาพถ่ายก่อนข่าว จะระบุว่าผลยังยืนยันหรือหักล้างข่าวไม่ได้', 'Image date is compared with the story date; when the image is older, the result is marked as unable to confirm or rule out the report')}</li></ul>
   <h2>${L('ข้อจำกัด', 'Limitations')}</h2><ul class="lim">
   <li>${L('ตำแหน่งมาจากข้อความในข่าว ไม่ได้วิเคราะห์จากภาพข่าว ตำแหน่งระดับอำเภอ/จังหวัดเป็นจุดศูนย์กลางของเขตปกครอง ไม่ใช่จุดที่น้ำท่วม', 'Locations come from text, not photos; amphoe/province points are administrative centres, not the flood itself')}</li>
   <li>${L('เรดาร์อาจสับสนน้ำท่วมกับนาข้าวที่มีน้ำขัง พื้นผิวเรียบ หรือเงาภูเขา ภาพเมฆมากอาจทำให้ไม่มีภาพที่ใช้ได้', 'Radar can confuse flooding with flooded paddies, smooth surfaces or terrain shadow; clouds can leave no usable optical image')}</li>
   <li>${L('ไม่มีการประเมินจำนวนผู้ประสบภัยหรือความเสียหาย ใช้ตัวเลขทางการจาก ปภ. เมื่ออ้างอิง', 'No estimate of people affected or losses; use official DDPM figures')}</li></ul>
-  <h2>${L('แหล่งข้อมูล', 'Sources')}</h2><ul class="lim"><li>Google News (${L('สำนักข่าวและเว็บไซต์ *.go.th', 'outlets and *.go.th')}), GDELT Project · OpenStreetMap Nominatim · geoBoundaries · Copernicus Sentinel-1/-2 via Microsoft Planetary Computer · ESA WorldCover 2021 · Esri World Imagery</li></ul>
+  <h2>${L('แหล่งข้อมูล', 'Sources')}</h2><ul class="lim"><li>Google News (${L('สำนักข่าวและเว็บไซต์ *.go.th', 'outlets and *.go.th')}), GDELT Project · ${L('ทำเนียบตำบล/อำเภอ', 'Tambon/amphoe gazetteer')}: OpenGISData-Thailand (CC BY 4.0, DOI 10.5281/zenodo.23260465) · geoBoundaries · Copernicus Sentinel-1/-2 via Microsoft Planetary Computer · ESA WorldCover 2021 · Esri World Imagery</li></ul>
   ${footer(pg)}</section>`);
 
   const extraCss = `<style>.nw{display:flex;gap:1.5mm;margin-bottom:1.2mm;font-size:7.6pt;line-height:1.25}.nw img{width:16mm;height:11mm;object-fit:cover;flex:none}.nw b{display:block;font-weight:600}.nw span{color:#555;font-size:6.8pt}</style>`;
