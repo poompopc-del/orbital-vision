@@ -11,6 +11,7 @@ import {
   type MonitorAoi, type MonitorRun, type Purpose, type Region, type SensorMode,
 } from '../lib/monitor';
 import { borderLines, lineLength, NEIGHBOURS, tilesAlong, type Neighbour, type Tile } from '../lib/border';
+import { loadCountries } from '../lib/countries';
 import { imageProvider } from '../components/gis/sceneLayer';
 import { buildReportHtml, hotspotsCsv, resultsGeoJson } from '../lib/report';
 import { downloadJson } from '../lib/geo';
@@ -97,7 +98,22 @@ export function MonitorWatch() {
   const [busy, setBusy] = useState<{ cur: string; msg: string; done: number; total: number } | null>(null);
   const [period, setPeriod] = useState(30);
   const abort = useRef<AbortController | null>(null);
-  const [tiles, setTiles] = useState<Tile[]>([]);
+  // candidate tiles along a border; the shift slider moves them into Thailand (−) or the neighbour (+)
+  const [borderNb, setBorderNb] = useState<Neighbour>('KHM');
+  const [tileSrc, setTileSrc] = useState<{ lines: [number, number][][]; size: number; nb: Neighbour; geom: GeoJSON.Polygon | GeoJSON.MultiPolygon | null } | null>(null);
+  const [tileShift, setTileShift] = useState(0);
+  const tiles: Tile[] = useMemo(() => (tileSrc ? tilesAlong(tileSrc.lines, tileSrc.size, tileSrc.nb, { shift: tileShift, neighbour: tileSrc.geom }) : []), [tileSrc, tileShift]);
+  const showBorderTiles = async (nb: Neighbour, size = tileSrc?.size ?? 10) => {
+    const lines = await borderLines(nb);
+    if (!lines.length) throw new Error('No shared border found in Natural Earth data');
+    const geom = (await loadCountries().catch(() => []))?.find((c) => c.id === nb)?.geometry ?? null;
+    setBorderNb(nb);
+    setTileSrc({ lines, size, nb, geom });
+    setBorderLines(lines);
+    setPicked(new Set());
+    setPanel('border');
+    return lines;
+  };
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [borderLinesState, setBorderLines] = useState<[number, number][][]>([]);
   const [extentLines, setExtentLines] = useState<[number, number][][]>([]);
@@ -427,15 +443,15 @@ export function MonitorWatch() {
             tiles={tiles}
             picked={picked}
             setPicked={setPicked}
-            onTiles={(t, lines) => {
-              setTiles(t);
-              setBorderLines(lines);
-              setPicked(new Set());
-            }}
+            nb={borderNb}
+            setNb={setBorderNb}
+            shift={tileShift}
+            setShift={setTileShift}
+            onGenerate={showBorderTiles}
             onAdd={(list, region, purpose, freq, prefix) => {
               const now = Date.now();
               setAois((l) => [...l, ...list.map((t, i) => ({ ...aoiFromPolygon(`${prefix} ${t.id}`, t.geometry, region, purpose, freq), id: `aoi_${now.toString(36)}_${i}` }))]);
-              setTiles([]);
+              setTileSrc(null);
               setPicked(new Set());
               setPanel('list');
             }}
@@ -470,7 +486,7 @@ export function MonitorWatch() {
       </aside>
       <div className="relative min-h-[360px] flex-1">
         <GlobeHost onReady={setViewer} />
-        <ExtentBar viewer={viewer} customRect={customRect} onLines={setExtentLines} />
+        <ExtentBar viewer={viewer} customRect={customRect} onLines={setExtentLines} nb={borderNb} onNb={(n) => void showBorderTiles(n).catch(() => {})} shift={tileShift} onShift={setTileShift} tileCount={tiles.length} />
         {swipe && (
           <>
             <div className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-white/90" style={{ left: `${split * 100}%` }} />
@@ -583,17 +599,20 @@ function AddPanel({ viewer, onAdd }: { viewer: Cesium.Viewer | null; onAdd: (r: 
 // ---------------------------------------------------------------- border tiles
 
 function BorderPanel({
-  viewer, tiles, picked, setPicked, onTiles, onAdd,
+  viewer, tiles, picked, setPicked, nb, setNb, shift, setShift, onGenerate, onAdd,
 }: {
   viewer: Cesium.Viewer | null;
   tiles: Tile[];
   picked: Set<string>;
   setPicked: (s: Set<string>) => void;
-  onTiles: (t: Tile[], lines: [number, number][][]) => void;
+  nb: Neighbour;
+  setNb: (n: Neighbour) => void;
+  shift: number;
+  setShift: (v: number) => void;
+  onGenerate: (nb: Neighbour, size: number) => Promise<[number, number][][]>;
   onAdd: (t: Tile[], region: Region, purpose: Purpose, freq: number, prefix: string) => void;
 }) {
   const L = useL();
-  const [nb, setNb] = useState<Neighbour>('KHM');
   const [size, setSize] = useState(10);
   const [purpose, setPurpose] = useState<Purpose>('clearing');
   const [freq, setFreq] = useState(7);
@@ -606,11 +625,8 @@ function BorderPanel({
     setBusy(true);
     setErr('');
     try {
-      const lines = await borderLines(nb);
-      if (!lines.length) throw new Error(L('ไม่พบแนวชายแดนร่วมในข้อมูล Natural Earth', 'No shared border found in Natural Earth data'));
+      const lines = await onGenerate(nb, size);
       setLen(lineLength(lines));
-      const t = tilesAlong(lines, size, nb);
-      onTiles(t, lines);
       if (viewer) {
         const xs = lines.flat().map((p) => p[0]), ys = lines.flat().map((p) => p[1]);
         viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(Math.min(...xs) - 0.3, Math.min(...ys) - 0.3, Math.max(...xs) + 0.3, Math.max(...ys) + 0.3), duration: 1.2 });
@@ -645,6 +661,7 @@ function BorderPanel({
           <p className="mt-2 text-[11px] text-slate-200">
             {L(`แนวชายแดนยาวราว ${Math.round(len)} กม. · ${tiles.length} ช่อง · คลิกช่องบนแผนที่เพื่อเลือก`, `Border ≈ ${Math.round(len)} km · ${tiles.length} tiles · click tiles on the map to select`)}
           </p>
+          <TileShift shift={shift} setShift={setShift} nbTh={meta.th} nbEn={meta.en} />
           <div className="mt-1 flex flex-wrap gap-1">
             <Button onClick={() => setPicked(new Set(tiles.map((t) => t.id)))}>{L('เลือกทั้งหมด', 'Select all')}</Button>
             <Button onClick={() => setPicked(new Set())}>{L('ล้าง', 'Clear')}</Button>
@@ -657,6 +674,24 @@ function BorderPanel({
       )}
       <p className="mt-2 text-[10px] leading-relaxed text-muted">{L('แนวชายแดนจาก Natural Earth 1:50m เป็นเส้นโดยประมาณ (คลาดได้ระดับร้อยเมตรถึงกิโลเมตร) ไม่ใช่เส้นเขตแดนตามกฎหมายหรือ MOU ใช้เพื่อวางช่องเฝ้าระวังเท่านั้น ช่องครอบคลุมทั้งสองฝั่งแนว', 'Border from Natural Earth 1:50m is approximate (hundreds of metres to km off) — not the legal or MOU boundary. Used only to lay out watch tiles; tiles cover both sides of the line.')}</p>
     </Panel>
+  );
+}
+
+export function TileShift({ shift, setShift, nbTh, nbEn }: { shift: number; setShift: (v: number) => void; nbTh: string; nbEn: string }) {
+  const L = useL();
+  const pctTh = Math.round(((1 - shift) / 2) * 100);
+  return (
+    <div className="mt-2 rounded border border-line p-1.5 text-[11px] text-slate-200">
+      <div className="mb-0.5 font-semibold">{L('ตำแหน่งกรอบเฝ้าระวังเทียบแนวชายแดน', 'Watch-box position vs the border')}</div>
+      <div className="flex justify-between text-[10px] text-muted"><span>◀ {L('เข้าไปฝั่งไทย', 'into Thailand')}</span><span>{L(`เข้าไปฝั่ง${nbTh}`, `into ${nbEn}`)} ▶</span></div>
+      <input type="range" min={-1} max={1} step={0.1} value={shift} onChange={(e) => setShift(+e.target.value)} className="w-full" />
+      <div className="flex justify-between text-[10px] text-muted">
+        <button className="hover:text-white" onClick={() => setShift(-1)}>{L('ฝั่งไทยทั้งกรอบ', 'all Thai side')}</button>
+        <button className="hover:text-white" onClick={() => setShift(0)}>{L('คร่อมแนว', 'straddle')}</button>
+        <button className="hover:text-white" onClick={() => setShift(1)}>{L('ฝั่งเพื่อนบ้านทั้งกรอบ', 'all neighbour side')}</button>
+      </div>
+      <p className="mt-0.5 text-[10px] text-muted">{L(`กรอบอยู่ฝั่งไทยราว ${pctTh}% และฝั่ง${nbTh}ราว ${100 - pctTh}% ของความกว้าง (วัดตั้งฉากกับแนวชายแดน Natural Earth ซึ่งเป็นเส้นโดยประมาณ)`, `About ${pctTh}% of each box on the Thai side, ${100 - pctTh}% on the ${nbEn} side (perpendicular to the approximate Natural Earth line)`)}</p>
+    </div>
   );
 }
 

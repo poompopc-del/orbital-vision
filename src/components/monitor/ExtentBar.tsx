@@ -16,11 +16,21 @@ const useL = () => {
 
 export type ExtentMode = 'overview' | 'border' | 'custom';
 
-export default function ExtentBar({ viewer, customRect, onLines }: { viewer: Cesium.Viewer | null; customRect: BBox4 | null; onLines: (l: [number, number][][]) => void }) {
+export default function ExtentBar({
+  viewer, customRect, onLines, nb, onNb, shift, onShift, tileCount,
+}: {
+  viewer: Cesium.Viewer | null;
+  customRect: BBox4 | null;
+  onLines: (l: [number, number][][]) => void;
+  nb: Neighbour;
+  onNb: (n: Neighbour) => void;
+  shift: number;
+  onShift: (v: number) => void;
+  tileCount: number;
+}) {
   const L = useL();
   const [mode, setMode] = useState<ExtentMode>('overview');
-  const [nb, setNb] = useState<Neighbour>('KHM');
-  const [share, setShare] = useState(0.5);
+  const share = 0.5; // camera frames the border line centred; the slider moves the watch boxes
   const [measured, setMeasured] = useState<number | null>(null);
   const [thBox, setThBox] = useState<BBox4>(THAILAND_BBOX_FALLBACK);
   const [srcOk, setSrcOk] = useState<boolean | null>(null);
@@ -64,6 +74,7 @@ export default function ExtentBar({ viewer, customRect, onLines }: { viewer: Ces
       const r = borderFocusRect(bboxOfCoords(lines.flat()), roughCentre(n.geometry), roughCentre(th.geometry), share);
       fly(r);
       void measure(r);
+      onNb(nb);
     } else if (customRect) {
       onLines([]);
       fly(customRect);
@@ -76,10 +87,13 @@ export default function ExtentBar({ viewer, customRect, onLines }: { viewer: Ces
     if (viewer) void apply('overview', true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewer, thBox.join(',')]);
+  const setNb = (n: Neighbour) => {
+    onNb(n);
+  };
   useEffect(() => {
     if (mode === 'border') void apply('border');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nb, share]);
+  }, [nb]);
 
   return (
     <div className="pointer-events-auto absolute right-3 top-3 z-10 w-[268px] rounded-md border border-line bg-ink-950/90 p-2 text-[11px] text-slate-200 backdrop-blur">
@@ -103,9 +117,11 @@ export default function ExtentBar({ viewer, customRect, onLines }: { viewer: Ces
                 </select>
               </div>
               <div>
-                <div className="flex justify-between text-muted"><span>◀ {L('เข้าไปฝั่งไทย', 'into Thailand')}</span><span>{L(`เข้าไปฝั่ง${NEIGHBOURS.find((x) => x.id === nb)?.th ?? ''}`, `into ${NEIGHBOURS.find((x) => x.id === nb)?.en ?? ''}`)} ▶</span></div>
-                <input type="range" min={0} max={1} step={0.05} value={share} onChange={(e) => setShare(+e.target.value)} className="w-full" />
-                <div className="flex justify-between text-[10px] text-muted"><button className="hover:text-white" onClick={() => setShare(0)}>{L('ฝั่งไทยสุด', 'Thai side')}</button><button className="hover:text-white" onClick={() => setShare(0.5)}>{L('กึ่งกลางแนว', 'centre')}</button><button className="hover:text-white" onClick={() => setShare(1)}>{L('ฝั่งเพื่อนบ้านสุด', 'neighbour side')}</button></div>
+                <div className="font-semibold">{L('ย้ายกรอบเฝ้าระวังเข้าหา', 'Move the watch boxes toward')}</div>
+                <div className="flex justify-between text-muted"><span>◀ {L('ฝั่งไทย', 'Thailand')}</span><span>{L(`ฝั่ง${NEIGHBOURS.find((x) => x.id === nb)?.th ?? ''}`, NEIGHBOURS.find((x) => x.id === nb)?.en ?? '')} ▶</span></div>
+                <input type="range" min={-1} max={1} step={0.1} value={shift} onChange={(e) => onShift(+e.target.value)} className="w-full" />
+                <div className="flex justify-between text-[10px] text-muted"><button className="hover:text-white" onClick={() => onShift(-1)}>{L('ฝั่งไทยทั้งกรอบ', 'all Thai side')}</button><button className="hover:text-white" onClick={() => onShift(0)}>{L('คร่อมแนว', 'straddle')}</button><button className="hover:text-white" onClick={() => onShift(1)}>{L('ฝั่งเพื่อนบ้านทั้งกรอบ', 'all neighbour side')}</button></div>
+                <p className="text-[10px] text-muted">{tileCount ? L(`${tileCount} กรอบตามแนว (ยังไม่บันทึก) — เลือกและเพิ่มเข้ารายการในแผง “+ ตามแนวชายแดน”`, `${tileCount} boxes along the line (not saved) — pick and add them in “+ Along border”`) : L('กำลังสร้างกรอบตามแนว…', 'Building boxes…')}</p>
               </div>
             </>
           )}

@@ -70,9 +70,33 @@ export interface Tile {
   geometry: GeoJSON.Polygon;
 }
 
-/** Square tiles of `sizeKm` centred every `sizeKm` along the lines (consecutive tiles touch). */
-export function tilesAlong(lines: [number, number][][], sizeKm: number, prefix: string): Tile[] {
+function inRing(x: number, y: number, ring: GeoJSON.Position[]) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+const inside = (x: number, y: number, g: GeoJSON.Polygon | GeoJSON.MultiPolygon) =>
+  (g.type === 'Polygon' ? [g.coordinates] : g.coordinates).some((p) => inRing(x, y, p[0]));
+
+export interface TileOpts {
+  /** −1 … 1: −1 = tiles fully on the Thai side, 0 = centred on the line, 1 = fully on the neighbour's side */
+  shift?: number;
+  /** neighbour outline, used to tell which side of the line is the neighbour's */
+  neighbour?: GeoJSON.Polygon | GeoJSON.MultiPolygon | null;
+}
+
+/**
+ * Square tiles of `sizeKm` centred every `sizeKm` along the lines (consecutive tiles touch), optionally
+ * moved perpendicular to the local line direction into Thailand or into the neighbour by
+ * `shift × sizeKm/2` (at ±1 the tile edge sits on the line).
+ */
+export function tilesAlong(lines: [number, number][][], sizeKm: number, prefix: string, opts: TileOpts = {}): Tile[] {
   const out: Tile[] = [];
+  const shift = Math.max(-1, Math.min(1, opts.shift ?? 0));
+  const centres: [number, number][] = [];
   for (const line of lines) {
     let carry = sizeKm / 2;
     for (let i = 1; i < line.length; i++) {
@@ -83,8 +107,26 @@ export function tilesAlong(lines: [number, number][][], sizeKm: number, prefix: 
         const t = s / d;
         const c: [number, number] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
         // skip if too close to the previous tile (sharp bends)
-        const prev = out[out.length - 1];
-        if (!prev || dist(prev.center, c) >= sizeKm * 0.7) out.push(square(c, sizeKm, prefix, out.length + 1));
+        const prev = centres[centres.length - 1];
+        if (!prev || dist(prev, c) >= sizeKm * 0.7) {
+          centres.push(c);
+          let cc = c;
+          if (shift && d > 0) {
+            // unit normal in km space, then pick the side that lies in the neighbour
+            const kx = kmLon(c[1]);
+            const ex = ((b[0] - a[0]) * kx) / d, ey = ((b[1] - a[1]) * KM_LAT) / d;
+            let nx = -ey, ny = ex;
+            if (opts.neighbour) {
+              const probe = 1.5; // km
+              const pIn = inside(c[0] + (nx * probe) / kx, c[1] + (ny * probe) / KM_LAT, opts.neighbour);
+              const qIn = inside(c[0] - (nx * probe) / kx, c[1] - (ny * probe) / KM_LAT, opts.neighbour);
+              if (!pIn && qIn) { nx = -nx; ny = -ny; }
+            }
+            const off = (shift * sizeKm) / 2;
+            cc = [c[0] + (nx * off) / kx, c[1] + (ny * off) / KM_LAT];
+          }
+          out.push(square(cc, sizeKm, prefix, out.length + 1));
+        }
         s += sizeKm;
       }
       carry = s - d;
