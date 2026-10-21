@@ -67,7 +67,7 @@ export default async function handler(req, res) {
       gdacs: () => {
         const to = new Date(), from = new Date(Date.now() - 60 * 86400e3);
         const d = (x) => x.toISOString().slice(0, 10);
-        return `https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=EQ;TC;FL;DR;WF;VO&fromDate=${d(from)}&toDate=${d(to)}&alertlevel=Green;Orange;Red`;
+        return `https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=EQ;TC;FL;DR;WF;VO&fromDate=${d(from)}&toDate=${d(to)}`;
       },
       air4thai: () => 'https://air4thai.pcd.go.th/services/getNewAQI_JSON.php',
       tmd: () => 'https://data.tmd.go.th/api/WeatherWarningNews/v2/?uid=api&ukey=api12345&format=json',
@@ -75,7 +75,7 @@ export default async function handler(req, res) {
     };
     if (!map[src]) return res.status(400).json({ error: 'unknown src', allowed: ['firms', ...Object.keys(map)] });
     const url = map[src]();
-    let r = await get(url, src === 'gdacs' ? 55000 : 25000, src === 'gdacs' || src === 'cems' ? { Accept: 'application/json' } : {}).catch((e) => ({ ok: false, status: 0, text: String(e && e.message) }));
+    let r = await get(url, src === 'gdacs' ? 28000 : 25000, src === 'gdacs' || src === 'cems' ? { Accept: 'application/json' } : {}).catch((e) => ({ ok: false, status: 0, text: String(e && e.message) }));
     // Air4Thai sometimes answers only over plain http
     if (!r.ok && src === 'air4thai') r = await get(url.replace('https:', 'http:')).catch((e) => ({ ok: false, status: 0, text: String(e && e.message) }));
     if (!r.ok && src === 'air4thai') r = await get('http://air4thai.com/forweb/getAQI_JSON.php').catch((e) => ({ ok: false, status: 0, text: String(e && e.message) }));
