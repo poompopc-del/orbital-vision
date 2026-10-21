@@ -112,7 +112,8 @@ function marks(t: string): Mark[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(t))) {
     const k = m[1];
-    let name = m[2].replace(/ฯ$/, 'ฯ');
+    // Thai is written without spaces, so a name can run into the next word ("อ.ลาดกระบังและ…")
+    let name = m[2].replace(/(และ|รวมถึง|ตลอดจน|ซึ่ง|ที่มี|ที่|ใน|ของ|ได้รับ|ได้|ส่วน|โดย|เป็น|มี|จน|ทำให้|ถูก|ประสบ|เกิด|น้ำท่วม|ท่วม|ล่าสุด)$/, '');
     if (STOP.has(name) || /^(ตำบล|อำเภอ|จังหวัด|แขวง|เขต|พื้นที่)/.test(name)) {
       re.lastIndex = m.index + m[0].length - name.length - 1; // let the inner marker be read
       continue;
@@ -231,36 +232,75 @@ async function nominatim(q: string): Promise<{ name: string; lat: number; lon: n
   return (await r.json()).results ?? [];
 }
 
-const strip = (s: string) => s.replace(/^(อำเภอ|ตำบล|แขวง|เขต)/, '');
+
+// Offline gazetteer of Thailand's 7,367 tambon and 928 amphoe with Thai names, centroids and extents
+// (OpenGISData-Thailand, CC BY 4.0) — instant and exact; Nominatim is only the fallback.
+interface Gaz {
+  source: string;
+  p: string[];
+  t: [string, string, number, number, number, number, number, number, number][];
+  a: [string, number, number, number, number, number, number, number][];
+}
+let gazP: Promise<Gaz> | null = null;
+const loadGaz = () =>
+  (gazP ??= fetch('/gazetteer-th.json').then((r) => {
+    if (!r.ok) throw new Error(`gazetteer HTTP ${r.status}`);
+    return r.json();
+  }).catch((e) => {
+    gazP = null;
+    throw e;
+  }));
+const norm = (s: string) => s.replace(/^(อำเภอ|ตำบล|แขวง|เขต|กิ่งอำเภอ)/, '').replace(/\s+/g, '');
+
+function fromGaz(g: Gaz, ref: PlaceRef): (GeoHit & { level: 'tambon' | 'amphoe' }) | null {
+  const th = PROVINCE_TH[ref.province];
+  const pi = g.p.indexOf(th);
+  if (pi < 0) return null;
+  let amp = ref.amphoe ? norm(ref.amphoe) : '';
+  if (amp === 'เมือง') amp = `เมือง${th}`;
+  const ampHit = amp ? g.a.find((x) => x[1] === pi && (x[0] === amp || x[0] === `เมือง${amp}`)) : undefined;
+  if (ref.tambon) {
+    const tam = norm(ref.tambon);
+    const cands = g.t.filter((x) => x[2] === pi && x[0] === tam);
+    const t = (ampHit ? cands.find((x) => x[1] === ampHit[0]) : undefined) ?? (cands.length === 1 || !amp ? cands[0] : undefined);
+    if (t) return { lat: t[3], lon: t[4], bbox: [t[5], t[6], t[7], t[8]], name: `ต.${t[0]} อ.${t[1]} จ.${th}`, level: 'tambon' };
+  }
+  if (ampHit) return { lat: ampHit[2], lon: ampHit[3], bbox: [ampHit[4], ampHit[5], ampHit[6], ampHit[7]], name: `อ.${ampHit[0]} จ.${th}`, level: 'amphoe' };
+  return null;
+}
+
+export const GAZ_LABEL = 'ทำเนียบตำบล/อำเภอ (OpenGISData-Thailand)';
 
 /** Locate a place. The result must lie inside the named province; otherwise null. */
-export async function geocode(ref: PlaceRef, provinces: Province[]): Promise<GeoHit> {
+export async function geocode(ref: PlaceRef, provinces: Province[]): Promise<GeoHit & { via?: string; level?: Precision }> {
   const key = placeKey(ref);
-  if (key in geoCache) return geoCache[key];
   const prov = provinces.find((p) => p.en === ref.province);
   if (!prov) return null;
-  let hit: GeoHit = null;
   if (ref.precision === 'province') {
     const [lon, lat] = turfCentroid(prov.geometry as any).geometry.coordinates;
-    hit = { lat, lon, bbox: prov.bbox, name: `จังหวัด${prov.th}` };
-  } else {
-    const isBkk = ref.province === 'Bangkok';
-    const queries: string[] = [];
-    if (ref.tambon) queries.push(`${isBkk ? 'แขวง' : 'ตำบล'}${strip(ref.tambon)} ${ref.amphoe ? `${isBkk ? 'เขต' : 'อำเภอ'}${strip(ref.amphoe)} ` : ''}${isBkk ? 'กรุงเทพมหานคร' : 'จังหวัด' + prov.th}`);
-    if (ref.amphoe) queries.push(`${isBkk ? 'เขต' : 'อำเภอ'}${strip(ref.amphoe)} ${isBkk ? 'กรุงเทพมหานคร' : 'จังหวัด' + prov.th}`);
-    for (const q of queries) {
-      const res = await nominatim(q).catch(() => []);
-      const ok = res.find((x) => provinceAt([prov], x.lon, x.lat));
-      if (ok) {
-        const b = ok.bbox; // [s, n, w, e]
-        hit = { lat: ok.lat, lon: ok.lon, bbox: b && b.length === 4 ? [b[2], b[0], b[3], b[1]] : undefined, name: ok.name };
-        break;
-      }
+    return { lat, lon, bbox: prov.bbox, name: `จังหวัด${prov.th}`, via: 'ขอบเขตจังหวัด (geoBoundaries)', level: 'province' };
+  }
+  const g = await loadGaz().catch(() => null);
+  const hit = g ? fromGaz(g, ref) : null;
+  if (hit) return { ...hit, via: GAZ_LABEL, level: hit.level };
+  if (key in geoCache) return geoCache[key] ? { ...geoCache[key]!, via: 'OpenStreetMap Nominatim' } : null;
+  let out: GeoHit = null;
+  const isBkk = ref.province === 'Bangkok';
+  const queries: string[] = [];
+  if (ref.tambon) queries.push(`${isBkk ? 'แขวง' : 'ตำบล'}${norm(ref.tambon)} ${ref.amphoe ? `${isBkk ? 'เขต' : 'อำเภอ'}${norm(ref.amphoe)} ` : ''}${isBkk ? 'กรุงเทพมหานคร' : 'จังหวัด' + prov.th}`);
+  if (ref.amphoe) queries.push(`${isBkk ? 'เขต' : 'อำเภอ'}${norm(ref.amphoe)} ${isBkk ? 'กรุงเทพมหานคร' : 'จังหวัด' + prov.th}`);
+  for (const q of queries) {
+    const res = await nominatim(q).catch(() => []);
+    const ok = res.find((x) => provinceAt([prov], x.lon, x.lat));
+    if (ok) {
+      const b = ok.bbox; // [s, n, w, e]
+      out = { lat: ok.lat, lon: ok.lon, bbox: b && b.length === 4 ? [b[2], b[0], b[3], b[1]] : undefined, name: ok.name };
+      break;
     }
   }
-  geoCache[key] = hit;
+  geoCache[key] = out;
   saveGeo();
-  return hit;
+  return out ? { ...out, via: 'OpenStreetMap Nominatim' } : null;
 }
 
 // ---------------------------------------------------------------- feeds
@@ -332,7 +372,10 @@ export async function fetchNews(days: number, onFeed: (s: FeedState) => void, on
       const st: FeedState = { id: f.id, label: f.labelTh, status: 'loading', count: 0 };
       onFeed(st);
       try {
-        const r = await feed(f.id, days);
+        const r = await feed(f.id, days).catch(async () => {
+          await new Promise((ok) => setTimeout(ok, 2500));
+          return feed(f.id, days);
+        });
         Object.assign(st, { status: 'ok', count: r.items.length, source: r.source, fetchedAt: r.fetchedAt });
         all.push(...r.items);
       } catch (e: any) {
@@ -402,16 +445,20 @@ export async function placeArticles(arts: NewsArticle[], onProgress: (m: string)
         const pg = await geocode(pr, provinces);
         if (pg) {
           const pk = placeKey(pr);
-          if (!byKey.has(pk)) byKey.set(pk, { key: pk, labelTh: placeLabel(pr), province: r.province, precision: 'province', lat: pg.lat, lon: pg.lon, bbox: pg.bbox, geocoder: 'ขอบเขตจังหวัด (geoBoundaries)', articleIds: [] });
+          if (!byKey.has(pk)) byKey.set(pk, { key: pk, labelTh: placeLabel(pr), province: r.province, precision: 'province', lat: pg.lat, lon: pg.lon, bbox: pg.bbox, geocoder: pg.via ?? '', articleIds: [] });
           refs.set(k, pr);
         }
       }
       continue;
     }
-    if (!byKey.has(k))
-      byKey.set(k, {
-        key: k, labelTh: placeLabel(r), province: r.province, amphoe: r.amphoe, tambon: r.tambon, precision: r.precision, lat: g.lat, lon: g.lon, bbox: g.bbox,
-        geocoder: r.precision === 'province' ? 'ขอบเขตจังหวัด (geoBoundaries)' : 'OpenStreetMap Nominatim', articleIds: [],
+    // a tambon that could not be found but whose amphoe could is placed at amphoe level
+    const eff: PlaceRef = g.level === 'amphoe' && r.precision === 'tambon' ? { province: r.province, amphoe: r.amphoe, precision: 'amphoe', quote: r.quote } : r;
+    const ek = placeKey(eff);
+    if (ek !== k) refs.set(k, eff);
+    if (!byKey.has(ek))
+      byKey.set(ek, {
+        key: ek, labelTh: placeLabel(eff), province: r.province, amphoe: eff.amphoe, tambon: eff.tambon, precision: eff.precision, lat: g.lat, lon: g.lon, bbox: g.bbox,
+        geocoder: g.via ?? '', articleIds: [],
       });
   }
   const unplaced: string[] = [];
@@ -436,16 +483,22 @@ const rank = (p: Precision) => ({ pin: 0, tambon: 1, amphoe: 2, province: 3 })[p
 export const PRECISION_TH: Record<Precision, string> = { tambon: 'ระดับตำบล', amphoe: 'ระดับอำเภอ', province: 'ระดับจังหวัด', pin: 'ปักหมุดโดยผู้ใช้' };
 export const PRECISION_COLOR: Record<Precision, string> = { pin: '#f472b6', tambon: '#22d3ee', amphoe: '#3b82f6', province: '#94a3b8' };
 
-/** Analysis box around a place: tambon ±4 km, amphoe ±8 km (clipped to its own extent when smaller), pin ±3 km. */
+/** Analysis box around a place: the tambon's own extent (kept between ±2 and ±6 km of its centre),
+ *  ±8 km around an amphoe centre, ±3 km around a pin. Province-level places are not analysed. */
 export function aoiForPlace(p: NewsPlace): GeoJSON.Polygon | null {
   if (p.precision === 'province') return null;
-  const half = p.precision === 'pin' ? 3 : p.precision === 'tambon' ? 4 : 8;
-  const dy = half / 110.574, dx = half / (111.32 * Math.cos((p.lat * Math.PI) / 180));
-  let [w, s, e, n] = [p.lon - dx, p.lat - dy, p.lon + dx, p.lat + dy];
-  if (p.bbox && p.precision !== 'pin') {
-    const [bw, bs, be, bn] = p.bbox;
-    if (be - bw < e - w && bn - bs < n - s) [w, s, e, n] = [bw, bs, be, bn];
+  const ky = 1 / 110.574, kx = 1 / (111.32 * Math.cos((p.lat * Math.PI) / 180));
+  let box: [number, number, number, number];
+  if (p.precision === 'tambon' && p.bbox) {
+    const [w0, s0, e0, n0] = p.bbox;
+    const clampX = (v: number, sgn: number) => p.lon + sgn * Math.min(6 * kx, Math.max(2 * kx, sgn * (v - p.lon)));
+    const clampY = (v: number, sgn: number) => p.lat + sgn * Math.min(6 * ky, Math.max(2 * ky, sgn * (v - p.lat)));
+    box = [clampX(w0, -1), clampY(s0, -1), clampX(e0, 1), clampY(n0, 1)];
+  } else {
+    const half = p.precision === 'pin' ? 3 : p.precision === 'tambon' ? 4 : 8;
+    box = [p.lon - half * kx, p.lat - half * ky, p.lon + half * kx, p.lat + half * ky];
   }
+  const [w, s, e, n] = box;
   return { type: 'Polygon', coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] };
 }
 

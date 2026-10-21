@@ -83,7 +83,11 @@ export default async function handler(req, res) {
       const scope = req.query.scope === 'gov' ? 'gov' : 'all';
       const q = `${FLOOD_TH}${scope === 'gov' ? ' site:go.th' : ''} when:${days}d`;
       const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=th&gl=TH&ceid=TH:th`;
-      const r = await get(url);
+      let r = await get(url).catch((e) => ({ ok: false, status: 0, text: String(e) }));
+      if (!r.ok) {
+        await new Promise((ok) => setTimeout(ok, 1500));
+        r = await get(url).catch((e) => ({ ok: false, status: 0, text: String(e) }));
+      }
       if (!r.ok) return res.status(502).json({ error: `upstream HTTP ${r.status}`, source: url, fetchedAt: now });
       const items = (r.text.match(/<item>[\s\S]*?<\/item>/g) || []).map((it) => ({
         title: tag(it, 'title'),
