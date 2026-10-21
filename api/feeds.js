@@ -63,6 +63,31 @@ export default async function handler(req, res) {
       res.setHeader('Cache-Control', 's-maxage=900, stale-while-revalidate=1800');
       return res.status(200).json({ src, period, fetchedAt: now, sources, csv: `${header},sensor\n${rows.join('\n')}` });
     }
+    // ThaiWater (สสน.) — read once per 10 min for everyone (edge cache) and trimmed, because the
+    // public API rate-limits (HTTP 429) and the rainfall list is ~4 MB
+    if (src === 'tw_wl' || src === 'tw_rain' || src === 'tw_warn') {
+      const TW = 'https://api-v3.thaiwater.net/api/v1/thaiwater30/public/';
+      const url = TW + (src === 'tw_wl' ? 'waterlevel_load' : src === 'tw_rain' ? 'rain_24h' : 'warning');
+      const r = await get(url, 25000, { Accept: 'application/json' });
+      if (!r.ok) return res.status(502).json({ error: `upstream HTTP ${r.status}`, source: url, fetchedAt: now });
+      const j = JSON.parse(r.text);
+      let data;
+      if (src === 'tw_wl')
+        data = (j.waterlevel_data?.data || []).map((x) => ({
+          dt: x.waterlevel_datetime, msl: x.waterlevel_msl, prev: x.waterlevel_msl_previous, pct: x.storage_percent, lv: x.situation_level,
+          st: { id: x.station?.id, th: x.station?.tele_station_name?.th, en: x.station?.tele_station_name?.en, lat: x.station?.tele_station_lat, lon: x.station?.tele_station_long, lb: x.station?.left_bank, rb: x.station?.right_bank },
+          prov: x.geocode?.province_name?.en, amphoe: x.geocode?.amphoe_name?.th, basin: x.basin?.basin_name?.th, agency: x.agency?.agency_shortname?.th,
+        }));
+      else if (src === 'tw_rain')
+        data = (j.data || []).filter((x) => +x.rain_24h >= 35.1).map((x) => ({
+          dt: x.rainfall_datetime, mm: +x.rain_24h, mm1h: x.rain_1h,
+          st: { id: x.station?.id, th: x.station?.tele_station_name?.th, lat: x.station?.tele_station_lat, lon: x.station?.tele_station_long },
+          prov: x.geocode?.province_name?.en, amphoe: x.geocode?.amphoe_name?.th, agency: x.agency?.agency_shortname?.th,
+        }));
+      else data = j.data || [];
+      res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=1200');
+      return res.status(200).json({ src, source: url, fetchedAt: now, data });
+    }
     const map = {
       gdacs: () => {
         const to = new Date(), from = new Date(Date.now() - 60 * 86400e3);

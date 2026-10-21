@@ -67,9 +67,9 @@ export interface RegistryEntry {
 }
 
 export const REGISTRY: RegistryEntry[] = [
-  { id: 'thaiwater_wl', name: 'ThaiWater — water level stations', org: 'สถาบันสารสนเทศทรัพยากรน้ำ (สสน.)', hazards: ['flood', 'drought'], format: 'JSON', endpoint: 'api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load', cadence: '~10–60 min', access: 'open', via: 'direct', terms: 'Public data, cite สสน. / ThaiWater' },
-  { id: 'thaiwater_rain', name: 'ThaiWater — 24 h rainfall', org: 'สถาบันสารสนเทศทรัพยากรน้ำ (สสน.)', hazards: ['storm', 'flood'], format: 'JSON', endpoint: 'api-v3.thaiwater.net/api/v1/thaiwater30/public/rain_24h', cadence: 'hourly', access: 'open', via: 'direct', terms: 'Public data, cite สสน. / ThaiWater' },
-  { id: 'thaiwater_warn', name: 'ThaiWater — station warnings', org: 'สถาบันสารสนเทศทรัพยากรน้ำ (สสน.)', hazards: ['flood'], format: 'JSON (text)', endpoint: 'api-v3.thaiwater.net/api/v1/thaiwater30/public/warning', cadence: 'hourly', access: 'open', via: 'direct', terms: 'Public data, cite สสน. / ThaiWater' },
+  { id: 'thaiwater_wl', name: 'ThaiWater — water level stations', org: 'สถาบันสารสนเทศทรัพยากรน้ำ (สสน.)', hazards: ['flood', 'drought'], format: 'JSON', endpoint: 'api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load', cadence: '~10–60 min', access: 'open', via: 'proxy', terms: 'Public data, cite สสน. / ThaiWater' },
+  { id: 'thaiwater_rain', name: 'ThaiWater — 24 h rainfall', org: 'สถาบันสารสนเทศทรัพยากรน้ำ (สสน.)', hazards: ['storm', 'flood'], format: 'JSON', endpoint: 'api-v3.thaiwater.net/api/v1/thaiwater30/public/rain_24h', cadence: 'hourly', access: 'open', via: 'proxy', terms: 'Public data, cite สสน. / ThaiWater' },
+  { id: 'thaiwater_warn', name: 'ThaiWater — station warnings', org: 'สถาบันสารสนเทศทรัพยากรน้ำ (สสน.)', hazards: ['flood'], format: 'JSON (text)', endpoint: 'api-v3.thaiwater.net/api/v1/thaiwater30/public/warning', cadence: 'hourly', access: 'open', via: 'proxy', terms: 'Public data, cite สสน. / ThaiWater' },
   { id: 'firms', name: 'NASA FIRMS — VIIRS active fire', org: 'NASA LANCE / FIRMS', hazards: ['fire'], format: 'CSV', endpoint: 'firms.modaps.eosdis.nasa.gov/data/active_fire/…/SouthEast_Asia_{24h|48h|7d}.csv', cadence: 'near real time (~3 h after overpass)', access: 'open', via: 'proxy', terms: 'NASA open data; cite FIRMS' },
   { id: 'usgs', name: 'USGS Earthquake Catalog', org: 'U.S. Geological Survey', hazards: ['quake'], format: 'GeoJSON', endpoint: 'earthquake.usgs.gov/fdsnws/event/1/query', cadence: 'minutes', access: 'open', via: 'direct', terms: 'Public domain' },
   { id: 'gdacs', name: 'GDACS event list', org: 'EC JRC / UN OCHA', hazards: ['quake', 'storm', 'flood', 'drought', 'fire'], format: 'GeoJSON', endpoint: 'gdacs.org/gdacsapi/api/events/geteventlist/SEARCH', cadence: 'event driven', access: 'open', via: 'proxy', terms: 'Free use with attribution' },
@@ -218,24 +218,22 @@ async function firms(days: number): Promise<FetchResult> {
 
 async function thaiwaterWl(): Promise<FetchResult> {
   const out = empty('thaiwater_wl');
-  const j = await getJson('https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load', 30000);
-  const f = nowIso();
-  const rows: any[] = j?.waterlevel_data?.data ?? [];
-  for (const r of rows) {
-    const lat = +r.station?.tele_station_lat, lon = +r.station?.tele_station_long;
+  const j = await getJson('/api/feeds?src=tw_wl', 30000);
+  const f = j.fetchedAt ?? nowIso();
+  for (const r of j.data ?? []) {
+    const lat = +r.st?.lat, lon = +r.st?.lon;
     if (!lat || !lon) continue;
-    const lv = r.situation_level as number | undefined;
-    const pct = r.storage_percent != null ? +r.storage_percent : NaN;
-    const name = r.station?.tele_station_name?.th ?? r.station?.tele_station_name?.en ?? '';
-    const prov = r.geocode?.province_name?.en ?? undefined;
-    out.stations.push({ kind: 'wl', lat, lon, value: pct, level: lv, name, time: bkk(r.waterlevel_datetime), province: prov });
+    const lv = r.lv as number | undefined;
+    const pct = r.pct != null ? +r.pct : NaN;
+    const name = r.st?.th ?? r.st?.en ?? '';
+    out.stations.push({ kind: 'wl', lat, lon, value: pct, level: lv, name, time: bkk(r.dt), province: r.prov });
     if (lv === 5 || lv === 1) {
       out.events.push({
-        id: `twl:${r.station?.id}`, source: 'thaiwater_wl', sourceId: String(r.station?.id ?? r.id), hazard: lv === 5 ? 'flood' : 'drought',
-        title: `${lv === 5 ? 'น้ำล้นตลิ่ง' : 'น้ำน้อยวิกฤติ'} — สถานี${name}`, lat, lon, time: bkk(r.waterlevel_datetime), fetchedAt: f, status: 'confirmed',
+        id: `twl:${r.st?.id}`, source: 'thaiwater_wl', sourceId: String(r.st?.id ?? ''), hazard: lv === 5 ? 'flood' : 'drought',
+        title: `${lv === 5 ? 'น้ำล้นตลิ่ง' : 'น้ำน้อยวิกฤติ'} — สถานี${name}`, lat, lon, time: bkk(r.dt), fetchedAt: f, status: 'confirmed',
         severity: lv === 5 ? (pct >= 120 ? 3 : 2) : 1, severityText: `${Number.isFinite(pct) ? pct.toFixed(0) : '—'}% ของความจุลำน้ำ (ระดับตลิ่ง)`,
-        url: 'https://www.thaiwater.net/water/wl', province: prov,
-        details: { station: name, river_capacity_pct: Number.isFinite(pct) ? +pct.toFixed(1) : null, water_level_msl_m: r.waterlevel_msl != null ? +r.waterlevel_msl : null, previous_msl_m: r.waterlevel_msl_previous != null ? +r.waterlevel_msl_previous : null, bank_left_m: r.station?.left_bank ?? null, bank_right_m: r.station?.right_bank ?? null, basin: r.basin?.basin_name?.th ?? null, amphoe: r.geocode?.amphoe_name?.th ?? null, agency: r.agency?.agency_shortname?.th ?? null },
+        url: 'https://www.thaiwater.net/water/wl', province: r.prov,
+        details: { station: name, river_capacity_pct: Number.isFinite(pct) ? +pct.toFixed(1) : null, water_level_msl_m: r.msl != null ? +r.msl : null, previous_msl_m: r.prev != null ? +r.prev : null, bank_left_m: r.st?.lb ?? null, bank_right_m: r.st?.rb ?? null, basin: r.basin ?? null, amphoe: r.amphoe ?? null, agency: r.agency ?? null },
       });
     }
   }
@@ -246,21 +244,20 @@ async function thaiwaterWl(): Promise<FetchResult> {
 
 async function thaiwaterRain(): Promise<FetchResult> {
   const out = empty('thaiwater_rain');
-  const j = await getJson('https://api-v3.thaiwater.net/api/v1/thaiwater30/public/rain_24h', 40000);
-  const f = nowIso();
-  for (const r of j?.data ?? []) {
-    const mm = +r.rain_24h;
-    const lat = +r.station?.tele_station_lat, lon = +r.station?.tele_station_long;
+  const j = await getJson('/api/feeds?src=tw_rain', 40000);
+  const f = j.fetchedAt ?? nowIso();
+  for (const r of j.data ?? []) {
+    const mm = +r.mm;
+    const lat = +r.st?.lat, lon = +r.st?.lon;
     if (!lat || !lon || !(mm >= 35.1)) continue;
-    const name = r.station?.tele_station_name?.th ?? '';
-    const prov = r.geocode?.province_name?.en;
-    out.stations.push({ kind: 'rain', lat, lon, value: mm, name, time: bkk(r.rainfall_datetime), province: prov });
+    const name = r.st?.th ?? '';
+    out.stations.push({ kind: 'rain', lat, lon, value: mm, name, time: bkk(r.dt), province: r.prov });
     if (mm >= 90.1)
       out.events.push({
-        id: `trn:${r.station?.id}`, source: 'thaiwater_rain', sourceId: String(r.station?.id ?? r.id), hazard: 'storm',
-        title: `ฝนหนักมาก ${mm.toFixed(1)} มม./24 ชม. — ${name}`, lat, lon, time: bkk(r.rainfall_datetime), fetchedAt: f, status: 'confirmed',
-        severity: mm >= 150 ? 3 : 2, severityText: `${mm.toFixed(1)} mm / 24 h`, url: 'https://www.thaiwater.net/water/rain', province: prov,
-        details: { station: name, rain_24h_mm: mm, rain_1h_mm: r.rain_1h ?? null, amphoe: r.geocode?.amphoe_name?.th ?? null, agency: r.agency?.agency_shortname?.th ?? null },
+        id: `trn:${r.st?.id}`, source: 'thaiwater_rain', sourceId: String(r.st?.id ?? ''), hazard: 'storm',
+        title: `ฝนหนักมาก ${mm.toFixed(1)} มม./24 ชม. — ${name}`, lat, lon, time: bkk(r.dt), fetchedAt: f, status: 'confirmed',
+        severity: mm >= 150 ? 3 : 2, severityText: `${mm.toFixed(1)} mm / 24 h`, url: 'https://www.thaiwater.net/water/rain', province: r.prov,
+        details: { station: name, rain_24h_mm: mm, rain_1h_mm: r.mm1h ?? null, amphoe: r.amphoe ?? null, agency: r.agency ?? null },
       });
   }
   const newest = out.stations.map((s) => s.time).sort().pop();
@@ -270,9 +267,9 @@ async function thaiwaterRain(): Promise<FetchResult> {
 
 async function thaiwaterWarn(): Promise<FetchResult> {
   const out = empty('thaiwater_warn');
-  const j = await getJson('https://api-v3.thaiwater.net/api/v1/thaiwater30/public/warning');
-  for (const r of j?.data ?? []) out.bulletins.push({ source: 'thaiwater_warn', time: bkk(r.datetime), text: String(r.message ?? '').trim(), url: 'https://www.thaiwater.net' });
-  out.state = { id: 'thaiwater_warn', status: 'ok', fetchedAt: nowIso(), upstreamTime: out.bulletins[0]?.time, count: out.bulletins.length, freshness: freshness('thaiwater_wl', out.bulletins[0]?.time) };
+  const j = await getJson('/api/feeds?src=tw_warn', 30000);
+  for (const r of j.data ?? []) out.bulletins.push({ source: 'thaiwater_warn', time: bkk(r.datetime), text: String(r.message ?? '').trim(), url: 'https://www.thaiwater.net' });
+  out.state = { id: 'thaiwater_warn', status: 'ok', fetchedAt: j.fetchedAt ?? nowIso(), upstreamTime: out.bulletins[0]?.time, count: out.bulletins.length, freshness: freshness('thaiwater_wl', out.bulletins[0]?.time) };
   return out;
 }
 
