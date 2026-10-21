@@ -269,8 +269,8 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
         inputs: () => [sar('vh')()],
         fn: ([a], [b]) => (a > -20 && a - b >= 3 ? 1 : b - a >= 3 ? 2 : 3),
         legend: [
-          { id: 1, label: 'Radar VH drop (possible clearing)', labelTh: 'เรดาร์ VH ลดลง (อาจถูกถาง)', color: '#ef4444' },
-          { id: 2, label: 'Radar VH increase', labelTh: 'เรดาร์ VH เพิ่มขึ้น', color: '#22c55e' },
+          { id: 1, label: 'Radar VH drop (possible clearing)', labelTh: 'สัญญาณเรดาร์ VH ลดลง (อาจถูกถาง)', color: '#ef4444' },
+          { id: 2, label: 'Radar VH increase', labelTh: 'สัญญาณเรดาร์ VH เพิ่มขึ้น', color: '#22c55e' },
         ],
         interest: [1],
       };
@@ -279,7 +279,7 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
         sensor, text: 'Sentinel-1 RTC VV (5×5 speckle filter): new strong scatterers = rise ≥ 4 dB to > −8 dB, outside cropland and existing built-up (ESA WorldCover 2021).',
         inputs: () => [sar('vv')()],
         fn: ([a], [b]) => (b - a >= 4 && b > -8 ? 1 : 3),
-        legend: [{ id: 1, label: 'New strong radar return (possible structure)', labelTh: 'สะท้อนเรดาร์แรงขึ้น (อาจเป็นสิ่งปลูกสร้าง)', color: '#f97316' }],
+        legend: [{ id: 1, label: 'New strong radar return (possible structure)', labelTh: 'สัญญาณเรดาร์สะท้อนแรงขึ้น (อาจเป็นสิ่งปลูกสร้าง)', color: '#f97316' }],
         interest: [1],
       };
     case 'water':
@@ -605,7 +605,7 @@ export function narrative(r: MonitorRun, lang: 'th' | 'en'): string[] {
   else
     lines.push(
       th
-        ? `ตรวจพบ${what} รวม ${fmt(ha)} เฮกตาร์ (${fmt(rai(s.interestKm2), 0)} ไร่) ใน ${r.hotspots?.length ?? 0} จุด`
+        ? `พบ${what} รวม ${fmt(ha)} เฮกตาร์ (${fmt(rai(s.interestKm2), 0)} ไร่) ${r.hotspots?.length ?? 0} จุด`
         : `${what}: ${fmt(ha)} ha (${fmt(rai(s.interestKm2), 0)} rai) detected in ${r.hotspots?.length ?? 0} patch(es).`,
     );
   const big = r.hotspots?.[0];

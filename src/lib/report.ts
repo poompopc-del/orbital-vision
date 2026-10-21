@@ -48,7 +48,12 @@ function scaleBar(f: BBox, frameWidthMm: number) {
 const NORTH = `<svg class="north" viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#0b1524" stroke="#fff" stroke-width="1.5"/><path d="M20 6 L27 28 L20 23 L13 28 Z" fill="#fff"/><text x="20" y="38" text-anchor="middle" font-size="8" fill="#fff" font-weight="700">N</text></svg>`;
 
 const zulu = (d: Date) => `${String(d.getUTCDate()).padStart(2, '0')} ${['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][d.getUTCMonth()]} ${d.getUTCFullYear()} / ${String(d.getUTCHours()).padStart(2, '0')}${String(d.getUTCMinutes()).padStart(2, '0')}Z`;
-const dmy = (s?: string) => (s ? new Date(s).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).toUpperCase() : '—');
+const MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const dmy = (s?: string) => {
+  if (!s) return '—';
+  const d = new Date(s);
+  return `${String(d.getUTCDate()).padStart(2, '0')} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+};
 
 export interface ReportInput {
   title: string;
@@ -214,20 +219,20 @@ table{border-collapse:collapse;width:100%}
 .scale{position:absolute;left:4mm;bottom:3mm;color:#fff;font-size:8pt;font-weight:700;text-shadow:0 0 2px #000}
 .scale .bar{height:2mm;background:#fff;border:1px solid #000;margin-bottom:.5mm}
 .src{position:absolute;left:10mm;bottom:9mm;font-size:7pt;color:#444;max-width:270mm}
-.aoi{display:grid;grid-template-columns:62mm 1fr;gap:3mm;height:128mm}
-.side{display:flex;flex-direction:column;gap:2mm}
-.box{border:1px solid #bbb;background:#f6f6f8;padding:2mm 2.5mm;flex:1;overflow:hidden}
+.aoi{display:grid;grid-template-columns:62mm 1fr;gap:3mm;height:124mm}
+.side{display:flex;flex-direction:column;gap:2mm;min-height:0}
+.box{border:1px solid #bbb;background:#f6f6f8;padding:2mm 2.5mm;flex:1;min-height:0;overflow:hidden}
 .box h3{margin:0 0 1mm;font-size:10pt}
 .box .meta{font-size:7.5pt;color:#3b2a8a;margin-bottom:1mm}
 .box ul{margin:0;padding-left:4mm;font-size:8.3pt;line-height:1.35}
 .box li{margin-bottom:.8mm}
 .kv{display:flex;justify-content:space-between;gap:2mm;font-size:8pt;border-top:1px solid #ddd;padding-top:.8mm;margin-top:.8mm}
 .hst{margin-top:1.5mm;font-size:7.5pt}.hst th,.hst td{border-bottom:1px solid #ddd;padding:.4mm .8mm;text-align:left}
-.loc{position:relative;height:42mm;border:1px solid #333;overflow:hidden}
+.loc{position:relative;flex:none;height:34mm;border:1px solid #333;overflow:hidden}
 .loc img{width:100%;height:100%;object-fit:fill}
 .loc span{position:absolute;left:1.5mm;bottom:1mm;color:#fff;font-size:7pt;font-weight:700;text-shadow:0 0 2px #000}
 .locmk{position:absolute;width:3mm;height:3mm;border:1.5px solid #fff;background:#e11;transform:translate(-50%,-50%)}
-.main{height:128mm}
+.main{height:124mm}
 .aoiline{position:absolute;inset:0;width:100%;height:100%}
 .hs{position:absolute;transform:translate(-50%,-50%);min-width:4.2mm;height:4.2mm;border-radius:50%;background:#fff;color:#c00;border:1.5px solid #c00;font-size:6.5pt;font-weight:700;display:flex;align-items:center;justify-content:center}
 .tag{background:rgba(11,21,36,.85);color:#fff;font-size:7.5pt;padding:.6mm 1.5mm}
