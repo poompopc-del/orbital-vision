@@ -73,6 +73,8 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
     return { ...cl, ...out };
   };
 
+  /** passes everything that can be checked without measuring (scene cloud, pixel size, coverage) */
+  const sceneOk = (it: ImageryItem) => checkScene(it, { cloudPct: 0, shadowPct: 0, noDataPct: 0 }, qc).ok;
   const passes = (it: ImageryItem, m: Record<string, AoiCloud | null | 'err'>) => checkScene(it, m[it.id] === 'err' ? null : (m[it.id] as AoiCloud | null | undefined), qc).ok;
 
   const preset = async (p: Preset) => {
@@ -83,10 +85,10 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
     try {
       if (p === 'event') {
         const ev = new Date(eventDate).toISOString();
-        const before = list.filter((x) => x.datetime < ev).reverse().slice(0, 8);
+        const before = list.filter((x) => x.datetime < ev && sceneOk(x)).reverse().slice(0, 8);
         const m1 = await measure(before, ac.signal);
         const a = before.find((x) => passes(x, m1)) ?? null;
-        const after = list.filter((x) => x.datetime >= ev && (!a || x.collection === a.collection)).slice(0, 8);
+        const after = list.filter((x) => x.datetime >= ev && sceneOk(x) && (!a || x.collection === a.collection)).slice(0, 8);
         const m2 = await measure(after, ac.signal);
         const b = after.find((x) => passes(x, { ...m1, ...m2 })) ?? null;
         setA(a);
@@ -94,16 +96,16 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
         if (!a || !b) setErr(L(`ไม่พบภาพที่ผ่านเกณฑ์${!a ? 'ก่อน' : 'หลัง'}วันเหตุการณ์ ลองขยายช่วงค้นหา ผ่อนเกณฑ์เมฆ หรือใช้เรดาร์`, `No passing scene ${!a ? 'before' : 'after'} the event — widen the search, relax the cloud limits or use radar`));
         return;
       }
-      const latest = [...list].reverse().slice(0, 10);
+      const latest = [...list].reverse().filter(sceneOk).slice(0, 8);
       const m1 = await measure(latest, ac.signal);
       const b = latest.find((x) => passes(x, m1)) ?? null;
       if (!b) {
-        setErr(L('ไม่มีภาพล่าสุดที่ผ่านเกณฑ์', 'No recent scene passes the thresholds'));
+        setErr(L(`ไม่มีภาพในช่วงค้นหาที่ผ่านเกณฑ์ (ตรวจ ${latest.length} ภาพที่เมฆรวมไม่เกิน ${qc.maxSceneCloud}%) — ขยายช่วงค้นหา ผ่อนเกณฑ์เมฆ หรือเลือกเรดาร์`, 'No scene in the range passes — widen the range, relax the cloud limits or use radar'));
         return;
       }
       const back = p === 'week' ? 7 : p === 'month' ? 30 : 365;
       const target = new Date(new Date(b.datetime).getTime() - back * 86400e3).toISOString();
-      const near = [...list].filter((x) => x.collection === b.collection && x.datetime < b.datetime).sort((x, y) => Math.abs(+new Date(x.datetime) - +new Date(target)) - Math.abs(+new Date(y.datetime) - +new Date(target))).slice(0, 8);
+      const near = [...list].filter((x) => x.collection === b.collection && x.datetime < b.datetime && sceneOk(x)).sort((x, y) => Math.abs(+new Date(x.datetime) - +new Date(target)) - Math.abs(+new Date(y.datetime) - +new Date(target))).slice(0, 8);
       const m2 = await measure(near, ac.signal);
       const a = nearestPassing(near, target, (x) => passes(x, { ...m1, ...m2 }), b);
       setA(a);
