@@ -26,8 +26,36 @@ export async function boundarySource(): Promise<{ custom: boolean; name?: string
  *  there is one, otherwise from Natural Earth. */
 export async function borderLines(n: Neighbour): Promise<[number, number][][]> {
   const b = await getBoundary();
-  if (b?.lines[n]?.length) return b.lines[n];
+  if (b?.lines[n]?.length) return stitch(b.lines[n]);
   return naturalEarthLines(n);
+}
+
+/** Join line pieces whose ends meet (within ~50 m) into continuous lines, longest first. */
+export function stitch(parts: [number, number][][], tolDeg = 0.0005): [number, number][][] {
+  const pool = parts.filter((p) => p.length > 1).map((p) => [...p]);
+  const near = (a: [number, number], b: [number, number]) => Math.abs(a[0] - b[0]) < tolDeg && Math.abs(a[1] - b[1]) < tolDeg;
+  const out: [number, number][][] = [];
+  while (pool.length) {
+    let cur = pool.shift()!;
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (let i = 0; i < pool.length; i++) {
+        const q = pool[i];
+        const h = cur[0], t = cur[cur.length - 1];
+        if (near(t, q[0])) cur = [...cur, ...q.slice(1)];
+        else if (near(t, q[q.length - 1])) cur = [...cur, ...[...q].reverse().slice(1)];
+        else if (near(h, q[q.length - 1])) cur = [...q, ...cur.slice(1)];
+        else if (near(h, q[0])) cur = [...[...q].reverse(), ...cur.slice(1)];
+        else continue;
+        pool.splice(i, 1);
+        grew = true;
+        break;
+      }
+    }
+    out.push(cur);
+  }
+  return out.sort((a, b) => b.length - a.length);
 }
 
 async function naturalEarthLines(n: Neighbour): Promise<[number, number][][]> {
@@ -122,9 +150,9 @@ export function tilesAlong(lines: [number, number][][], sizeKm: number, prefix: 
       while (s <= d) {
         const t = s / d;
         const c: [number, number] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-        // skip if too close to the previous tile (sharp bends)
-        const prev = centres[centres.length - 1];
-        if (!prev || dist(prev, c) >= sizeKm * 0.7) {
+        // skip if too close to any earlier tile (sharp bends, overlapping line pieces)
+        const tooClose = centres.some((q) => Math.abs(q[1] - c[1]) * KM_LAT < sizeKm && dist(q, c) < sizeKm * 0.7);
+        if (!tooClose) {
           centres.push(c);
           let cc = c;
           if (shift && d > 0) {

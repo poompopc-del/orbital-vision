@@ -39,3 +39,18 @@ test('boxes keep their size and ids when shifted', () => {
     assert.ok(Math.abs((e1 - w1) - (e2 - w2)) < 1e-9);
   });
 });
+
+import { stitch } from '../src/lib/border';
+test('stitch joins touching pieces in any direction', () => {
+  const parts: [number, number][][] = [[[0, 0], [1, 0]], [[2, 0], [1, 0]], [[2, 0], [3, 0]], [[10, 10], [11, 10]]];
+  const s = stitch(parts);
+  assert.equal(s.length, 2);
+  assert.deepEqual(s[0][0], [0, 0]);
+  assert.deepEqual(s[0][s[0].length - 1], [3, 0]);
+});
+
+test('overlapping pieces do not produce duplicate boxes', () => {
+  const a = tilesAlong([line, line], 10, 'T');
+  const b = tilesAlong([line], 10, 'T');
+  assert.equal(a.length, b.length);
+});
