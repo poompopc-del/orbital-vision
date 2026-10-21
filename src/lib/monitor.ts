@@ -9,7 +9,7 @@
 //  • confidence is derived from cloud-free coverage, scene geometry and time gap, and is shown
 import { classify, cellAreaKm2, cellLonLat, fetchRaster, gridFor, type ClassDef, type Classified, type Raster } from './change';
 import { pickBestScene } from './autoscene';
-import { indexExpression, indexSummary, INDICES, S2_CLEAR_EXPR, sarDbExpression, sensorOf } from './spectral';
+import { indexExpression, indexSummary, INDICES, PC_DATA, S2_CLEAR_EXPR, sarDbExpression, sensorOf } from './spectral';
 import { renderScene } from './export';
 import { areaKm2, centroid } from './geo';
 import type { ImageryItem, StacCollectionId } from './stac';
@@ -80,6 +80,7 @@ export interface MonitorRun {
   confidence?: 'high' | 'medium' | 'low';
   confidenceNotes?: string[];
   method?: string;
+  note?: string;
   bounds?: { west: number; south: number; east: number; north: number };
   overlayBounds?: { west: number; south: number; east: number; north: number };
 }
@@ -208,7 +209,7 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
     switch (p) {
       case 'clearing':
         return {
-          sensor, text: 'Sentinel-2 NDVI: loss = NDVI(before) ≥ 0.45 and drop ≥ 0.20; gain = rise ≥ 0.20 to ≥ 0.45. Cloud/shadow masked with SCL.',
+          sensor, text: 'Sentinel-2 NDVI: loss = NDVI(before) ≥ 0.45 and drop ≥ 0.20, only on tree/shrub cover (ESA WorldCover 2021); gain = rise ≥ 0.20 to ≥ 0.45. Cloud/shadow masked with SCL.',
           inputs: (it) => [idx('ndvi')(it)],
           fn: ([a], [b]) => (a >= 0.45 && a - b >= 0.2 ? 1 : b >= 0.45 && b - a >= 0.2 ? 2 : 3),
           legend: [
@@ -219,7 +220,7 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
         };
       case 'construction':
         return {
-          sensor, text: 'Sentinel-2: new bare/built surface = NDVI drop ≥ 0.15 and NDBI rise ≥ 0.10. Cloud/shadow masked with SCL.',
+          sensor, text: 'Sentinel-2: new bare/built surface = NDVI drop ≥ 0.15 and NDBI rise ≥ 0.10, outside cropland and existing built-up (ESA WorldCover 2021). Cloud/shadow masked with SCL.',
           inputs: (it) => [idx('ndvi')(it), idx('ndbi')(it)],
           fn: ([na, ba], [nb, bb]) => (na - nb >= 0.15 && bb - ba >= 0.1 ? 1 : 3),
           legend: [{ id: 1, label: 'New bare / built surface (possible road, clearing or structure)', labelTh: 'ผิวดินเปิด / สิ่งปลูกสร้างใหม่ (อาจเป็นทาง ที่โล่ง หรืออาคาร)', color: '#f97316' }],
@@ -264,7 +265,7 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
   switch (p) {
     case 'clearing':
       return {
-        sensor, text: 'Sentinel-1 RTC VH: possible clearing = VH(before) > −20 dB and drop ≥ 3 dB (loss of canopy volume scattering).',
+        sensor, text: 'Sentinel-1 RTC VH (5×5 speckle filter): possible clearing = VH(before) > −20 dB and drop ≥ 3 dB, only on tree/shrub cover (ESA WorldCover 2021).',
         inputs: () => [sar('vh')()],
         fn: ([a], [b]) => (a > -20 && a - b >= 3 ? 1 : b - a >= 3 ? 2 : 3),
         legend: [
@@ -275,7 +276,7 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
       };
     case 'construction':
       return {
-        sensor, text: 'Sentinel-1 RTC VV: new strong scatterers = rise ≥ 4 dB to > −8 dB (possible structures, metal, vehicles).',
+        sensor, text: 'Sentinel-1 RTC VV (5×5 speckle filter): new strong scatterers = rise ≥ 4 dB to > −8 dB, outside cropland and existing built-up (ESA WorldCover 2021).',
         inputs: () => [sar('vv')()],
         fn: ([a], [b]) => (b - a >= 4 && b > -8 ? 1 : 3),
         legend: [{ id: 1, label: 'New strong radar return (possible structure)', labelTh: 'สะท้อนเรดาร์แรงขึ้น (อาจเป็นสิ่งปลูกสร้าง)', color: '#f97316' }],
@@ -283,7 +284,7 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
       };
     case 'water':
       return {
-        sensor, text: 'Sentinel-1 RTC VV < −18 dB = open water. New water = dry before, wet after (same relative orbit preferred).',
+        sensor, text: 'Sentinel-1 RTC VV (5×5 speckle filter) < −18 dB = open water. New water = dry before, wet after (same relative orbit preferred).',
         inputs: () => [sar('vv')()],
         fn: ([a], [b]) => (a >= -18 && b < -18 ? 1 : a < -18 && b >= -18 ? 2 : a < -18 && b < -18 ? 4 : 3),
         legend: [
@@ -328,6 +329,56 @@ async function clearestOptical(aoi: GeoJSON.Polygon, from: string, to: string, m
     }
   }
   return best;
+}
+
+// ---- ESA WorldCover 2021 (10 m) land-cover mask, read through the Planetary Computer data API
+const WC_ALLOW: Partial<Record<Purpose, number[]>> = { clearing: [10, 20] }; // tree cover, shrubland
+const WC_DENY: Partial<Record<Purpose, number[]>> = { construction: [40, 50] }; // cropland, built-up
+
+async function landCoverMask(aoi: GeoJSON.Polygon, purpose: Purpose, grid: ReturnType<typeof gridFor>, signal?: AbortSignal): Promise<Float32Array | null> {
+  const allow = WC_ALLOW[purpose], deny = WC_DENY[purpose];
+  if (!allow && !deny) return null;
+  const r = await fetch('https://planetarycomputer.microsoft.com/api/stac/v1/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ collections: ['esa-worldcover'], intersects: aoi, limit: 4, sortby: [{ field: 'properties.datetime', direction: 'desc' }] }),
+    signal,
+  });
+  if (!r.ok) return null;
+  const feats: any[] = (await r.json()).features ?? [];
+  const f = feats.find((x) => String(x.properties?.datetime ?? x.properties?.start_datetime ?? '').startsWith('2021')) ?? feats[0];
+  if (!f) return null;
+  const cond = allow ? allow.map((c) => `(map==${c})`).join('|') : deny!.map((c) => `(map!=${c})`).join('&');
+  // 2 = keep, 1 = drop (0 is reserved for no-data)
+  const pseudo = { id: f.id, collection: 'esa-worldcover' } as unknown as ImageryItem;
+  const m = await fetchRaster(pseudo, `where(${cond},2,1)`, [0, 2], grid, signal);
+  return m.values;
+}
+
+/** 5×5 mean in linear power units (dB in, dB out), NaN-aware — reduces radar speckle. */
+function despeckle(r: Raster): Raster {
+  const { width: W, height: H } = r.grid;
+  const lin = new Float32Array(r.values.length);
+  for (let p = 0; p < lin.length; p++) lin[p] = Number.isNaN(r.values[p]) ? NaN : 10 ** (r.values[p] / 10);
+  const out = new Float32Array(lin.length);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const p = y * W + x;
+      if (Number.isNaN(lin[p])) { out[p] = NaN; continue; }
+      let s = 0, n = 0;
+      for (let dy = -2; dy <= 2; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= H) continue;
+        for (let dx = -2; dx <= 2; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= W) continue;
+          const v = lin[yy * W + xx];
+          if (!Number.isNaN(v)) { s += v; n++; }
+        }
+      }
+      out[p] = 10 * Math.log10(s / n);
+    }
+  return { grid: r.grid, values: out };
 }
 
 export interface RunProgress {
@@ -379,6 +430,7 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
       return { ...base, reason: tried.join('; ') || 'no usable imagery' };
     }
     const m = methodFor(a.purpose, sensor)!;
+    const note = sensor === 'sar' && !wantSar && tried.length ? `optical not usable (${tried.join('; ')}) — radar used instead` : undefined;
 
     // ---- read pixels
     const grid = gridFor(aoi);
@@ -393,10 +445,14 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
         const clear = await fetchRaster(it, S2_CLEAR_EXPR, [0, 1], grid, signal, (d, n) => progress(`ตรวจเมฆภาพ${lbl} ${d}/${n}`));
         for (const r of out) for (let p = 0; p < r.values.length; p++) if (!(clear.values[p] > 0.5)) r.values[p] = NaN;
       }
+      if (sensorOf(it) === 's1') return out.map(despeckle);
       return out;
     };
     const ra = await read(A, 'ก่อน');
     const rb = await read(B, 'หลัง');
+    progress('อ่านแผนที่สิ่งปกคลุมดิน (ESA WorldCover)…');
+    const lc = await landCoverMask(aoi, a.purpose, grid, signal).catch(() => null);
+    const lcNote = (WC_ALLOW[a.purpose] || WC_DENY[a.purpose]) && !lc ? 'land-cover mask unavailable — all land classes analysed' : undefined;
     progress('จำแนกการเปลี่ยนแปลง…');
     // pack multi-input pixels into one virtual raster pair for classify(): index p → arrays
     const n = ra.length;
@@ -416,7 +472,10 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
         va.push(ra[k].values[p]);
         vb.push(rb[k].values[p]);
       }
-      return m.fn(va, vb);
+      const c = m.fn(va, vb);
+      // land-cover filter applies to the classes of interest only (e.g. loss on forest)
+      if (lc && m.interest.includes(c) && !(lc[p] > 1.5)) return 3;
+      return c;
     }, defs);
     // classify() counts 255 as a class; move it to no-data
     const nd = res.areasKm2[255] ?? 0;
@@ -425,8 +484,8 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
     res.noDataKm2 += nd;
 
     // ---- hotspots (connected components of the classes of interest)
-    const hotspots = findHotspots(res, m.interest);
-    const interestKm2 = hotspots.reduce((s, h) => s + h.areaHa / 100, 0);
+    const { list: hotspots, totalHa } = findHotspots(res, m.interest, sensor === 'sar' ? 0.5 : MIN_HOTSPOT_HA);
+    const interestKm2 = totalHa / 100;
     const validFrac = res.validKm2 / Math.max(res.aoiKm2, 1e-9);
     if (validFrac < 0.2) {
       return { ...base, sensor, A: meta(A, aCloud != null ? aCloud * 100 : null), B: meta(B, bCloud != null ? bCloud * 100 : null), reason: `only ${Math.round(validFrac * 100)}% of the AOI is cloud-free in both images` };
@@ -444,7 +503,8 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
     const geomA = A.raw?.properties?.['sat:relative_orbit'] ?? A.raw?.properties?.['s2:mgrs_tile'];
     const geomB = B.raw?.properties?.['sat:relative_orbit'] ?? B.raw?.properties?.['s2:mgrs_tile'];
     if (geomA != null && geomB != null && geomA !== geomB) { score--; notes.push('images from different orbit/tile geometry'); }
-    if (sensor === 'sar') notes.push('radar change can also come from soil moisture, crops or rain');
+    if (sensor === 'sar') { notes.push('radar change can also come from soil moisture, crops or rain'); score = Math.min(score, 2); }
+    if (lcNote) notes.push(lcNote);
     const confidence = score >= 3 ? 'high' : score === 2 ? 'medium' : 'low';
 
     // ---- images for the record / report
@@ -471,6 +531,7 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
       confidence,
       confidenceNotes: notes,
       method: m.text,
+      note,
       bounds: after ? { west: after.west, south: after.south, east: after.east, north: after.north } : undefined,
       overlayBounds: { west: res.grid.west, south: res.grid.south, east: res.grid.east, north: res.grid.north },
     };
@@ -486,7 +547,7 @@ function hexRgba(hex: string, a: number): [number, number, number, number] {
 }
 
 /** 8-connected components of the interest classes; keeps those ≥ MIN_HOTSPOT_HA, largest first. */
-function findHotspots(res: Classified, interest: number[]): Hotspot[] {
+function findHotspots(res: Classified, interest: number[], minHa: number): { list: Hotspot[]; totalHa: number } {
   const g = res.grid;
   const W = g.width, H = g.height;
   const want = new Uint8Array(256);
@@ -518,10 +579,11 @@ function findHotspots(res: Classified, interest: number[]): Hotspot[] {
         }
     }
     const ha = area * 100;
-    if (ha >= MIN_HOTSPOT_HA) out.push({ n: 0, lat: sy / cnt, lon: sx / cnt, areaHa: ha, cls: c0 });
+    if (ha >= minHa) out.push({ n: 0, lat: sy / cnt, lon: sx / cnt, areaHa: ha, cls: c0 });
   }
   out.sort((x, y) => y.areaHa - x.areaHa);
-  return out.slice(0, 50).map((h, i) => ({ ...h, n: i + 1 }));
+  const totalHa = out.reduce((s, h) => s + h.areaHa, 0);
+  return { list: out.slice(0, 50).map((h, i) => ({ ...h, n: i + 1 })), totalHa };
 }
 
 // ---------------------------------------------------------------- narrative (facts only, from numbers)

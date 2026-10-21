@@ -500,6 +500,8 @@ function AoiDetail({ aoi, onRun, busy, lang }: { aoi: MonitorAoi; onRun: () => v
               <Badge>{run.sensor === 'sar' ? 'Sentinel-1' : 'Sentinel-2'}</Badge>
             </div>
             <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-slate-200">{narrative(run, lang).map((x) => <li key={x}>{x}</li>)}</ul>
+            {run.note && <p className="text-[10px] text-warn">{run.note}</p>}
+            <p className="text-[10px] text-muted">{run.method}</p>
             {!!run.confidenceNotes?.length && <ul className="pl-4 text-[10px] text-muted">{run.confidenceNotes.map((x) => <li key={x}>• {x}</li>)}</ul>}
             <div className="grid grid-cols-2 gap-1.5">
               <figure>
