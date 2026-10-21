@@ -542,7 +542,7 @@ function PlacePanel({ p, articles, onClose, onPin, pinning }: { p: NewsPlace; ar
         <div className="mb-1 font-semibold text-cyan-300">{L('ข่าวที่กล่าวถึงพื้นที่นี้', 'Stories about this place')}</div>
         <div className="space-y-2">
           {articles.map((a) => {
-            const ref = a.places.find((r) => placeKey(r) === p.key);
+            const ref = a.places.find((r) => placeKey(r) === p.key) ?? a.places.find((r) => r.province === p.province && (!p.amphoe || r.amphoe === p.amphoe || r.tambon === p.tambon));
             return (
               <div key={a.id} className="flex gap-2">
                 {a.image && <img src={a.image} alt="" className="h-14 w-20 shrink-0 rounded object-cover" referrerPolicy="no-referrer" onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />}
@@ -550,6 +550,7 @@ function PlacePanel({ p, articles, onClose, onPin, pinning }: { p: NewsPlace; ar
                   <a href={a.realUrl ?? a.link} target="_blank" rel="noreferrer" className="text-[12px] leading-snug text-white hover:underline">{a.title}</a>
                   <div className="text-[10px] text-muted">{a.outlet} · {FEED_TH[a.feed]} · {tTime(a.published)}</div>
                   {ref && <div className="text-[10px] text-slate-400">“…{ref.quote}…”</div>}
+                  {a.places.length > 8 && <div className="text-[10px] text-warn">{L(`ข่าวนี้กล่าวถึง ${a.places.length} พื้นที่ อาจเป็นรายชื่อพื้นที่เฝ้าระวัง/สรุปสถานการณ์ ไม่ใช่จุดน้ำท่วมทั้งหมด`, `This story lists ${a.places.length} places — possibly a watch list or round-up`)}</div>}
                 </div>
               </div>
             );

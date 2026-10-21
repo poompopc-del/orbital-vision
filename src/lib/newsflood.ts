@@ -265,7 +265,7 @@ export const loadGaz = () =>
   }));
 const norm = (s: string) => s.replace(/^(อำเภอ|ตำบล|แขวง|เขต|กิ่งอำเภอ)/, '').replace(/\s+/g, '');
 
-function fromGaz(g: Gaz, ref: PlaceRef): (GeoHit & { level: 'tambon' | 'amphoe' }) | null {
+function fromGaz(g: Gaz, ref: PlaceRef): (NonNullable<GeoHit> & { level: 'tambon' | 'amphoe'; amp: string; tam?: string }) | null {
   const th = PROVINCE_TH[ref.province];
   const pi = g.p.indexOf(th);
   if (pi < 0) return null;
@@ -276,9 +276,9 @@ function fromGaz(g: Gaz, ref: PlaceRef): (GeoHit & { level: 'tambon' | 'amphoe' 
     const tam = norm(ref.tambon);
     const cands = g.t.filter((x) => x[2] === pi && x[0] === tam);
     const t = (ampHit ? cands.find((x) => x[1] === ampHit[0]) : undefined) ?? (cands.length === 1 || !amp ? cands[0] : undefined);
-    if (t) return { lat: t[3], lon: t[4], bbox: [t[5], t[6], t[7], t[8]], name: `ต.${t[0]} อ.${t[1]} จ.${th}`, level: 'tambon' };
+    if (t) return { lat: t[3], lon: t[4], bbox: [t[5], t[6], t[7], t[8]], name: `ต.${t[0]} อ.${t[1]} จ.${th}`, level: 'tambon', amp: t[1], tam: t[0] };
   }
-  if (ampHit) return { lat: ampHit[2], lon: ampHit[3], bbox: [ampHit[4], ampHit[5], ampHit[6], ampHit[7]], name: `อ.${ampHit[0]} จ.${th}`, level: 'amphoe' };
+  if (ampHit) return { lat: ampHit[2], lon: ampHit[3], bbox: [ampHit[4], ampHit[5], ampHit[6], ampHit[7]], name: `อ.${ampHit[0]} จ.${th}`, level: 'amphoe', amp: ampHit[0] };
   return null;
 }
 
@@ -291,7 +291,7 @@ function exists(g: Gaz, provEn: string, amp?: string, tam?: string) {
 export const GAZ_LABEL = 'ทำเนียบตำบล/อำเภอ (OpenGISData-Thailand)';
 
 /** Locate a place. The result must lie inside the named province; otherwise null. */
-export async function geocode(ref: PlaceRef, provinces: Province[]): Promise<GeoHit & { via?: string; level?: Precision }> {
+export async function geocode(ref: PlaceRef, provinces: Province[]): Promise<(NonNullable<GeoHit> & { via?: string; level?: Precision; amp?: string; tam?: string }) | null> {
   const key = placeKey(ref);
   const prov = provinces.find((p) => p.en === ref.province);
   if (!prov) return null;
@@ -475,7 +475,11 @@ export async function placeArticles(arts: NewsArticle[], onProgress: (m: string)
       continue;
     }
     // a tambon that could not be found but whose amphoe could is placed at amphoe level
-    const eff: PlaceRef = g.level === 'amphoe' && r.precision === 'tambon' ? { province: r.province, amphoe: r.amphoe, precision: 'amphoe', quote: r.quote } : r;
+    // use the gazetteer's official names so "ต.ศาลาแดง" and "ต.ศาลาแดง อ.บางน้ำเปรี้ยว" become one place
+    const eff: PlaceRef =
+      g.level === 'tambon' ? { province: r.province, amphoe: g.amp, tambon: g.tam, precision: 'tambon', quote: r.quote }
+      : g.level === 'amphoe' ? { province: r.province, amphoe: g.amp, precision: 'amphoe', quote: r.quote }
+      : r;
     const ek = placeKey(eff);
     if (ek !== k) refs.set(k, eff);
     if (!byKey.has(ek))
