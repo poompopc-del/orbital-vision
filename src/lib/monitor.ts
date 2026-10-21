@@ -11,8 +11,12 @@ import { classify, cellAreaKm2, cellLonLat, fetchRaster, gridFor, type ClassDef,
 import { pickBestScene } from './autoscene';
 import { aoiStatistics, indexExpression, indexSummary, INDICES, S2_CLEAR_EXPR, sarDbExpression, sensorOf } from './spectral';
 import { renderScene } from './export';
-import { areaKm2, centroid } from './geo';
+import { centroid } from './geo';
+import { geometryAreaKm2, fmtArea, type AreaUnit } from './area';
+import { checkPair, checkScene, comparisonQuality, familyOf, gsdMeters, loadQc, sameSeason, type AoiCloud, type Quality, type QcSettings } from './qc';
+import { searchArchive } from './stac';
 import type { ImageryItem, StacCollectionId } from './stac';
+const areaKm2 = (g: GeoJSON.Polygon) => geometryAreaKm2(g);
 
 // ---------------------------------------------------------------- types
 
@@ -39,19 +43,29 @@ export interface SceneMeta {
   id: string;
   collection: string;
   label: string;
+  /** acquisition time (never the processing or catalogue time) */
   datetime: string;
+  /** whole-scene cloud from the catalogue, % */
   cloud: number | null;
+  /** cloud (incl. cirrus) inside the AOI from the per-pixel mask, % */
   aoiCloudPct: number | null;
+  /** cloud shadow inside the AOI, % */
+  aoiShadowPct?: number | null;
   gsd: string;
+  processed?: string | null;
+  ingested?: string | null;
 }
 
 export interface Hotspot {
   n: number;
   lat: number;
   lon: number;
+  /** legacy field (older runs); new runs also carry areaKm2 */
   areaHa: number;
+  areaKm2?: number;
   cls: number;
 }
+export const hotspotKm2 = (h: Hotspot) => h.areaKm2 ?? h.areaHa / 100;
 
 export interface LegendItem {
   id: number;
@@ -74,7 +88,24 @@ export interface MonitorRun {
   sensor?: 'optical' | 'sar';
   A?: SceneMeta;
   B?: SceneMeta;
-  stats?: { aoiKm2: number; validKm2: number; noDataKm2: number; classKm2: Record<number, number>; interestKm2: number };
+  stats?: {
+    aoiKm2: number;
+    /** analysable in both images */
+    validKm2: number;
+    /** cloud + shadow + no data (everything not analysable) */
+    noDataKm2: number;
+    /** breakdown of the not-analysable part (new runs) */
+    cloudKm2?: number;
+    shadowKm2?: number;
+    missingKm2?: number;
+    /** all change classes (pixels counted once) */
+    changeKm2?: number;
+    /** analysable and below the change thresholds */
+    noChangeKm2?: number;
+    classKm2: Record<number, number>;
+    /** change of interest in patches above the minimum size */
+    interestKm2: number;
+  };
   legend?: LegendItem[];
   interest?: number[];
   hotspots?: Hotspot[];
@@ -85,6 +116,16 @@ export interface MonitorRun {
   note?: string;
   bounds?: { west: number; south: number; east: number; north: number };
   overlayBounds?: { west: number; south: number; east: number; north: number };
+  /** comparison quality (images and their match) — separate from classification confidence */
+  quality?: Quality;
+  /** thresholds in force for this run */
+  qc?: QcSettings;
+  /** fair-comparison notes (sensor, geometry, season) */
+  pairNotes?: string[];
+  /** how the scenes were chosen */
+  mode?: 'auto' | 'manual';
+  /** other scenes that pass the thresholds (offered when this run could not conclude) */
+  suggestions?: { id: string; datetime: string; cloud: number | null; collection: string }[];
 }
 
 export const PURPOSES: { id: Purpose; label: string; labelTh: string; hint: string }[] = [
@@ -305,33 +346,9 @@ export const methodText = (p: Purpose, s: 'optical' | 'sar') => methodFor(p, s)?
 
 // ---------------------------------------------------------------- run
 
-const MIN_HOTSPOT_HA = 0.2;
 const OPT: StacCollectionId = 'sentinel-2-l2a';
 const RAD: StacCollectionId = 'sentinel-1-rtc';
 
-function meta(it: ImageryItem, aoiCloud: number | null): SceneMeta {
-  return { id: it.id, collection: it.collection, label: it.collectionLabel, datetime: it.datetime, cloud: it.cloudCover, aoiCloudPct: aoiCloud, gsd: it.gsd };
-}
-
-/** Among optical candidates pick the one with the least cloud *inside the AOI* (SCL statistics). */
-async function clearestOptical(aoi: GeoJSON.Polygon, from: string, to: string, match: ImageryItem | null, signal?: AbortSignal) {
-  const r = await pickBestScene(aoi, OPT, from, to, { match, maxCloud: 80 });
-  const pool = [r.item, ...r.candidates.filter((c) => c.source === 'planetary-computer' && c.id !== r.item?.id && (c.coveragePct ?? 0) >= 90)]
-    .filter(Boolean)
-    .slice(0, 5) as ImageryItem[];
-  let best: { it: ImageryItem; cloud: number } | null = null;
-  for (const it of pool) {
-    try {
-      const s = await indexSummary(it, idx('ndvi')(it).expr, aoi, [-1, 1], signal);
-      const c = s.cloudFraction ?? 1;
-      if (!best || c < best.cloud) best = { it, cloud: c };
-      if (c < 0.05) break;
-    } catch {
-      /* scene may not cover */
-    }
-  }
-  return best;
-}
 
 // ---- ESA WorldCover 2021 (10 m) land-cover mask, read through the Planetary Computer data API
 const WC_ALLOW: Partial<Record<Purpose, number[]>> = { clearing: [10, 20] }; // tree cover, shrubland
@@ -416,11 +433,51 @@ function despeckle(r: Raster): Raster {
   return { grid: r.grid, values: out };
 }
 
+// ---------------------------------------------------------------- cloud / shadow / no-data masks
+
+const lsBit = (k: number) => `(((qa_pixel/${2 ** k})%2)>=1)`;
+/** per-pixel state codes: 0 no data · 3 cloud shadow · 8 cloud · 4 clear */
+function stateExpr(it: ImageryItem): string | null {
+  const k = sensorOf(it);
+  if (k === 's2') return 'where((SCL==0)|(SCL==1),0,where(SCL==3,3,where((SCL==8)|(SCL==9)|(SCL==10),8,4)))';
+  if (k === 'landsat') return `where(${lsBit(0)},0,where(${lsBit(1)}|${lsBit(2)}|${lsBit(3)},8,where(${lsBit(4)},3,4)))`;
+  return null;
+}
+const cloudExpr = (it: ImageryItem) => (sensorOf(it) === 's2' ? 'where((SCL==8)|(SCL==9)|(SCL==10),1,0)' : `where(${lsBit(1)}|${lsBit(2)}|${lsBit(3)},1,0)`);
+const shadowExpr = (it: ImageryItem) => (sensorOf(it) === 's2' ? 'where(SCL==3,1,0)' : `where(${lsBit(4)}&(~${lsBit(3)}),1,0)`);
+
+/** Cloud and shadow inside the AOI from the scene's own mask (Sentinel-2 SCL / Landsat QA_PIXEL). Radar → null. */
+export async function measureAoiCloud(it: ImageryItem, aoi: GeoJSON.Polygon, signal?: AbortSignal): Promise<AoiCloud | null> {
+  const k = sensorOf(it);
+  if (k !== 's2' && k !== 'landsat') return null;
+  const [c, sh] = await Promise.all([aoiStatistics(it, cloudExpr(it), aoi, { signal }), aoiStatistics(it, shadowExpr(it), aoi, { signal }).catch(() => null)]);
+  const cover = it.coveragePct ?? 100;
+  const f = cover / 100;
+  return { cloudPct: c.mean * 100 * f, shadowPct: (sh?.mean ?? 0) * 100 * f, noDataPct: Math.max(0, 100 - cover) };
+}
+
 export interface RunProgress {
   (msg: string): void;
 }
 
-export async function runMonitor(a: MonitorAoi, periodDays: number, progress: RunProgress, signal?: AbortSignal): Promise<MonitorRun> {
+const OPT_COLLECTIONS: StacCollectionId[] = ['sentinel-2-l2a'];
+
+/** Optical candidates in a window that pass the scene thresholds and the AOI-cloud threshold, best first. */
+async function passingOptical(aoi: GeoJSON.Polygon, from: string, to: string, qc: QcSettings, match: ImageryItem | null, signal: AbortSignal | undefined, seen: { it: ImageryItem; cl: AoiCloud | null; why: string[] }[]) {
+  const all = (await searchArchive({ aoi, collections: OPT_COLLECTIONS, from, to, maxCloud: qc.maxSceneCloud, limit: 40 })).filter((x) => x.source === 'planetary-computer');
+  const pre = all.filter((x) => checkScene(x, { cloudPct: 0, shadowPct: 0, noDataPct: 0 }, qc).ok || checkScene(x, null, qc).pending);
+  const sameGeom = (x: ImageryItem) => !match || x.raw?.properties?.['s2:mgrs_tile'] == null || x.raw.properties['s2:mgrs_tile'] === match.raw?.properties?.['s2:mgrs_tile'];
+  const ordered = [...pre].sort((a, b) => Number(sameGeom(b)) - Number(sameGeom(a)) || (a.cloudCover ?? 100) - (b.cloudCover ?? 100) || b.datetime.localeCompare(a.datetime)).slice(0, 6);
+  for (const it of ordered) {
+    const cl = await measureAoiCloud(it, aoi, signal).catch(() => null);
+    const chk = checkScene(it, cl, qc);
+    seen.push({ it, cl, why: chk.reasons });
+    if (cl && chk.ok) return { it, cl };
+  }
+  return null;
+}
+
+export async function runMonitor(a: MonitorAoi, periodDays: number, progress: RunProgress, signal?: AbortSignal, qc: QcSettings = loadQc()): Promise<MonitorRun> {
   const w = windowsFor(periodDays);
   const base: MonitorRun = {
     id: `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -430,130 +487,172 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
     at: new Date().toISOString(),
     status: 'insufficient',
     windows: w,
+    qc,
+    mode: 'auto',
   };
   const aoi = a.geometry;
   const wantSar = a.sensor === 'sar' || (a.sensor === 'auto' && a.purpose === 'water');
   const sarPossible = !!methodFor(a.purpose, 'sar');
   const tried: string[] = [];
+  const seen: { it: ImageryItem; cl: AoiCloud | null; why: string[] }[] = [];
 
   try {
-    // ---- choose scenes
-    let A: ImageryItem | null = null, B: ImageryItem | null = null, sensor: 'optical' | 'sar' = 'optical';
-    let aCloud: number | null = null, bCloud: number | null = null;
-    if (!wantSar) {
-      progress('ค้นหาภาพ Sentinel-2 ช่วงล่าสุด…');
-      const b = await clearestOptical(aoi, w.after[0], w.after[1], null, signal);
-      if (b && b.cloud <= 0.5) {
-        progress('ค้นหาภาพอ้างอิงช่วงก่อนหน้า…');
-        const aa = await clearestOptical(aoi, w.before[0], w.before[1], b.it, signal);
-        if (aa && aa.cloud <= 0.5) {
-          A = aa.it; B = b.it; aCloud = aa.cloud; bCloud = b.cloud;
-        } else tried.push(aa ? `optical reference too cloudy over the AOI (${Math.round(aa.cloud * 100)}%)` : 'no optical reference scene');
-      } else tried.push(b ? `latest optical scene too cloudy over the AOI (${Math.round(b.cloud * 100)}%)` : 'no new optical scene in the period');
-    }
-    if (!A && (wantSar || (a.sensor === 'auto' && sarPossible))) {
+    let A: ImageryItem | null = null, B: ImageryItem | null = null;
+    let clA: AoiCloud | null = null, clB: AoiCloud | null = null;
+    const optical = async () => {
+      progress(`ค้นหาภาพ Sentinel-2 ช่วงล่าสุด (เมฆรวม ≤ ${qc.maxSceneCloud}%, เมฆใน AOI ≤ ${qc.maxAoiCloud}%)…`);
+      const b = await passingOptical(aoi, w.after[0], w.after[1], qc, null, signal, seen);
+      if (!b) return void tried.push(`ไม่มีภาพ Sentinel-2 ช่วง ${w.after[0]} ถึง ${w.after[1]} ที่ผ่านเกณฑ์เมฆ`);
+      progress('ค้นหาภาพอ้างอิงช่วงก่อนหน้า…');
+      const aa = await passingOptical(aoi, w.before[0], w.before[1], qc, b.it, signal, seen);
+      if (!aa) return void tried.push(`ไม่มีภาพอ้างอิง Sentinel-2 ช่วง ${w.before[0]} ถึง ${w.before[1]} ที่ผ่านเกณฑ์เมฆ`);
+      A = aa.it; B = b.it; clA = aa.cl; clB = b.cl;
+    };
+    const radar = async () => {
       progress('ค้นหาภาพเรดาร์ Sentinel-1…');
       const rb = await pickBestScene(aoi, RAD, w.after[0], w.after[1]);
-      if (rb.item) {
-        const ra = await pickBestScene(aoi, RAD, w.before[0], w.before[1], { match: rb.item });
-        if (ra.item) {
-          A = ra.item; B = rb.item; sensor = 'sar';
-        } else tried.push('no radar reference scene');
-      } else tried.push('no new radar scene in the period');
-    }
-    // radar first (water) found nothing usable → try optical as well when the sensor is automatic
-    if (!A && wantSar && a.sensor === 'auto') {
-      progress('ลองภาพ Sentinel-2 แทน…');
-      const b = await clearestOptical(aoi, w.after[0], w.after[1], null, signal);
-      if (b && b.cloud <= 0.5) {
-        const aa = await clearestOptical(aoi, w.before[0], w.before[1], b.it, signal);
-        if (aa && aa.cloud <= 0.5) {
-          A = aa.it; B = b.it; aCloud = aa.cloud; bCloud = b.cloud; sensor = 'optical';
-        } else tried.push(aa ? `optical reference too cloudy over the AOI (${Math.round(aa.cloud * 100)}%)` : 'no optical reference scene');
-      } else tried.push(b ? `latest optical scene too cloudy over the AOI (${Math.round(b.cloud * 100)}%)` : 'no new optical scene in the period');
-    }
+      if (!rb.item) return void tried.push('ไม่มีภาพเรดาร์ใหม่ในช่วงที่ตรวจ');
+      const ra = await pickBestScene(aoi, RAD, w.before[0], w.before[1], { match: rb.item });
+      if (!ra.item) return void tried.push('ไม่มีภาพเรดาร์อ้างอิง');
+      A = ra.item; B = rb.item;
+    };
+    if (!wantSar) await optical();
+    if (!A && (wantSar || (a.sensor === 'auto' && sarPossible))) await radar();
+    if (!A && wantSar && a.sensor === 'auto') await optical();
     if (!A || !B) {
-      return { ...base, reason: tried.join('; ') || 'no usable imagery' };
+      const sugg = seen.filter((x) => !x.why.length && x.cl).map((x) => ({ id: x.it.id, datetime: x.it.datetime, cloud: x.it.cloudCover, collection: x.it.collection }));
+      const rejected = seen.filter((x) => x.why.length).slice(0, 4).map((x) => `${x.it.datetime.slice(0, 10)}: ${x.why.join(', ')}`);
+      return { ...base, reason: [...tried, ...rejected].join(' · ') || 'ไม่มีภาพที่ใช้ได้', suggestions: sugg };
     }
-    const m = methodFor(a.purpose, sensor)!;
-    const note = sensor === 'sar' && !wantSar && tried.length ? `optical not usable (${tried.join('; ')}) — radar used instead` : undefined;
+    const sarUsedInstead = familyOf(B) === 'sar' && !wantSar && tried.length ? `ภาพปกติใช้ไม่ได้ (${tried.join('; ')}) จึงใช้เรดาร์แทน` : undefined;
+    const r = await compareScenes(a, A, B, progress, signal, { qc, clA, clB, base });
+    return sarUsedInstead ? { ...r, note: [sarUsedInstead, r.note].filter(Boolean).join(' · ') } : r;
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw e;
+    return { ...base, status: 'error', reason: e?.message ?? String(e) };
+  }
+}
 
-    // ---- read pixels
+const CLOUD = 250, SHADOW = 251, NODATA = 255;
+
+/** Compare two given scenes over the AOI with quality control. Used by the automatic check and by manual comparison. */
+export async function compareScenes(
+  a: MonitorAoi,
+  A: ImageryItem,
+  B: ImageryItem,
+  progress: RunProgress,
+  signal?: AbortSignal,
+  opt: { qc?: QcSettings; clA?: AoiCloud | null; clB?: AoiCloud | null; base?: MonitorRun; mode?: 'auto' | 'manual' } = {},
+): Promise<MonitorRun> {
+  const qc = opt.qc ?? loadQc();
+  const base: MonitorRun = opt.base ?? {
+    id: `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    aoiId: a.id, aoiName: a.name, purpose: a.purpose, at: new Date().toISOString(), status: 'insufficient',
+    windows: { before: [A.datetime.slice(0, 10), A.datetime.slice(0, 10)], after: [B.datetime.slice(0, 10), B.datetime.slice(0, 10)] },
+    qc, mode: opt.mode ?? 'manual',
+  };
+  const aoi = a.geometry;
+  const sensor: 'optical' | 'sar' = familyOf(B);
+  const metaOf = (it: ImageryItem, cl: AoiCloud | null | undefined): SceneMeta => {
+    const p = it.raw?.properties ?? {};
+    return {
+      id: it.id, collection: it.collection, label: it.collectionLabel, datetime: it.datetime, cloud: it.cloudCover,
+      aoiCloudPct: cl ? cl.cloudPct : null, aoiShadowPct: cl ? cl.shadowPct : null, gsd: it.gsd,
+      processed: p['s2:generation_time'] ?? p['s1:processing_datetime'] ?? p['processing:datetime'] ?? null, ingested: p.created ?? null,
+    };
+  };
+  try {
+    const pair = checkPair(A, B, qc);
+    if (!pair.ok) return { ...base, reason: pair.reasons.join(' · '), A: metaOf(A, opt.clA), B: metaOf(B, opt.clB), pairNotes: pair.notes };
+    const m = methodFor(a.purpose, sensor);
+    if (!m) return { ...base, reason: sensor === 'sar' ? 'หัวข้อนี้วิเคราะห์ด้วยเรดาร์ไม่ได้ ต้องใช้ภาพปกติ' : 'ไม่มีวิธีวิเคราะห์สำหรับหัวข้อนี้' };
+    // measure AOI cloud if the caller did not
+    let clA = opt.clA ?? null, clB = opt.clB ?? null;
+    if (sensor === 'optical') {
+      progress('ตรวจเมฆใน AOI ของทั้งสองภาพ…');
+      if (!clA) clA = await measureAoiCloud(A, aoi, signal).catch(() => null);
+      if (!clB) clB = await measureAoiCloud(B, aoi, signal).catch(() => null);
+      const fails = [['ก่อน', A, clA], ['หลัง', B, clB]].map(([lbl, it, cl]) => ({ lbl, chk: checkScene(it as ImageryItem, cl as AoiCloud | null, qc) })).filter((x) => !x.chk.ok);
+      if (fails.length)
+        return {
+          ...base, A: metaOf(A, clA), B: metaOf(B, clB), pairNotes: pair.notes,
+          reason: fails.map((x) => `ภาพ${x.lbl}: ${x.chk.pending ? 'วัดเมฆใน AOI ไม่ได้' : x.chk.reasons.join(', ')}`).join(' · '),
+        };
+    }
+
+    // ---- read pixels + per-pixel state
     const grid = gridFor(aoi);
-    const read = async (it: ImageryItem, lbl: string): Promise<Raster[]> => {
+    const read = async (it: ImageryItem, lbl: string) => {
       const out: Raster[] = [];
       const ins = m.inputs(it);
-      for (let k = 0; k < ins.length; k++) {
-        const r = await fetchRaster(it, ins[k].expr, ins[k].range, grid, signal, (d, n) => progress(`อ่านภาพ${lbl} ${k + 1}/${ins.length} · ${d}/${n}`));
-        out.push(r);
-      }
-      if (sensorOf(it) === 's2') {
-        const clear = await fetchRaster(it, S2_CLEAR_EXPR, [0, 1], grid, signal, (d, n) => progress(`ตรวจเมฆภาพ${lbl} ${d}/${n}`));
-        for (const r of out) for (let p = 0; p < r.values.length; p++) if (!(clear.values[p] > 0.5)) r.values[p] = NaN;
-      }
-      if (sensorOf(it) === 's1') return out.map(despeckle);
-      return out;
+      for (let k = 0; k < ins.length; k++) out.push(await fetchRaster(it, ins[k].expr, ins[k].range, grid, signal, (d, n) => progress(`อ่านภาพ${lbl} ${k + 1}/${ins.length} · ${d}/${n}`)));
+      const se = stateExpr(it);
+      const state = se ? await fetchRaster(it, se, [0, 255], grid, signal, (d, n) => progress(`อ่านหน้ากากเมฆภาพ${lbl} ${d}/${n}`)) : null;
+      return { vals: sensorOf(it) === 's1' ? out.map(despeckle) : out, state };
     };
     const ra = await read(A, 'ก่อน');
     const rb = await read(B, 'หลัง');
     progress('อ่านแผนที่สิ่งปกคลุมดิน (ESA WorldCover)…');
     const lc = await landCoverMask(aoi, a.purpose, grid, signal).catch(() => null);
     const lcNote = (WC_ALLOW[a.purpose] || WC_DENY[a.purpose]) && !lc ? 'land-cover mask unavailable — all land classes analysed' : undefined;
-    progress('จำแนกการเปลี่ยนแปลง…');
-    // pack multi-input pixels into one virtual raster pair for classify(): index p → arrays
-    const n = ra.length;
-    const vA = new Float32Array(ra[0].values.length).map((_, p) => p);
-    const RA: Raster = { grid, values: vA };
-    const RB: Raster = { grid, values: vA };
+    progress('จำแนกการเปลี่ยนแปลง (แยกเมฆ เงาเมฆ และไม่มีข้อมูลออก)…');
+    const n = ra.vals.length;
+    const idxR: Raster = { grid, values: new Float32Array(ra.vals[0].values.length).map((_, p) => p) };
+    const st = (s: Raster | null, p: number) => {
+      if (!s) return 4;
+      const v = s.values[p];
+      if (Number.isNaN(v)) return 0;
+      const c = Math.round(v);
+      return c <= 1 ? 0 : c <= 5 ? (c === 3 ? 3 : 4) : 8;
+    };
     const anyNaN = (rs: Raster[], p: number) => rs.some((r) => Number.isNaN(r.values[p]));
     const defs: ClassDef[] = [
       ...m.legend.map((l) => ({ id: l.id, label: l.label, rgba: hexRgba(l.color, 215) })),
       { id: 3, label: 'No significant change', rgba: [0, 0, 0, 0] },
+      { id: CLOUD, label: 'Cloud', rgba: [235, 235, 245, 170], hatch: true },
+      { id: SHADOW, label: 'Cloud shadow', rgba: [120, 90, 200, 170], hatch: true },
+      { id: NODATA, label: 'No data', rgba: [90, 90, 90, 150], hatch: true },
     ];
-    const res: Classified = classify(aoi, RA, RB, (pa) => {
+    const res: Classified = classify(aoi, idxR, idxR, (pa) => {
       const p = pa as number;
-      if (anyNaN(ra, p) || anyNaN(rb, p)) return 255;
+      const sa = st(ra.state, p), sb = st(rb.state, p);
+      if (sa === 8 || sb === 8) return CLOUD;
+      if (sa === 3 || sb === 3) return SHADOW;
+      if (sa === 0 || sb === 0 || anyNaN(ra.vals, p) || anyNaN(rb.vals, p)) return NODATA;
       const va: number[] = [], vb: number[] = [];
       for (let k = 0; k < n; k++) {
-        va.push(ra[k].values[p]);
-        vb.push(rb[k].values[p]);
+        va.push(ra.vals[k].values[p]);
+        vb.push(rb.vals[k].values[p]);
       }
       const c = m.fn(va, vb);
-      // land-cover filter applies to the classes of interest only (e.g. loss on forest)
       if (lc && m.interest.includes(c) && !(lc[p] > 1.5)) return 3;
       return c;
     }, defs);
-    // classify() counts 255 as a class; move it to no-data
-    const nd = res.areasKm2[255] ?? 0;
-    delete res.areasKm2[255];
-    res.validKm2 -= nd;
-    res.noDataKm2 += nd;
+    // every AOI pixel is in exactly one state: change class / no change / cloud / shadow / no data
+    const cloudKm2 = res.areasKm2[CLOUD] ?? 0, shadowKm2 = res.areasKm2[SHADOW] ?? 0, ndKm2 = res.areasKm2[NODATA] ?? 0;
+    const missKm2 = ndKm2 + res.noDataKm2;
+    const validKm2 = Math.max(0, res.validKm2 - cloudKm2 - shadowKm2 - ndKm2);
+    [CLOUD, SHADOW, NODATA].forEach((k) => delete res.areasKm2[k]);
+    const changeIds = m.legend.map((l) => l.id).filter((id) => id !== 4);
+    const changeKm2 = changeIds.reduce((t, id) => t + (res.areasKm2[id] ?? 0), 0);
+    const validFrac = validKm2 / Math.max(res.aoiKm2, 1e-12);
 
-    // ---- hotspots (connected components of the classes of interest)
-    const { list: hotspots, totalHa } = findHotspots(res, m.interest, sensor === 'sar' ? 0.5 : MIN_HOTSPOT_HA);
-    const interestKm2 = totalHa / 100;
-    const validFrac = res.validKm2 / Math.max(res.aoiKm2, 1e-9);
-    if (validFrac < 0.2) {
-      return { ...base, sensor, A: meta(A, aCloud != null ? aCloud * 100 : null), B: meta(B, bCloud != null ? bCloud * 100 : null), reason: `only ${Math.round(validFrac * 100)}% of the AOI is cloud-free in both images` };
-    }
-    const sigHa = Math.max(2, 0.01 * res.validKm2 * 100);
-    const level: Level = interestKm2 * 100 >= sigHa ? 'significant' : interestKm2 * 100 >= 0.3 ? 'minor' : 'none';
+    const pixKm2 = Math.max(gsdMeters(A), gsdMeters(B)) ** 2 / 1e6;
+    const { list: hotspots, totalKm2 } = findHotspots(res, m.interest, Math.max(sensor === 'sar' ? 0.005 : 0.002, 20 * pixKm2));
+    const quality = comparisonQuality({
+      validFrac,
+      aoiCloudA: clA ? (clA.cloudPct + clA.shadowPct) / 100 : null,
+      aoiCloudB: clB ? (clB.cloudPct + clB.shadowPct) / 100 : null,
+      sameCollection: A.collection === B.collection,
+      sameFamily: familyOf(A) === familyOf(B),
+      sameGeometry: !pair.notes.some((x) => x.startsWith('เรขาคณิต')),
+      gapDays: Math.abs(new Date(B.datetime).getTime() - new Date(A.datetime).getTime()) / 86400e3,
+      sameSeason: sameSeason(A.datetime, B.datetime),
+      gsdA: gsdMeters(A),
+      gsdB: gsdMeters(B),
+    });
 
-    // ---- confidence
-    const notes: string[] = [];
-    let score = 3;
-    if (validFrac < 0.8) { score--; notes.push(`${Math.round((1 - validFrac) * 100)}% of the AOI has no usable data (cloud/shadow/edge)`); }
-    if (validFrac < 0.5) score--;
-    const gap = Math.abs(new Date(B.datetime).getTime() - new Date(A.datetime).getTime()) / 86400e3;
-    if (gap > 45) { score--; notes.push(`${Math.round(gap)} days between images — seasonal change possible`); }
-    const geomA = A.raw?.properties?.['sat:relative_orbit'] ?? A.raw?.properties?.['s2:mgrs_tile'];
-    const geomB = B.raw?.properties?.['sat:relative_orbit'] ?? B.raw?.properties?.['s2:mgrs_tile'];
-    if (geomA != null && geomB != null && geomA !== geomB) { score--; notes.push('images from different orbit/tile geometry'); }
-    if (sensor === 'sar') { notes.push('radar change can also come from soil moisture, crops or rain'); score = Math.min(score, 2); }
-    if (lcNote) notes.push(lcNote);
-    const confidence = score >= 3 ? 'high' : score === 2 ? 'medium' : 'low';
-
-    // ---- images for the record / report
+    // ---- images for the record / report / swipe
     progress('สร้างภาพประกอบ…');
     const after = await renderScene(B, aoi, { maxPx: 1400, signal }).catch(() => null);
     const before = await renderScene(A, aoi, { maxPx: 1400, signal }).catch(() => null);
@@ -563,24 +662,31 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
 
     const classKm2: Record<number, number> = {};
     Object.entries(res.areasKm2).forEach(([k, v]) => (classKm2[+k] = v));
-    return {
-      ...base,
-      status: 'ok',
-      sensor,
-      A: meta(A, aCloud != null ? aCloud * 100 : null),
-      B: meta(B, bCloud != null ? bCloud * 100 : null),
-      stats: { aoiKm2: res.aoiKm2, validKm2: res.validKm2, noDataKm2: res.noDataKm2, classKm2, interestKm2 },
-      legend: m.legend,
-      interest: m.interest,
-      hotspots,
-      level,
-      confidence,
-      confidenceNotes: notes,
-      method: m.text,
-      note,
+    const stats = {
+      aoiKm2: res.aoiKm2, validKm2, noDataKm2: cloudKm2 + shadowKm2 + missKm2, cloudKm2, shadowKm2, missingKm2: missKm2,
+      changeKm2, noChangeKm2: Math.max(0, validKm2 - changeKm2), classKm2, interestKm2: totalKm2,
+    };
+    const common = {
+      ...base, sensor, A: metaOf(A, clA), B: metaOf(B, clB), stats, legend: m.legend, interest: m.interest, method: m.text, quality, pairNotes: pair.notes, qc,
       bounds: after ? { west: after.west, south: after.south, east: after.east, north: after.north } : undefined,
       overlayBounds: { west: res.grid.west, south: res.grid.south, east: res.grid.east, north: res.grid.north },
     };
+    // not enough analysable area → report the breakdown, but no change conclusion
+    if (validFrac * 100 < qc.minValidPct)
+      return { ...common, status: 'insufficient', reason: `พื้นที่ใช้วิเคราะห์ได้ ${(validFrac * 100).toFixed(0)}% ต่ำกว่าเกณฑ์ ${qc.minValidPct}% (เมฆ ${fmtArea(cloudKm2)}, เงาเมฆ ${fmtArea(shadowKm2)}, ไม่มีข้อมูล ${fmtArea(missKm2)}) — เลือกภาพวันอื่น` };
+
+    const sigKm2 = Math.max(0.02, 0.01 * validKm2);
+    const level: Level = totalKm2 >= sigKm2 ? 'significant' : totalKm2 >= 0.003 ? 'minor' : 'none';
+    // classification confidence (separate from image quality)
+    const notes: string[] = [];
+    let score = quality.score >= 75 ? 3 : quality.score >= 50 ? 2 : 1;
+    if (quality.score < 75) notes.push(`คุณภาพการเปรียบเทียบ ${quality.score}/100`);
+    if (sensor === 'sar') { notes.push('สัญญาณเรดาร์เปลี่ยนได้จากความชื้นดิน พืชผล ฝน หรือความหยาบผิว ไม่ใช่เฉพาะการเปลี่ยนแปลงจริง'); score = Math.min(score, 2); }
+    if (A.collection !== B.collection) { notes.push('เทียบข้ามเซนเซอร์'); score = Math.min(score, 2); }
+    if (lcNote) { notes.push(lcNote); score = Math.max(1, score - 1); }
+    pair.notes.forEach((x) => notes.push(x));
+    const confidence = score >= 3 ? 'high' : score === 2 ? 'medium' : 'low';
+    return { ...common, status: 'ok', hotspots, level, confidence, confidenceNotes: notes };
   } catch (e: any) {
     if (e?.name === 'AbortError') throw e;
     return { ...base, status: 'error', reason: e?.message ?? String(e) };
@@ -592,8 +698,8 @@ function hexRgba(hex: string, a: number): [number, number, number, number] {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), a];
 }
 
-/** 8-connected components of the interest classes; keeps those ≥ MIN_HOTSPOT_HA, largest first. */
-function findHotspots(res: Classified, interest: number[], minHa: number): { list: Hotspot[]; totalHa: number } {
+/** 8-connected components of the interest classes; keeps those ≥ minKm2, largest first. Pixels belong to one class only, so nothing is counted twice. */
+function findHotspots(res: Classified, interest: number[], minKm2: number): { list: Hotspot[]; totalKm2: number } {
   const g = res.grid;
   const W = g.width, H = g.height;
   const want = new Uint8Array(256);
@@ -611,7 +717,7 @@ function findHotspots(res: Classified, interest: number[], minHa: number): { lis
       const p = stack.pop()!;
       const row = (p / W) | 0, col = p - row * W;
       const [lon, lat] = cellLonLat(g, row, col);
-      area += cellAreaKm2(g, lat);
+      area += cellAreaKm2(g, row);
       sx += lon; sy += lat; cnt++;
       for (let dr = -1; dr <= 1; dr++)
         for (let dc = -1; dc <= 1; dc++) {
@@ -624,12 +730,11 @@ function findHotspots(res: Classified, interest: number[], minHa: number): { lis
           }
         }
     }
-    const ha = area * 100;
-    if (ha >= minHa) out.push({ n: 0, lat: sy / cnt, lon: sx / cnt, areaHa: ha, cls: c0 });
+    if (area >= minKm2) out.push({ n: 0, lat: sy / cnt, lon: sx / cnt, areaHa: area * 100, areaKm2: area, cls: c0 });
   }
-  out.sort((x, y) => y.areaHa - x.areaHa);
-  const totalHa = out.reduce((s, h) => s + h.areaHa, 0);
-  return { list: out.slice(0, 50).map((h, i) => ({ ...h, n: i + 1 })), totalHa };
+  out.sort((x, y) => (y.areaKm2 ?? 0) - (x.areaKm2 ?? 0));
+  const totalKm2 = out.reduce((s, h) => s + (h.areaKm2 ?? 0), 0);
+  return { list: out.slice(0, 50).map((h, i) => ({ ...h, n: i + 1 })), totalKm2 };
 }
 
 // ---------------------------------------------------------------- narrative (facts only, from numbers)
@@ -637,33 +742,32 @@ function findHotspots(res: Classified, interest: number[], minHa: number): { lis
 const fmt = (v: number, d = 1) => v.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
 export const rai = (km2: number) => km2 * 625;
 
-export function narrative(r: MonitorRun, lang: 'th' | 'en'): string[] {
+const SENSOR_TH: Record<string, string> = { 'sentinel-2-l2a': 'Sentinel-2', 'landsat-c2-l2': 'Landsat', 'sentinel-1-rtc': 'เรดาร์ Sentinel-1' };
+
+export function narrative(r: MonitorRun, lang: 'th' | 'en', unit: AreaUnit = 'km2'): string[] {
   const th = lang === 'th';
+  const A = (km2: number) => fmtArea(km2, unit, th);
   if (r.status !== 'ok' || !r.stats) {
-    return [th ? `ข้อมูลไม่เพียงพอสำหรับประเมินการเปลี่ยนแปลง: ${r.reason ?? ''}` : `Insufficient data to assess change: ${r.reason ?? ''}`];
+    return [th ? `ข้อมูลไม่เพียงพอสำหรับสรุปผล (ไม่ได้แปลว่าไม่มีการเปลี่ยนแปลง): ${r.reason ?? ''}` : `Insufficient data to conclude (this does not mean "no change"): ${r.reason ?? ''}`];
   }
   const s = r.stats;
   const lines: string[] = [];
-  const ha = s.interestKm2 * 100;
   const label = r.legend?.find((l) => r.interest?.includes(l.id));
   const what = th ? label?.labelTh ?? 'การเปลี่ยนแปลง' : label?.label ?? 'change';
-  if (r.level === 'none') lines.push(th ? `ไม่พบการเปลี่ยนแปลงที่เกินเกณฑ์จากข้อมูลที่ใช้วิเคราะห์` : `No change above the threshold was detected in the data analysed.`);
-  else
-    lines.push(
-      th
-        ? `พบ${what} รวม ${fmt(ha)} เฮกตาร์ (${fmt(rai(s.interestKm2), 0)} ไร่) ${r.hotspots?.length ?? 0} จุด`
-        : `${what}: ${fmt(ha)} ha (${fmt(rai(s.interestKm2), 0)} rai) detected in ${r.hotspots?.length ?? 0} patch(es).`,
-    );
+  if (r.level === 'none') lines.push(th ? `ไม่พบการเปลี่ยนแปลงที่เกินเกณฑ์ในส่วนที่ตรวจสอบได้` : `No change above the threshold in the part that could be checked.`);
+  else lines.push(th ? `พบ${what} รวม ${A(s.interestKm2)} ${r.hotspots?.length ?? 0} จุด` : `${what}: ${A(s.interestKm2)} in ${r.hotspots?.length ?? 0} patch(es).`);
   const big = r.hotspots?.[0];
-  if (big && r.level !== 'none')
-    lines.push(th ? `จุดใหญ่ที่สุด ${fmt(big.areaHa)} เฮกตาร์ ที่พิกัด ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}` : `Largest patch ${fmt(big.areaHa)} ha at ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}.`);
+  if (big && r.level !== 'none') lines.push(th ? `จุดใหญ่ที่สุด ${A(hotspotKm2(big))} ที่พิกัด ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}` : `Largest patch ${A(hotspotKm2(big))} at ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}.`);
+  const sa = SENSOR_TH[r.A?.collection ?? ''] ?? r.A?.label, sb = SENSOR_TH[r.B?.collection ?? ''] ?? r.B?.label;
+  const sens = sa === sb ? sa : `${sa} / ${sb}`;
+  lines.push(th ? `เปรียบเทียบภาพถ่ายวันที่ ${r.A?.datetime.slice(0, 10)} กับ ${r.B?.datetime.slice(0, 10)} (${sens})` : `Compared images acquired ${r.A?.datetime.slice(0, 10)} and ${r.B?.datetime.slice(0, 10)} (${sens}).`);
+  const cov = (100 * s.validKm2) / Math.max(s.aoiKm2, 1e-9);
+  const unc = s.noDataKm2;
   lines.push(
     th
-      ? `เปรียบเทียบภาพ ${r.A?.datetime.slice(0, 10)} กับ ${r.B?.datetime.slice(0, 10)} (${r.sensor === 'sar' ? 'เรดาร์ Sentinel-1' : 'Sentinel-2'})`
-      : `Compared ${r.A?.datetime.slice(0, 10)} with ${r.B?.datetime.slice(0, 10)} (${r.sensor === 'sar' ? 'Sentinel-1 radar' : 'Sentinel-2'}).`,
+      ? `ตรวจสอบได้ ${fmt(cov, 0)}% ของพื้นที่${unc > 0 ? ` · ตรวจไม่ได้ (เมฆ/เงาเมฆ/ไม่มีข้อมูล) ${A(unc)}` : ''} · ความเชื่อมั่น${confTh(r.confidence)}${r.quality ? ` · คุณภาพการเปรียบเทียบ ${r.quality.score}/100` : ''}`
+      : `${fmt(cov, 0)}% of the AOI checkable${unc > 0 ? ` · not checkable (cloud/shadow/no data) ${A(unc)}` : ''} · confidence ${r.confidence}${r.quality ? ` · comparison quality ${r.quality.score}/100` : ''}.`,
   );
-  const cov = (100 * s.validKm2) / Math.max(s.aoiKm2, 1e-9);
-  lines.push(th ? `วิเคราะห์ได้ ${fmt(cov, 0)}% ของพื้นที่ · ความเชื่อมั่น${confTh(r.confidence)}` : `${fmt(cov, 0)}% of the AOI analysable · confidence ${r.confidence}.`);
   return lines;
 }
 

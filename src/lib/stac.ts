@@ -125,6 +125,13 @@ export async function searchArchive(q: StacQuery): Promise<ImageryItem[]> {
   return out.sort((a, b) => b.datetime.localeCompare(a.datetime));
 }
 
+/** One catalogue record by id (Planetary Computer), e.g. to show the scenes of an earlier run again. */
+export async function fetchItem(collection: string, id: string, aoi: GeoJSON.Polygon): Promise<ImageryItem | null> {
+  const r = await fetch(`${STAC_API}/collections/${collection}/items/${encodeURIComponent(id)}`);
+  if (!r.ok) return null;
+  return toItem(await r.json(), aoi, 'planetary-computer');
+}
+
 /** Add the full-resolution rendered scene (map tiles) to a viewer. Returns null if the item has no tiles. */
 export async function addSceneLayer(viewer: Cesium.Viewer, item: ImageryItem): Promise<Cesium.ImageryLayer | null> {
   if (!item.tilejson) return null;

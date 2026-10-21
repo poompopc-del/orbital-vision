@@ -14,6 +14,15 @@ import { borderLines, lineLength, NEIGHBOURS, tilesAlong, type Neighbour, type T
 import { imageProvider } from '../components/gis/sceneLayer';
 import { buildReportHtml, hotspotsCsv, resultsGeoJson } from '../lib/report';
 import { downloadJson } from '../lib/geo';
+import ComparePanel, { QcPanel } from '../components/monitor/ComparePanel';
+import ResultQuality from '../components/monitor/ResultQuality';
+import ExtentBar from '../components/monitor/ExtentBar';
+import { useQc } from '../lib/qcStore';
+import { fmtArea, km2ToRai, type AreaUnit } from '../lib/area';
+import { hotspotKm2 } from '../lib/monitor';
+import { fetchItem, type ImageryItem } from '../lib/stac';
+import { pcProvider } from '../components/gis/sceneLayer';
+import { displayTemplate } from '../lib/export';
 
 // ---------------------------------------------------------------- shared state (persisted in this browser)
 
@@ -91,9 +100,21 @@ export function MonitorWatch() {
   const [tiles, setTiles] = useState<Tile[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [borderLinesState, setBorderLines] = useState<[number, number][][]>([]);
+  const [extentLines, setExtentLines] = useState<[number, number][][]>([]);
+  const [swipe, setSwipe] = useState<{ A: ImageryItem; B: ImageryItem } | null>(null);
+  const [split, setSplit] = useState(0.5);
+  const { qc } = useQc();
 
   const sel = aois.find((a) => a.id === selId) ?? null;
   const due = aois.filter((a) => isDue(a, runs));
+  const customRect = useMemo((): [number, number, number, number] | null => {
+    const gs = sel ? [sel.geometry] : aois.map((a) => a.geometry);
+    if (!gs.length) return null;
+    const pts = gs.flatMap((g) => g.coordinates[0]);
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const pad = 0.05;
+    return [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad];
+  }, [sel?.id, sel?.geometry, aois]);
 
   // box editing: the live box is kept in a ref so dragging does not re-render React
   const [edit, setEdit] = useState<{ id: string; orig: GeoJSON.Polygon; b: BB } | null>(null);
@@ -123,6 +144,9 @@ export function MonitorWatch() {
   useEffect(() => {
     if (!viewer) return;
     const ds = new Cesium.CustomDataSource('monitor');
+    extentLines.forEach((l) =>
+      ds.entities.add({ polyline: { positions: l.map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: 2.5, material: Cesium.Color.fromCssColorString('#facc15'), clampToGround: false } }),
+    );
     borderLinesState.forEach((l) =>
       ds.entities.add({ polyline: { positions: l.map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.YELLOW, dashLength: 10 }), clampToGround: false } }),
     );
@@ -154,7 +178,34 @@ export function MonitorWatch() {
     return () => {
       if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
     };
-  }, [viewer, aois, runs, selId, tiles, picked, borderLinesState, edit?.id]);
+  }, [viewer, aois, runs, selId, tiles, picked, borderLinesState, extentLines, edit?.id]);
+
+  // ---- before / after swipe of two real scenes
+  useEffect(() => {
+    if (!viewer || !swipe) return;
+    const la = viewer.imageryLayers.addImageryProvider(pcProvider(displayTemplate(swipe.A), swipe.A));
+    const lb = viewer.imageryLayers.addImageryProvider(pcProvider(displayTemplate(swipe.B), swipe.B));
+    la.splitDirection = Cesium.SplitDirection.LEFT;
+    lb.splitDirection = Cesium.SplitDirection.RIGHT;
+    viewer.scene.requestRender();
+    return () => {
+      if (!viewer.isDestroyed()) {
+        viewer.imageryLayers.remove(la, true);
+        viewer.imageryLayers.remove(lb, true);
+      }
+    };
+  }, [viewer, swipe?.A.id, swipe?.B.id]);
+  useEffect(() => {
+    if (viewer) {
+      viewer.scene.splitPosition = split;
+      viewer.scene.requestRender();
+    }
+  }, [viewer, split]);
+  const toggleSwipe = (A: ImageryItem, B: ImageryItem) => {
+    if (swipe && swipe.A.id === A.id && swipe.B.id === B.id) return setSwipe(null);
+    setSwipe({ A, B });
+    setSplit(0.5);
+  };
 
   // ---- edit box + handles (positions follow the live ref)
   useEffect(() => {
@@ -273,7 +324,7 @@ export function MonitorWatch() {
   }, [viewer]);
 
   useEffect(() => {
-    if (viewer && !aois.length) viewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(101, 13, 3.2e6) });
+    /* initial view is set by the extent bar (whole Thailand) */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewer]);
 
@@ -305,7 +356,7 @@ export function MonitorWatch() {
       for (let i = 0; i < list.length; i++) {
         const a = list[i];
         setBusy({ cur: a.name, msg: '', done: i, total: list.length });
-        const r = await runMonitor(a, period, (msg) => setBusy({ cur: a.name, msg, done: i, total: list.length }), ac.signal);
+        const r = await runMonitor(a, period, (msg) => setBusy({ cur: a.name, msg, done: i, total: list.length }), ac.signal, qc);
         addRun(r);
       }
     } catch (e: any) {
@@ -358,6 +409,8 @@ export function MonitorWatch() {
             )}
           </p>
         </Panel>
+
+        <QcPanel />
 
         {busy && (
           <Panel>
@@ -412,10 +465,22 @@ export function MonitorWatch() {
             onSet={nudge}
           />
         )}
-        {sel && panel === 'list' && !edit && <AoiDetail aoi={sel} onRun={() => runList([sel])} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} />}
+        {sel && panel === 'list' && !edit && <AoiDetail aoi={sel} onRun={() => runList([sel])} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
+        {sel && panel === 'list' && !edit && <ComparePanel key={sel.id} aoi={sel} onRun={(r) => addRun(r)} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
       </aside>
       <div className="relative min-h-[360px] flex-1">
         <GlobeHost onReady={setViewer} />
+        <ExtentBar viewer={viewer} customRect={customRect} onLines={setExtentLines} />
+        {swipe && (
+          <>
+            <div className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-white/90" style={{ left: `${split * 100}%` }} />
+            <div className="absolute bottom-24 left-1/2 z-20 w-[min(520px,80%)] -translate-x-1/2 rounded-md border border-line bg-ink-950/90 p-2 text-[11px] text-slate-200">
+              <div className="flex justify-between font-mono"><span>◀ A {swipe.A.datetime.slice(0, 10)} · {swipe.A.collectionLabel}</span><span>B {swipe.B.datetime.slice(0, 10)} · {swipe.B.collectionLabel} ▶</span></div>
+              <input type="range" min={0.02} max={0.98} step={0.005} value={split} onChange={(e) => setSplit(+e.target.value)} className="w-full" />
+              <div className="flex justify-between text-[10px] text-muted"><span>{L('ภาพจริงจาก Microsoft Planetary Computer · ซ้าย = ก่อน · ขวา = หลัง', 'Real imagery (Planetary Computer) · left = before · right = after')}</span><button className="text-cyan-300 hover:underline" onClick={() => setSwipe(null)}>{L('ปิด', 'Close')}</button></div>
+            </div>
+          </>
+        )}
         {edit && (
           <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 rounded-md border border-cyan-400 bg-ink-950/90 px-3 py-1.5 text-xs text-cyan-100">
             {L('ลากจุดกลาง ✥ เพื่อย้าย · ลากจุดมุม/ขอบเพื่อย่อขยาย', 'Drag ✥ to move · drag corners/edges to resize')}
@@ -424,9 +489,10 @@ export function MonitorWatch() {
           </div>
         )}
         <div className="absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 p-2 text-[11px] text-slate-200 backdrop-blur">
-          {[['significant', L('เปลี่ยนแปลงมีนัยสำคัญ', 'Significant change')], ['minor', L('เล็กน้อย', 'Minor')], ['none', L('ไม่พบ', 'None')], ['insufficient', L('ข้อมูลไม่พอ', 'Insufficient data')], ['new', L('ยังไม่ตรวจ', 'Not checked')]].map(([k, l]) => (
-            <div key={k} className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: LEVEL_COLOR[k] }} />{l}</div>
+          {[['significant', L('เปลี่ยนแปลงมีนัยสำคัญ', 'Significant change')], ['minor', L('เล็กน้อย', 'Minor')], ['none', L('ไม่พบการเปลี่ยนแปลงเกินเกณฑ์', 'No significant change')], ['insufficient', L('ข้อมูลไม่พอ (ไม่สรุปผล)', 'Insufficient (no conclusion)')], ['new', L('ยังไม่ตรวจ', 'Not checked')]].map(([k, l]) => (
+            <div key={k} className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: k === 'insufficient' ? 'repeating-linear-gradient(45deg,#94a3b8 0 2px,transparent 2px 4px)' : LEVEL_COLOR[k] }} />{l}</div>
           ))}
+          <div className="mt-1 border-t border-line pt-1 text-[10px] text-muted">{L('ในผลแต่ละพื้นที่: ลายเส้นขาว = เมฆ · ม่วง = เงาเมฆ · เทา = ไม่มีข้อมูล', 'Within a result: white hatch = cloud · purple = shadow · grey = no data')}</div>
         </div>
       </div>
     </div>
@@ -438,6 +504,7 @@ export function MonitorWatch() {
 function WatchList({ selId, onSelect, onRun, busy }: { selId: string | null; onSelect: (id: string) => void; onRun: (l: MonitorAoi[]) => void; busy: boolean }) {
   const L = useL();
   const { aois, runs, setAois } = useMonitor();
+  const { unit } = useQc();
   const [filter, setFilter] = useState<Region | 'all'>('all');
   const shown = aois.filter((a) => filter === 'all' || a.region === filter);
   if (!aois.length)
@@ -466,7 +533,7 @@ function WatchList({ selId, onSelect, onRun, busy }: { selId: string | null; onS
                   <span className="block truncate text-[10px] text-muted">
                     {L(PURPOSES.find((p) => p.id === a.purpose)!.labelTh, PURPOSES.find((p) => p.id === a.purpose)!.label)} · {L(`ทุก ${a.freqDays} วัน`, `every ${a.freqDays} d`)}
                     {r ? ` · ${new Date(r.at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}` : ''}
-                    {r?.status === 'ok' && r.stats ? ` · ${(r.stats.interestKm2 * 100).toFixed(1)} ha` : ''}
+                    {r?.status === 'ok' && r.stats ? ` · ${fmtArea(r.stats.interestKm2, unit, true)}` : ''}
                   </span>
                 </span>
                 {isDue(a, runs) && <Badge tone="warn">{L('ถึงรอบ', 'due')}</Badge>}
@@ -646,8 +713,17 @@ function EditPanel({ b, orig, onSave, onCancel, onSet }: { b: BB; orig: BB; onSa
   );
 }
 
-function AoiDetail({ aoi, onRun, onEdit, busy, lang }: { aoi: MonitorAoi; onRun: () => void; onEdit: () => void; busy: boolean; lang: 'th' | 'en' }) {
+function AoiDetail({ aoi, onRun, onEdit, busy, lang, onSwipe, swipeOn }: { aoi: MonitorAoi; onRun: () => void; onEdit: () => void; busy: boolean; lang: 'th' | 'en'; onSwipe: (A: ImageryItem, B: ImageryItem) => void; swipeOn: boolean }) {
   const L = useL();
+  const { unit } = useQc();
+  const [swErr, setSwErr] = useState('');
+  const swipeRun = async (r: MonitorRun) => {
+    setSwErr('');
+    if (!r.A || !r.B) return;
+    const [a, b] = await Promise.all([fetchItem(r.A.collection, r.A.id, aoi.geometry), fetchItem(r.B.collection, r.B.id, aoi.geometry)]);
+    if (!a || !b) return setSwErr(L('โหลดข้อมูลภาพจากคลังไม่ได้', 'Could not load the scenes from the catalogue'));
+    onSwipe(a, b);
+  };
   const { runs, setAois, removeRun } = useMonitor();
   const mine = runs.filter((r) => r.aoiId === aoi.id);
   const [runId, setRunId] = useState<string | null>(null);
@@ -664,13 +740,13 @@ function AoiDetail({ aoi, onRun, onEdit, busy, lang }: { aoi: MonitorAoi; onRun:
   }, [run?.id]);
   const upd = (p: Partial<MonitorAoi>) => setAois((l) => l.map((a) => (a.id === aoi.id ? { ...a, ...p } : a)));
   const info = aoiInfo(aoi);
-  const series = useMemo(() => [...mine].filter((r) => r.status === 'ok').reverse(), [mine]);
+  const series = useMemo(() => [...mine].filter((r) => r.status === 'ok').sort((x, y) => (x.B?.datetime ?? '').localeCompare(y.B?.datetime ?? '')), [mine]);
 
   return (
     <Panel title={L('รายละเอียดพื้นที่', 'Area detail')}>
       <div className="space-y-1.5">
         <Input value={aoi.name} onChange={(e) => upd({ name: e.target.value })} className="!py-1 text-sm" />
-        <div className="font-mono text-[10px] text-muted">{info.lat.toFixed(4)}, {info.lon.toFixed(4)} · {info.km2.toFixed(1)} km²</div>
+        <div className="font-mono text-[10px] text-muted">{info.lat.toFixed(4)}, {info.lon.toFixed(4)} · {fmtArea(info.km2, unit, lang === 'th')}</div>
         <div className="grid grid-cols-3 gap-1">
           <Select value={aoi.purpose} onChange={(e) => upd({ purpose: e.target.value as Purpose })} className="!py-1 text-xs">{PURPOSES.map((p) => <option key={p.id} value={p.id}>{L(p.labelTh, p.label)}</option>)}</Select>
           <Select value={aoi.sensor} onChange={(e) => upd({ sensor: e.target.value as SensorMode })} className="!py-1 text-xs">
@@ -690,17 +766,19 @@ function AoiDetail({ aoi, onRun, onEdit, busy, lang }: { aoi: MonitorAoi; onRun:
 
         {mine.length > 1 && (
           <Select value={run?.id} onChange={(e) => setRunId(e.target.value)} className="!py-1 text-xs">
-            {mine.map((r) => <option key={r.id} value={r.id}>{new Date(r.at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })} · {r.status === 'ok' ? `${(r.stats!.interestKm2 * 100).toFixed(1)} ha` : L('ข้อมูลไม่พอ', 'insufficient')}</option>)}
+            {mine.map((r) => <option key={r.id} value={r.id}>{new Date(r.at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}{r.A && r.B ? ` · ภาพ ${r.A.datetime.slice(0, 10)}→${r.B.datetime.slice(0, 10)}` : ''} · {r.status === 'ok' ? fmtArea(r.stats!.interestKm2, unit, lang === 'th') : L('ข้อมูลไม่พอ', 'insufficient')}{r.mode === 'manual' ? ` · ${L('เลือกเอง', 'manual')}` : ''}</option>)}
           </Select>
         )}
 
         {!run && <p className="text-[11px] text-muted">{L('ยังไม่เคยตรวจพื้นที่นี้', 'Not checked yet.')}</p>}
         {run && run.status !== 'ok' && (
           <Notice tone="warn">
-            <b>{run.status === 'error' ? L('เกิดข้อผิดพลาด', 'Error') : L('ข้อมูลไม่เพียงพอ', 'Insufficient data')}</b> — {run.reason}
-            <div className="mt-1 text-[10px]">{L('ลองเพิ่มช่วงเวลาที่ตรวจเป็น 30–60 วัน หรือเปลี่ยนเป็นเรดาร์', 'Try a 30–60 day window or switch to radar.')}</div>
+            <b>{run.status === 'error' ? L('เกิดข้อผิดพลาด', 'Error') : L('ข้อมูลไม่เพียงพอ — ไม่สรุปผลการเปลี่ยนแปลง', 'Insufficient data — no change conclusion')}</b> — {run.reason}
+            <div className="mt-1 text-[10px]">{L('ไม่ได้แปลว่า “ไม่มีการเปลี่ยนแปลง” · ลองเลือกภาพวันอื่นในส่วน “เปรียบเทียบภาพย้อนหลัง” ด้านล่าง เพิ่มช่วงเวลาเป็น 30–60 วัน หรือใช้เรดาร์', 'This does not mean “no change” · pick another date below, use a 30–60 day window, or radar.')}</div>
+            {!!run.suggestions?.length && <div className="mt-1 text-[10px]">{L('ภาพที่ผ่านเกณฑ์ในช่วงนี้', 'Passing scenes in the window')}: {run.suggestions.map((x) => x.datetime.slice(0, 10)).join(', ')}</div>}
           </Notice>
         )}
+        {run && run.status !== 'ok' && run.stats && <ResultQuality run={run} unit={unit} />}
         {run && aoi.editedAt && run.at < aoi.editedAt && <Notice tone="warn">{L('ผลนี้ตรวจด้วยกรอบก่อนแก้ไข กด “ตรวจตอนนี้” เพื่อตรวจกรอบใหม่', 'This result used the box before it was edited — run a new check')}</Notice>}
         {run && run.status === 'ok' && run.stats && (
           <div className="space-y-1.5">
@@ -709,10 +787,12 @@ function AoiDetail({ aoi, onRun, onEdit, busy, lang }: { aoi: MonitorAoi; onRun:
               <Badge tone="cyan">{L('ความเชื่อมั่น', 'confidence')} {lang === 'th' ? confTh(run.confidence) : run.confidence}</Badge>
               <Badge>{run.sensor === 'sar' ? 'Sentinel-1' : 'Sentinel-2'}</Badge>
             </div>
-            <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-slate-200">{narrative(run, lang).map((x) => <li key={x}>{x}</li>)}</ul>
+            <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-slate-200">{narrative(run, lang, unit).map((x) => <li key={x}>{x}</li>)}</ul>
             {run.note && <p className="text-[10px] text-warn">{run.note}</p>}
             <p className="text-[10px] text-muted">{run.method}</p>
-            {!!run.confidenceNotes?.length && <ul className="pl-4 text-[10px] text-muted">{run.confidenceNotes.map((x) => <li key={x}>• {x}</li>)}</ul>}
+            <ResultQuality run={run} unit={unit} />
+            {run.A && run.B && <Button onClick={() => void swipeRun(run)}>{swipeOn ? L('ปิด/สลับเลื่อนเทียบภาพ', 'Toggle swipe') : L('เลื่อนเทียบภาพก่อน/หลังบนแผนที่', 'Swipe before/after on the map')}</Button>}
+            {swErr && <p className="text-[10px] text-bad">{swErr}</p>}
             <div className="grid grid-cols-2 gap-1.5">
               <figure>
                 <div className="relative aspect-square overflow-hidden rounded border border-line bg-black">{img.before && <img src={img.before} className="h-full w-full object-contain" alt="" />}</div>
@@ -730,15 +810,15 @@ function AoiDetail({ aoi, onRun, onEdit, busy, lang }: { aoi: MonitorAoi; onRun:
               </figure>
             </div>
             <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-300">
-              {run.legend?.map((l) => <span key={l.id} className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: l.color }} />{L(l.labelTh, l.label)} {((run.stats!.classKm2[l.id] ?? 0) * 100).toFixed(1)} ha</span>)}
+              {run.legend?.map((l) => <span key={l.id} className="flex items-center gap-1"><i className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: l.color }} />{L(l.labelTh, l.label)} {fmtArea(run.stats!.classKm2[l.id] ?? 0, unit, lang === 'th')}</span>)}
             </div>
             {!!run.hotspots?.length && (
               <div className="max-h-40 overflow-y-auto rounded border border-line scroll-thin">
                 <table className="w-full text-[10px]">
-                  <thead className="text-muted"><tr><th className="px-1 text-left">#</th><th className="text-left">lat, lon</th><th className="pr-1 text-right">ha</th><th className="pr-1 text-right">{L('ไร่', 'rai')}</th></tr></thead>
+                  <thead className="text-muted"><tr><th className="px-1 text-left">#</th><th className="text-left">lat, lon</th><th className="pr-1 text-right">{L('ตร.กม.', 'km²')}</th><th className="pr-1 text-right">{L('ไร่', 'rai')}</th></tr></thead>
                   <tbody className="font-mono text-slate-200">
                     {run.hotspots.slice(0, 20).map((h) => (
-                      <tr key={h.n} className="border-t border-white/5"><td className="px-1">{h.n}</td><td>{h.lat.toFixed(5)}, {h.lon.toFixed(5)}</td><td className="pr-1 text-right">{h.areaHa.toFixed(2)}</td><td className="pr-1 text-right">{(h.areaHa * 6.25).toFixed(1)}</td></tr>
+                      <tr key={h.n} className="border-t border-white/5"><td className="px-1">{h.n}</td><td>{h.lat.toFixed(5)}, {h.lon.toFixed(5)}</td><td className="pr-1 text-right">{hotspotKm2(h).toFixed(4)}</td><td className="pr-1 text-right">{km2ToRai(hotspotKm2(h)).toFixed(2)}</td></tr>
                     ))}
                   </tbody>
                 </table>
@@ -748,7 +828,7 @@ function AoiDetail({ aoi, onRun, onEdit, busy, lang }: { aoi: MonitorAoi; onRun:
             <button className="text-[10px] text-muted hover:text-bad" onClick={() => removeRun(run.id)}>{L('ลบผลการตรวจครั้งนี้', 'Delete this result')}</button>
           </div>
         )}
-        {series.length > 1 && <Trend series={series} />}
+        {series.length > 1 && <Trend series={series} unit={unit} />}
       </div>
     </Panel>
   );
@@ -765,23 +845,25 @@ function OverlayOnImage({ src, img, ov }: { src: string; img: { west: number; so
   );
 }
 
-function Trend({ series }: { series: MonitorRun[] }) {
+function Trend({ series, unit }: { series: MonitorRun[]; unit: AreaUnit }) {
   const L = useL();
   const W = 380, H = 90, P = 28;
-  const vs = series.map((r) => (r.stats?.interestKm2 ?? 0) * 100);
+  const conv = (km2: number) => (unit === 'rai' ? km2ToRai(km2) : km2);
+  const uTh = unit === 'rai' ? 'ไร่' : 'ตร.กม.', uEn = unit === 'rai' ? 'rai' : 'km²';
+  const vs = series.map((r) => conv(r.stats?.interestKm2 ?? 0));
   const hi = Math.max(...vs, 1);
   const x = (i: number) => P + (i / Math.max(series.length - 1, 1)) * (W - P - 8);
   const y = (v: number) => H - 16 - (v / hi) * (H - 26);
   return (
     <div>
-      <div className="label mb-1">{L('แนวโน้มพื้นที่ที่ตรวจพบ (เฮกตาร์)', 'Detected area trend (ha)')}</div>
+      <div className="label mb-1">{L(`แนวโน้มพื้นที่ที่ตรวจพบ (${uTh}) — เรียงตามวันที่ภาพ “หลัง”`, `Detected area trend (${uEn}) — by after-image date`)}</div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
         <line x1={P} x2={W - 8} y1={H - 16} y2={H - 16} stroke="rgba(148,178,214,0.25)" />
-        <text x={2} y={y(hi) + 3} fontSize="9" fill="#8b98ab">{hi.toFixed(1)}</text>
+        <text x={2} y={y(hi) + 3} fontSize="9" fill="#8b98ab">{hi.toFixed(unit === 'rai' ? 0 : 2)}</text>
         <path d={series.map((_, i) => `${i ? 'L' : 'M'}${x(i)},${y(vs[i])}`).join(' ')} fill="none" stroke="#22d3ee" strokeWidth={1.8} />
         {series.map((r, i) => (
           <g key={r.id}>
-            <circle cx={x(i)} cy={y(vs[i])} r={3} fill={LEVEL_COLOR[r.level ?? 'none']}><title>{`${r.B?.datetime.slice(0, 10)}: ${vs[i].toFixed(2)} ha`}</title></circle>
+            <circle cx={x(i)} cy={y(vs[i])} r={3} fill={LEVEL_COLOR[r.level ?? 'none']}><title>{`${r.B?.datetime.slice(0, 10)}: ${vs[i].toFixed(unit === 'rai' ? 1 : 3)} ${uTh}`}</title></circle>
             <text x={x(i)} y={H - 3} fontSize="8" fill="#8b98ab" textAnchor="middle">{r.B?.datetime.slice(5, 10)}</text>
           </g>
         ))}
@@ -796,6 +878,7 @@ export function MonitorReport() {
   const L = useL();
   const lang0 = useLang((s) => s.lang);
   const { aois, runs } = useMonitor();
+  const { unit } = useQc();
   const [lang, setLang] = useState<'th' | 'en'>(lang0);
   const [title, setTitle] = useState(lang0 === 'th' ? 'รายงานการเปลี่ยนแปลงพื้นที่จากภาพดาวเทียม' : 'Satellite Area Change Assessment');
   const [onlyChanged, setOnlyChanged] = useState(false);
@@ -817,7 +900,7 @@ export function MonitorReport() {
     setBusy(true);
     setErr('');
     try {
-      const html = await buildReportHtml({ title, lang, requirement, items });
+      const html = await buildReportHtml({ title, lang, requirement, items, unit });
       const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
       const w = window.open(url, '_blank');
       if (!w) setErr(L('เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาตป๊อปอัปให้เว็บนี้แล้วลองอีกครั้ง', 'The browser blocked the new window — allow pop-ups for this site and try again.'));
@@ -864,7 +947,7 @@ export function MonitorReport() {
                     <input type="checkbox" checked={sel.has(a.id)} onChange={() => setSel((s) => { const n = new Set(s); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n; })} />
                     <span className="h-2.5 w-2.5 rounded-sm" style={{ background: LEVEL_COLOR[statusOf(r)] }} />
                     <span className="flex-1 truncate">{a.name}</span>
-                    <span className="font-mono text-[10px] text-muted">{r ? `${r.at.slice(0, 10)}${r.status === 'ok' ? ` · ${(r.stats!.interestKm2 * 100).toFixed(1)} ha · ${(rai(r.stats!.interestKm2)).toFixed(0)} ${L('ไร่', 'rai')}` : ` · ${L('ข้อมูลไม่พอ', 'insufficient')}`}` : L('ยังไม่ตรวจ', 'not checked')}</span>
+                    <span className="font-mono text-[10px] text-muted">{r ? `${r.at.slice(0, 10)}${r.status === 'ok' ? ` · ${fmtArea(r.stats!.interestKm2, unit, lang === 'th')}` : ` · ${L('ข้อมูลไม่พอ', 'insufficient')}`}` : L('ยังไม่ตรวจ', 'not checked')}</span>
                   </label>
                 </li>
               );

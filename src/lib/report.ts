@@ -1,8 +1,10 @@
 // OPP-style landscape report (16:9 pages) built as a standalone HTML document that the browser
 // prints to PDF. Every number and sentence comes from stored monitoring runs; images are the
 // rendered scenes saved with each run; the basemap comes from Esri World Imagery (export API).
-import { getImage, narrative, rai, confTh, levelTh, PURPOSES, REGIONS, type MonitorAoi, type MonitorRun } from './monitor';
-import { areaKm2, centroid } from './geo';
+import { getImage, narrative, confTh, levelTh, hotspotKm2, PURPOSES, REGIONS, type MonitorAoi, type MonitorRun } from './monitor';
+import { centroid } from './geo';
+import { fmtArea, geometryAreaKm2, km2ToRai, type AreaUnit } from './area';
+const areaKm2 = (g: GeoJSON.Polygon) => geometryAreaKm2(g);
 
 export type Lang = 'th' | 'en';
 export type BBox = { west: number; south: number; east: number; north: number };
@@ -60,11 +62,14 @@ export interface ReportInput {
   lang: Lang;
   requirement: string;
   items: { aoi: MonitorAoi; run: MonitorRun | undefined }[];
+  unit?: AreaUnit;
 }
 
 export async function buildReportHtml(inp: ReportInput): Promise<string> {
   const th = inp.lang === 'th';
   const L = (a: string, b: string) => (th ? a : b);
+  const unit = inp.unit ?? 'km2';
+  const AR = (km2: number) => fmtArea(km2, unit, th);
   const now = new Date();
   const items = inp.items.map((x, i) => ({ ...x, n: i + 1 }));
   const counts = { significant: 0, minor: 0, none: 0, insufficient: 0 };
@@ -102,7 +107,7 @@ export async function buildReportHtml(inp: ReportInput): Promise<string> {
     .map(({ aoi, run, n }) => {
       const [lon, lat] = centroid(aoi.geometry);
       const lv = !run || run.status !== 'ok' ? L('ข้อมูลไม่พอ', 'Insufficient') : th ? levelTh(run.level) : run.level;
-      const finding = run ? narrative(run, inp.lang)[0] : L('ยังไม่ได้วิเคราะห์', 'Not analysed yet');
+      const finding = run ? narrative(run, inp.lang, unit)[0] : L('ยังไม่ได้วิเคราะห์', 'Not analysed yet');
       return `<tr><td class="c">${n}</td><td>${esc(aoi.name)}</td><td class="mono c">${lat.toFixed(3)},<br>${lon.toFixed(3)}</td><td class="c lv-${run?.status === 'ok' ? run.level : 'x'}">${esc(String(lv))}</td><td>${esc(finding)}</td></tr>`;
     })
     .join('');
@@ -129,13 +134,13 @@ export async function buildReportHtml(inp: ReportInput): Promise<string> {
     const [clon, clat] = centroid(aoi.geometry);
     const region = REGIONS.find((r) => r.id === aoi.region);
     const purpose = PURPOSES.find((p) => p.id === aoi.purpose);
-    const bullets = (run ? narrative(run, inp.lang) : [L('ยังไม่มีผลวิเคราะห์', 'No analysis yet')]).map((x) => `<li>${esc(x)}</li>`).join('');
+    const bullets = (run ? narrative(run, inp.lang, unit) : [L('ยังไม่มีผลวิเคราะห์', 'No analysis yet')]).map((x) => `<li>${esc(x)}</li>`).join('');
     const hs = (run?.hotspots ?? []).slice(0, 10);
     const hsMarks = hs.map((h) => {
       const [x, y] = px(frame, h.lon, h.lat);
       return `<div class="hs" style="left:${x}%;top:${y}%">${h.n}</div>`;
     }).join('');
-    const hsRows = hs.slice(0, 6).map((h) => `<tr><td>${h.n}</td><td class="mono">${h.lat.toFixed(4)}, ${h.lon.toFixed(4)}</td><td class="r">${f1(h.areaHa)}</td></tr>`).join('');
+    const hsRows = hs.slice(0, 6).map((h) => `<tr><td>${h.n}</td><td class="mono">${h.lat.toFixed(4)}, ${h.lon.toFixed(4)}</td><td class="r">${hotspotKm2(h).toFixed(4)}</td><td class="r">${f1(km2ToRai(hotspotKm2(h)), 2)}</td></tr>`).join('');
     const legend = (run?.legend ?? []).map((l) => `<span><i style="background:${l.color}"></i>${esc(th ? l.labelTh : l.label)}</span>`).join('');
     const [lx, ly] = px(loc, clon, clat);
     const sensorTxt = run?.sensor === 'sar' ? 'Sentinel-1 RTC (SAR)' : 'Sentinel-2 L2A';
@@ -146,9 +151,12 @@ export async function buildReportHtml(inp: ReportInput): Promise<string> {
         <div class="box"><h3>${L('อัปเดตภาพ', 'Imagery Update')}: ${dmy(run?.B?.datetime)}</h3>
           <div class="meta">${esc(th ? region?.labelTh ?? '' : region?.label ?? '')} · ${esc(th ? purpose?.labelTh ?? '' : purpose?.label ?? '')}</div>
           <ul>${bullets}</ul>
-          ${run?.status === 'ok' ? `<div class="kv"><span>${L('พื้นที่ที่ตรวจพบ', 'Detected area')}</span><b>${f1((run.stats?.interestKm2 ?? 0) * 100)} ha · ${f1(rai(run.stats?.interestKm2 ?? 0), 0)} ${L('ไร่', 'rai')}</b></div>
+          ${run?.status === 'ok' ? `<div class="kv"><span>${L('พื้นที่ที่ตรวจพบ', 'Detected area')}</span><b>${AR(run.stats?.interestKm2 ?? 0)}</b></div>
+          <div class="kv"><span>${L('วิเคราะห์ได้ / ตรวจไม่ได้', 'Checked / not checkable')}</span><b>${f1((100 * (run.stats?.validKm2 ?? 0)) / Math.max(run.stats?.aoiKm2 ?? 1, 1e-9), 0)}% / ${AR(run.stats?.noDataKm2 ?? 0)}</b></div>
+          ${run.quality ? `<div class="kv"><span>${L('คุณภาพการเปรียบเทียบ', 'Comparison quality')}</span><b>${run.quality.score}/100</b></div>` : ''}
+          <div class="kv"><span>${L('เมฆใน AOI (ก่อน / หลัง)', 'AOI cloud (before / after)')}</span><b>${run.A?.aoiCloudPct != null ? f1(run.A.aoiCloudPct + (run.A.aoiShadowPct ?? 0), 0) + '%' : run.sensor === 'sar' ? L('เรดาร์', 'radar') : '—'} / ${run.B?.aoiCloudPct != null ? f1(run.B.aoiCloudPct + (run.B.aoiShadowPct ?? 0), 0) + '%' : run.sensor === 'sar' ? L('เรดาร์', 'radar') : '—'}</b></div>
           <div class="kv"><span>${L('ระดับ / ความเชื่อมั่น', 'Level / confidence')}</span><b>${th ? levelTh(run.level) : run.level} · ${th ? confTh(run.confidence) : run.confidence}</b></div>` : ''}
-          ${hsRows ? `<table class="hst"><tr><th>#</th><th>LAT, LON</th><th>ha</th></tr>${hsRows}</table>` : ''}
+          ${hsRows ? `<table class="hst"><tr><th>#</th><th>LAT, LON</th><th>${L('ตร.กม.', 'km²')}</th><th>${L('ไร่', 'rai')}</th></tr>${hsRows}</table>` : ''}
         </div>
         <div class="loc"><img src="${esri(loc, 300, 480)}" alt=""/><div class="locmk" style="left:${lx}%;top:${ly}%"></div><span>AOI ${n}</span></div>
       </div>
@@ -161,10 +169,10 @@ export async function buildReportHtml(inp: ReportInput): Promise<string> {
         <div class="tag tl mono">${dmy(run?.B?.datetime)} · ${clat.toFixed(3)}, ${clon.toFixed(3)}</div>
         ${im?.before && run?.bounds ? `<div class="inset"><img src="${im.before}" alt=""/><div class="tag mono">${L('ก่อน', 'BEFORE')} ${dmy(run?.A?.datetime)}</div></div>` : ''}
         ${NORTH}${scaleBar(frame, 190)}
-        <div class="legend"><b>${L('คำอธิบาย', 'LEGEND')}</b><span><i class="line"></i>AOI</span><span><i class="dot">1</i>${L('จุดที่ตรวจพบ', 'Detected patch')}</span>${legend}<span class="muted">${L('ช่วงที่ตรวจ', 'Change window')}: ${dmy(run?.A?.datetime)} → ${dmy(run?.B?.datetime)}</span></div>
+        <div class="legend"><b>${L('คำอธิบาย', 'LEGEND')}</b><span><i class="line"></i>AOI</span><span><i class="dot">1</i>${L('จุดที่ตรวจพบ', 'Detected patch')}</span>${legend}<span><i style="background:repeating-linear-gradient(45deg,#e5e7eb 0 2px,transparent 2px 4px)"></i>${L('เมฆ', 'Cloud')}</span><span><i style="background:repeating-linear-gradient(45deg,#7c5cd6 0 2px,transparent 2px 4px)"></i>${L('เงาเมฆ', 'Shadow')}</span><span><i style="background:repeating-linear-gradient(45deg,#6b7280 0 2px,transparent 2px 4px)"></i>${L('ไม่มีข้อมูล', 'No data')}</span><span class="muted">${L('ช่วงที่ตรวจ', 'Change window')}: ${dmy(run?.A?.datetime)} → ${dmy(run?.B?.datetime)}</span></div>
       </div>
     </div>
-    <div class="src">${run?.status === 'ok' ? `${sensorTxt}: ${esc(run.A?.id ?? '')} (${dmy(run.A?.datetime)}), ${esc(run.B?.id ?? '')} (${dmy(run.B?.datetime)}) · Microsoft Planetary Computer · ` : ''}${L('แผนที่ฐาน Esri World Imagery', 'Esri World Imagery basemap')} · ${f1(areaKm2(aoi.geometry), 1)} km²</div>
+    <div class="src">${run?.status === 'ok' ? `${sensorTxt}: ${esc(run.A?.id ?? '')} (${dmy(run.A?.datetime)}), ${esc(run.B?.id ?? '')} (${dmy(run.B?.datetime)}) · Microsoft Planetary Computer · ` : ''}${L('แผนที่ฐาน Esri World Imagery', 'Esri World Imagery basemap')} · AOI ${AR(areaKm2(aoi.geometry))}</div>
     ${footer(pg++)}</section>`);
   }
 
@@ -176,9 +184,11 @@ export async function buildReportHtml(inp: ReportInput): Promise<string> {
   <h1>${L('วิธีการ แหล่งข้อมูล และข้อจำกัด', 'Method, Sources & Limitations')}</h1><div class="rule"></div>
   <table class="kf small"><thead><tr><th>AOI</th><th>${L('ชื่อ', 'Name')}</th><th>${L('ภาพที่ใช้ (ก่อน / หลัง)', 'Scenes (before / after)')}</th><th>${L('วิเคราะห์เมื่อ', 'Analysed')}</th><th>${L('วิธี', 'Method')}</th></tr></thead><tbody>${srcRows}</tbody></table>
   <h2>${L('ข้อจำกัด', 'Limitations')}</h2><ul class="lim">
-  <li>${L('ความละเอียด 10 เมตร (Sentinel) — ตรวจจับการถางหรือดินเปิดขนาดตั้งแต่ราว 0.2 เฮกตาร์ขึ้นไปได้ แต่ไม่เห็นสิ่งปลูกสร้างขนาดเล็ก ทางเดินแคบ หรือยานพาหนะ', '10 m resolution (Sentinel): clearings or bare ground from about 0.2 ha are detectable; small structures, narrow tracks and vehicles are not.')}</li>
+  <li>${L('ความละเอียด 10 เมตร (Sentinel) — ตรวจจับการถางหรือดินเปิดขนาดตั้งแต่ราว 0.002 ตร.กม. (1.25 ไร่) ขึ้นไปได้ แต่ไม่เห็นสิ่งปลูกสร้างขนาดเล็ก ทางเดินแคบ หรือยานพาหนะ', '10 m resolution (Sentinel): clearings or bare ground from about 0.002 km² (1.25 rai) are detectable; small structures, narrow tracks and vehicles are not.')}</li>
   <li>${L('เมฆและเงาเมฆถูกตัดออกด้วยชั้น SCL ของ Sentinel-2 พื้นที่ที่ถูกตัดจะไม่ถูกนับ ส่วนเรดาร์อาจเปลี่ยนจากความชื้น ฝน หรือพืชไร่', 'Cloud and shadow are masked with Sentinel-2 SCL and excluded; radar change can also come from moisture, rain or crops.')}</li>
   <li>${L('ตำแหน่งเป็นพิกัดศูนย์กลางของกลุ่มพิกเซล ความคลาดเคลื่อนราว 10–20 เมตร เส้นชายแดนในแผนที่ (ถ้ามี) เป็นเส้นโดยประมาณจาก Natural Earth ไม่ใช่เส้นเขตแดนตามกฎหมาย', 'Positions are pixel-cluster centroids (±10–20 m). Any border line shown is approximate (Natural Earth), not the legal boundary.')}</li>
+  <li>${L('แต่ละพิกเซลอยู่ได้สถานะเดียว: เปลี่ยนแปลง / ไม่เปลี่ยนแปลงเกินเกณฑ์ / ตรวจไม่ได้ (เมฆ เงาเมฆ ไม่มีข้อมูล จากหน้ากาก Sentinel-2 SCL หรือ Landsat QA_PIXEL) พื้นที่ตรวจไม่ได้ไม่ถูกนับเป็นการเปลี่ยนแปลงและไม่ถูกสรุปว่าไม่เปลี่ยนแปลง หากพื้นที่วิเคราะห์ได้ต่ำกว่าเกณฑ์ ระบบจะไม่สรุปผล', 'Each pixel has one state: change / no significant change / not checkable (cloud, shadow, no data from Sentinel-2 SCL or Landsat QA_PIXEL). Not-checkable areas are neither change nor “no change”; below the analysable threshold no conclusion is made.')}</li>
+  <li>${L('พื้นที่คำนวณบนทรงรี WGS84 แสดงเป็น ตร.กม. และไร่ (1 ตร.กม. = 625 ไร่, 1 ไร่ = 1,600 ตร.ม.) · คะแนนคุณภาพการเปรียบเทียบ (0–100) มาจากพื้นที่ใช้ได้ 40 · เมฆใน AOI 20 · เซนเซอร์/มุมถ่าย 15 · ช่วงห่าง/ฤดูกาล 15 · ความละเอียด 10 และแยกจากความเชื่อมั่นของการจำแนก', 'Areas computed on the WGS84 ellipsoid, shown in km² and rai (1 km² = 625 rai; 1 rai = 1,600 m²) · comparison quality (0–100) = usable area 40 · AOI cloud 20 · sensor/geometry 15 · gap/season 15 · resolution 10, separate from classification confidence')}</li>
   <li>${L('การเปลี่ยนแปลงของค่าดัชนีไม่ใช่หลักฐานยืนยันสาเหตุ ต้องตรวจสอบด้วยภาพความละเอียดสูงหรือภาคพื้นดินก่อนสรุป', 'A change in index values is not proof of cause; confirm with very-high-resolution imagery or ground checks before drawing conclusions.')}</li></ul>
   <h2>${L('แหล่งข้อมูล', 'Sources')}</h2><ul class="lim">
   <li>Copernicus Sentinel-1/-2 (ESA) — Microsoft Planetary Computer STAC & data API, ${L('เข้าถึงเมื่อ', 'accessed')} ${dmy(now.toISOString())}</li>
@@ -262,17 +272,18 @@ ${pages.join('\n')}
 }
 
 export function hotspotsCsv(items: { aoi: MonitorAoi; run: MonitorRun | undefined }[]) {
-  const head = 'aoi,aoi_name,run_date,before_scene,after_scene,sensor,patch,lat,lon,area_ha,area_rai,class,level,confidence';
+  const head = 'aoi,aoi_name,run_date,before_acquired,after_acquired,before_scene,after_scene,sensor,patch,lat,lon,area_km2,area_rai,class,level,confidence,aoi_km2,analysable_km2,cloud_km2,shadow_km2,nodata_km2,quality';
+  const runCols = (run: MonitorRun) => [run.stats?.aoiKm2?.toFixed(4) ?? '', run.stats?.validKm2?.toFixed(4) ?? '', run.stats?.cloudKm2?.toFixed(4) ?? '', run.stats?.shadowKm2?.toFixed(4) ?? '', (run.stats?.missingKm2 ?? (run.stats?.cloudKm2 == null ? run.stats?.noDataKm2 : undefined))?.toFixed(4) ?? '', run.quality?.score ?? ''];
   const rows: string[] = [];
   items.forEach(({ aoi, run }, i) => {
     if (!run || run.status !== 'ok') {
-      rows.push([i + 1, `"${aoi.name}"`, run?.at ?? '', '', '', '', '', '', '', '', '', '', run ? 'insufficient' : 'not_run', ''].join(','));
+      rows.push([i + 1, `"${aoi.name}"`, run?.at ?? '', run?.A?.datetime ?? '', run?.B?.datetime ?? '', run?.A?.id ?? '', run?.B?.id ?? '', run?.sensor ?? '', '', '', '', '', '', '', run ? run.status : 'not_run', '', ...(run ? runCols(run) : ['', '', '', '', '', ''])].join(','));
       return;
     }
     (run.hotspots ?? []).forEach((h) =>
-      rows.push([i + 1, `"${aoi.name}"`, run.at, run.A?.id, run.B?.id, run.sensor, h.n, h.lat.toFixed(6), h.lon.toFixed(6), h.areaHa.toFixed(3), (h.areaHa * 6.25).toFixed(1), `"${run.legend?.find((l) => l.id === h.cls)?.label ?? h.cls}"`, run.level, run.confidence].join(',')),
+      rows.push([i + 1, `"${aoi.name}"`, run.at, run.A?.datetime, run.B?.datetime, run.A?.id, run.B?.id, run.sensor, h.n, h.lat.toFixed(6), h.lon.toFixed(6), hotspotKm2(h).toFixed(6), km2ToRai(hotspotKm2(h)).toFixed(2), `"${run.legend?.find((l) => l.id === h.cls)?.label ?? h.cls}"`, run.level, run.confidence, ...runCols(run)].join(',')),
     );
-    if (!run.hotspots?.length) rows.push([i + 1, `"${aoi.name}"`, run.at, run.A?.id, run.B?.id, run.sensor, '', '', '', '0', '0', '', run.level, run.confidence].join(','));
+    if (!run.hotspots?.length) rows.push([i + 1, `"${aoi.name}"`, run.at, run.A?.datetime, run.B?.datetime, run.A?.id, run.B?.id, run.sensor, '', '', '', '0', '0', '', run.level, run.confidence, ...runCols(run)].join(','));
   });
   return '﻿' + head + '\n' + rows.join('\n');
 }
@@ -283,9 +294,9 @@ export function resultsGeoJson(items: { aoi: MonitorAoi; run: MonitorRun | undef
     features.push({
       type: 'Feature',
       geometry: aoi.geometry,
-      properties: { aoi: i + 1, name: aoi.name, region: aoi.region, purpose: aoi.purpose, run_at: run?.at, status: run?.status ?? 'not_run', reason: run?.reason, level: run?.level, confidence: run?.confidence, detected_ha: run?.stats ? run.stats.interestKm2 * 100 : null, valid_km2: run?.stats?.validKm2, before: run?.A?.id, after: run?.B?.id, method: run?.method },
+      properties: { aoi: i + 1, name: aoi.name, region: aoi.region, purpose: aoi.purpose, run_at: run?.at, status: run?.status ?? 'not_run', reason: run?.reason, level: run?.level, confidence: run?.confidence, detected_km2: run?.stats ? run.stats.interestKm2 : null, detected_rai: run?.stats ? km2ToRai(run.stats.interestKm2) : null, aoi_km2: run?.stats?.aoiKm2 ?? areaKm2(aoi.geometry), analysable_km2: run?.stats?.validKm2, cloud_km2: run?.stats?.cloudKm2, shadow_km2: run?.stats?.shadowKm2, nodata_km2: run?.stats?.missingKm2, quality: run?.quality?.score, before_acquired: run?.A?.datetime, after_acquired: run?.B?.datetime, before: run?.A?.id, after: run?.B?.id, method: run?.method },
     });
-    run?.hotspots?.forEach((h) => features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [h.lon, h.lat] }, properties: { aoi: i + 1, patch: h.n, area_ha: +h.areaHa.toFixed(3), class: h.cls } }));
+    run?.hotspots?.forEach((h) => features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [h.lon, h.lat] }, properties: { aoi: i + 1, patch: h.n, area_km2: +hotspotKm2(h).toFixed(6), area_rai: +km2ToRai(hotspotKm2(h)).toFixed(2), class: h.cls } }));
   });
   return { type: 'FeatureCollection', features };
 }

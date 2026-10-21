@@ -14,6 +14,7 @@ import { aoiFromPolygon, getImage, landCoverShares, narrative, runMonitor, type 
 import { useMonitor } from './Monitor';
 import { useDisaster } from './Disaster';
 import { imageProvider } from '../components/gis/sceneLayer';
+import { fmtArea } from '../lib/area';
 import { dmy, esc, esri, f1, fit, NORTH, placed, px, reportShell, scaleBar, zulu, type BBox } from '../lib/report';
 
 // ---------------------------------------------------------------- state
@@ -627,13 +628,13 @@ export function NewsFloodReport() {
   };
   const csv = () => {
     if (!snap) return;
-    const rows = [['place', 'precision', 'lat', 'lon', 'stories', 'latest_story', 'satellite_result', 'new_water_ha', 'scene_after', 'headline', 'outlet', 'url']];
+    const rows = [['place', 'precision', 'lat', 'lon', 'stories', 'latest_story', 'satellite_result', 'new_water_km2', 'scene_after', 'headline', 'outlet', 'url']];
     places.forEach((p) => {
       const r = runs.find((x) => x.id === runOf[p.key]);
       p.articleIds.forEach((id) => {
         const a = snap.articles.find((x) => x.id === id);
         if (!a) return;
-        rows.push([p.labelTh, p.precision, p.lat.toFixed(5), p.lon.toFixed(5), String(p.articleIds.length), a.published ?? '', levelText(r), r?.status === 'ok' ? ((r.stats?.interestKm2 ?? 0) * 100).toFixed(1) : '', r?.B?.datetime ?? '', a.title, a.outlet, a.realUrl ?? a.link]);
+        rows.push([p.labelTh, p.precision, p.lat.toFixed(5), p.lon.toFixed(5), String(p.articleIds.length), a.published ?? '', levelText(r), r?.status === 'ok' ? (r.stats?.interestKm2 ?? 0).toFixed(4) : '', r?.B?.datetime ?? '', a.title, a.outlet, a.realUrl ?? a.link]);
       });
     });
     const blob = new Blob(['﻿' + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')], { type: 'text/csv' });
@@ -702,7 +703,7 @@ async function buildNewsReport(inp: { title: string; lang: 'th' | 'en'; snap: Ne
   const ov = fit(allB, 120 / 128, 0.25);
   const rowOf = ({ p, n, run }: (typeof items)[number]) => {
     const latest = p.articleIds.map((id) => arts.get(id)?.published ?? '').sort().pop();
-    return `<tr><td class="c">${n}</td><td>${esc(p.labelTh)} <span style="color:#666;font-size:6.5pt">· ${esc(precTh(p.precision))}</span></td><td class="c">${p.articleIds.length}</td><td class="mono c">${dmy(latest || undefined)}</td><td class="c lv-${run?.status === 'ok' ? run.level : 'x'}">${esc(res(run))}${run?.status === 'ok' && run.level !== 'none' ? `<br>${f1((run.stats?.interestKm2 ?? 0) * 100)} ha` : ''}${timing(run, p.articleIds.map((id) => arts.get(id)))?.before ? ` <span style="color:#b45309;font-size:6.5pt">(${L('ภาพ', 'img')} ${dmy(run?.B?.datetime)})</span>` : ''}</td></tr>`;
+    return `<tr><td class="c">${n}</td><td>${esc(p.labelTh)} <span style="color:#666;font-size:6.5pt">· ${esc(precTh(p.precision))}</span></td><td class="c">${p.articleIds.length}</td><td class="mono c">${dmy(latest || undefined)}</td><td class="c lv-${run?.status === 'ok' ? run.level : 'x'}">${esc(res(run))}${run?.status === 'ok' && run.level !== 'none' ? `<br>${fmtArea(run.stats?.interestKm2 ?? 0, 'km2', th)}` : ''}${timing(run, p.articleIds.map((id) => arts.get(id)))?.before ? ` <span style="color:#b45309;font-size:6.5pt">(${L('ภาพ', 'img')} ${dmy(run?.B?.datetime)})</span>` : ''}</td></tr>`;
   };
   const PER = 9;
   const marks = items.map(({ p, n }) => {

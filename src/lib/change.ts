@@ -4,8 +4,8 @@
 // and re-projected to a lat/lon-linear image for draping on the globe.
 import { greyTileUrl } from './spectral';
 import type { ImageryItem } from './stac';
+import { rectAreaKm2 } from './area';
 
-const R = 6378137;
 
 function lonLatToTile(lon: number, lat: number, z: number) {
   const n = 2 ** z;
@@ -121,8 +121,11 @@ function pixelLatLon(g: Grid, row: number, col: number) {
   return [lon, lat];
 }
 
-/** Ground area of one web-mercator pixel at latitude (m²). */
-const pixelArea = (lat: number, z: number) => ((2 * Math.PI * R * Math.cos((lat * Math.PI) / 180)) / (256 * 2 ** z)) ** 2;
+/** Ellipsoidal ground area (km²) of one web-mercator pixel row cell (exact for the cell's lat/lon edges). */
+const pixelAreaKm2 = (g: Grid, row: number) => {
+  const n = tileYToLat(g.y0 + row / 256, g.z), s = tileYToLat(g.y0 + (row + 1) / 256, g.z);
+  return rectAreaKm2(0, s, 360 / (256 * 2 ** g.z), n);
+};
 
 export type ClassId = number;
 
@@ -130,6 +133,8 @@ export interface ClassDef {
   id: ClassId;
   label: string;
   rgba: [number, number, number, number];
+  /** drawn as diagonal hatching (uncertain states: cloud, shadow, no data) */
+  hatch?: boolean;
 }
 
 export interface Classified {
@@ -161,7 +166,7 @@ export function classify(
   let valid = 0, nodata = 0, aoiA = 0;
   for (let row = 0; row < g.height; row++) {
     const [, lat] = pixelLatLon(g, row, 0);
-    const pa = pixelArea(lat, g.z) / 1e6;
+    const pa = pixelAreaKm2(g, row);
     for (let col = 0; col < g.width; col++) {
       const [lon] = pixelLatLon(g, row, col);
       const p = row * g.width + col;
@@ -181,6 +186,7 @@ export function classify(
     }
   }
   const colour = new Map(defs.map((d) => [d.id, d.rgba]));
+  const hatch = new Set(defs.filter((d) => d.hatch).map((d) => d.id));
   // re-project rows to linear latitude so the image drapes correctly with a lat/lon rectangle
   const out = document.createElement('canvas');
   out.width = g.width;
@@ -194,8 +200,9 @@ export function classify(
     for (let col = 0; col < g.width; col++) {
       const c = classes[srcRow * g.width + col];
       if (c === 0) continue;
-      const rgba = c === 255 ? ([128, 128, 128, 110] as const) : colour.get(c);
+      const rgba = colour.get(c) ?? (c === 255 ? ([128, 128, 128, 110] as const) : undefined);
       if (!rgba) continue;
+      if (hatch.has(c) && (row + col) % 8 >= 3) continue; // stripes: uncertain areas never look like a change colour
       const q = (row * g.width + col) * 4;
       img.data[q] = rgba[0];
       img.data[q + 1] = rgba[1];
@@ -226,4 +233,4 @@ export function cellLonLat(g: Grid, row: number, col: number): [number, number] 
   const [lon, lat] = pixelLatLon(g, row, col);
   return [lon, lat];
 }
-export const cellAreaKm2 = (g: Grid, lat: number) => pixelArea(lat, g.z) / 1e6;
+export const cellAreaKm2 = (g: Grid, row: number) => pixelAreaKm2(g, row);
