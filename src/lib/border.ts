@@ -132,54 +132,82 @@ export interface TileOpts {
   neighbourCentre?: [number, number] | null;
 }
 
+/** Point at arc distance `d` (km) along a densified line, plus the local direction averaged over ±win km. */
+function along(pts: [number, number][], cum: number[], d: number, win: number) {
+  const at = (x: number): [number, number] => {
+    x = Math.max(0, Math.min(cum[cum.length - 1], x));
+    let lo = 0, hi = cum.length - 1;
+    while (hi - lo > 1) {
+      const m = (lo + hi) >> 1;
+      if (cum[m] <= x) lo = m;
+      else hi = m;
+    }
+    const t = cum[hi] > cum[lo] ? (x - cum[lo]) / (cum[hi] - cum[lo]) : 0;
+    return [pts[lo][0] + (pts[hi][0] - pts[lo][0]) * t, pts[lo][1] + (pts[hi][1] - pts[lo][1]) * t];
+  };
+  const p = at(d), a = at(d - win), b = at(d + win);
+  return { p, a, b };
+}
+
 /**
- * Square tiles of `sizeKm` centred every `sizeKm` along the lines (consecutive tiles touch), optionally
- * moved perpendicular to the local line direction into Thailand or into the neighbour by
- * `shift × sizeKm/2` (at ±1 the tile edge sits on the line).
+ * Square tiles of `sizeKm` that together cover every point of the lines: walk along the line and,
+ * wherever a point is not yet inside a tile, place a new one ahead of it. `shift` moves tiles
+ * perpendicular to the (smoothed) line direction into Thailand (−) or the neighbour (+); the line
+ * stays a little inside each tile (at full shift ~7% of the width) so coverage holds at every shift.
  */
 export function tilesAlong(lines: [number, number][][], sizeKm: number, prefix: string, opts: TileOpts = {}): Tile[] {
   const out: Tile[] = [];
-  const shift = Math.max(-1, Math.min(1, opts.shift ?? 0));
-  const centres: [number, number][] = [];
-  for (const line of lines) {
-    let carry = sizeKm / 2;
-    for (let i = 1; i < line.length; i++) {
-      const a = line[i - 1], b = line[i];
-      const d = dist(a, b);
-      let s = carry;
-      while (s <= d) {
-        const t = s / d;
-        const c: [number, number] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-        // skip if too close to any earlier tile (sharp bends, overlapping line pieces)
-        const tooClose = centres.some((q) => Math.abs(q[1] - c[1]) * KM_LAT < sizeKm && dist(q, c) < sizeKm * 0.7);
-        if (!tooClose) {
-          centres.push(c);
-          let cc = c;
-          if (shift && d > 0) {
-            // unit normal in km space, then pick the side that lies in the neighbour
-            const kx = kmLon(c[1]);
-            const ex = ((b[0] - a[0]) * kx) / d, ey = ((b[1] - a[1]) * KM_LAT) / d;
-            let nx = -ey, ny = ex;
-            if (opts.neighbour) {
-              // vote over several probe distances (the boundary file and the outline may differ by
-              // a few km); if still undecided, use the direction of the neighbour's centre
-              let vote = 0;
-              for (const probe of [1.5, 4, 8]) {
-                const pIn = inside(c[0] + (nx * probe) / kx, c[1] + (ny * probe) / KM_LAT, opts.neighbour);
-                const qIn = inside(c[0] - (nx * probe) / kx, c[1] - (ny * probe) / KM_LAT, opts.neighbour);
-                vote += Number(pIn) - Number(qIn);
-              }
-              if (vote === 0 && opts.neighbourCentre) vote = Math.sign((opts.neighbourCentre[0] - c[0]) * kx * nx + (opts.neighbourCentre[1] - c[1]) * KM_LAT * ny);
-              if (vote < 0) { nx = -nx; ny = -ny; }
+  const shift = Math.max(-1, Math.min(1, opts.shift ?? 0)) * 0.85;
+  const half = sizeKm / 2;
+  // a densified point counts as covered only with a margin of one step, so the line between
+  // checked points cannot slip out through a corner
+  const step = sizeKm / 25;
+  const inTile = (t: Tile, q: [number, number]) => {
+    const r = t.geometry.coordinates[0];
+    const mx = step / kmLon(q[1]), my = step / KM_LAT;
+    return q[0] >= r[0][0] + mx && q[0] <= r[1][0] - mx && q[1] >= r[0][1] + my && q[1] <= r[2][1] - my;
+  };
+  for (const raw of lines) {
+    if (raw.length < 2) continue;
+    // densify so no stretch longer than one step goes unchecked
+    const pts: [number, number][] = [raw[0]];
+    for (let i = 1; i < raw.length; i++) {
+      const a = raw[i - 1], b = raw[i];
+      const n = Math.max(1, Math.ceil(dist(a, b) / step));
+      for (let k = 1; k <= n; k++) pts.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n]);
+    }
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
+    for (let i = 0; i < pts.length; i++) {
+      const q = pts[i];
+      let covered = false;
+      for (let k = out.length - 1; k >= 0; k--) if (inTile(out[k], q)) { covered = true; break; } // newest first: almost always the hit
+      if (covered) continue;
+      // centre ahead of the uncovered point so the tile covers as much of the line as possible
+      let placed: Tile | null = null;
+      for (const ahead of [0.85 * half, 0.5 * half, 0]) {
+        const { p, a, b } = along(pts, cum, cum[i] + ahead, half);
+        let c: [number, number] = p;
+        if (shift) {
+          const kx = kmLon(p[1]);
+          const ex = (b[0] - a[0]) * kx, ey = (b[1] - a[1]) * KM_LAT;
+          const L = Math.hypot(ex, ey) || 1;
+          let nx = -ey / L, ny = ex / L;
+          if (opts.neighbour) {
+            let vote = 0;
+            for (const probe of [1.5, 4, 8]) {
+              vote += Number(inside(p[0] + (nx * probe) / kx, p[1] + (ny * probe) / KM_LAT, opts.neighbour)) - Number(inside(p[0] - (nx * probe) / kx, p[1] - (ny * probe) / KM_LAT, opts.neighbour));
             }
-            const off = (shift * sizeKm) / 2;
-            cc = [c[0] + (nx * off) / kx, c[1] + (ny * off) / KM_LAT];
+            if (vote === 0 && opts.neighbourCentre) vote = Math.sign((opts.neighbourCentre[0] - p[0]) * kx * nx + (opts.neighbourCentre[1] - p[1]) * KM_LAT * ny);
+            if (vote < 0) { nx = -nx; ny = -ny; }
           }
-          out.push(square(cc, sizeKm, prefix, out.length + 1));
+          c = [p[0] + (nx * shift * half) / kx, p[1] + (ny * shift * half) / KM_LAT];
         }
-        s += sizeKm;
+        const t = square(c, sizeKm, prefix, out.length + 1);
+        if (inTile(t, q)) { placed = t; break; }
       }
-      carry = s - d;
+      // last resort: centre on the uncovered point itself (always covers it)
+      out.push(placed ?? square(q, sizeKm, prefix, out.length + 1));
     }
   }
   return out;

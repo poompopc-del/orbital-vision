@@ -7,7 +7,7 @@ import { Badge, Button, Field, Input, Notice, Panel, Select, Spinner, cx } from 
 import { Cesium, flyToPolygon } from '../lib/cesium';
 import { useWorkspace } from '../store';
 import {
-  aoiFromPolygon, aoiInfo, confTh, deleteImages, getImage, isDue, lastRunOf, levelTh, loadAois, loadRuns, methodText, narrative, PURPOSES, rai, REGIONS, runMonitor, saveAois, saveRuns,
+  aoiFromPolygon, aoiInfo, SATELLITES, satelliteOf, confTh, deleteImages, getImage, isDue, lastRunOf, levelTh, loadAois, loadRuns, methodText, narrative, PURPOSES, rai, REGIONS, runMonitor, saveAois, saveRuns,
   type MonitorAoi, type MonitorRun, type Purpose, type Region, type SensorMode,
 } from '../lib/monitor';
 import { borderLines, boundarySource, lineLength, NEIGHBOURS, tilesAlong, type Neighbour, type Tile } from '../lib/border';
@@ -387,9 +387,9 @@ export function MonitorWatch() {
     }
   };
 
-  const addFromWorkspace = (region: Region, purpose: Purpose, freq: number, name: string) => {
+  const addFromWorkspace = (region: Region, purpose: Purpose, freq: number, name: string, sat: SensorMode) => {
     if (!wsAoi) return;
-    const a = aoiFromPolygon(name || wsAoi.name, wsAoi.geometry, region, purpose, freq);
+    const a = aoiFromPolygon(name || wsAoi.name, wsAoi.geometry, region, purpose, freq, sat);
     setAois((l) => [...l, a]);
     setSelId(a.id);
     setPanel('list');
@@ -453,9 +453,9 @@ export function MonitorWatch() {
             shift={tileShift}
             setShift={setTileShift}
             onGenerate={showBorderTiles}
-            onAdd={(list, region, purpose, freq, prefix) => {
+            onAdd={(list, region, purpose, freq, prefix, sat) => {
               const now = Date.now();
-              setAois((l) => [...l, ...list.map((t, i) => ({ ...aoiFromPolygon(`${prefix} ${t.id}`, t.geometry, region, purpose, freq), id: `aoi_${now.toString(36)}_${i}` }))]);
+              setAois((l) => [...l, ...list.map((t, i) => ({ ...aoiFromPolygon(`${prefix} ${t.id}`, t.geometry, region, purpose, freq, sat), id: `aoi_${now.toString(36)}_${i}` }))]);
               setTileSrc(null);
               setPicked(new Set());
               setPanel('list');
@@ -539,6 +539,13 @@ function WatchList({ selId, onSelect, onRun, busy }: { selId: string | null; onS
         </Select>
         <Button disabled={busy || !shown.length} onClick={() => onRun(shown.filter((a) => a.active))}>{L('ตรวจทั้งหมด', 'Run all')}</Button>
       </div>
+      <div className="flex items-center gap-1.5 text-[11px] text-slate-200">
+        <span className="shrink-0 text-muted">🛰 {L('ตั้งดาวเทียมทุกพื้นที่ที่แสดง', 'Satellite for all listed')}</span>
+        <Select value="" onChange={(e) => { const v = e.target.value as SensorMode; if (v) setAois((l) => l.map((a) => (shown.includes(a) ? { ...a, sensor: v } : a))); }} className="!py-1 text-xs">
+          <option value="">{L('— เลือก —', '— choose —')}</option>
+          {SATELLITES.map((x) => <option key={x.id} value={x.id}>{L(x.th, x.en)}</option>)}
+        </Select>
+      </div>
       <ul className="max-h-[36vh] space-y-1 overflow-y-auto scroll-thin">
         {shown.map((a) => {
           const r = lastRunOf(a.id, runs);
@@ -552,7 +559,7 @@ function WatchList({ selId, onSelect, onRun, busy }: { selId: string | null; onS
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs text-white">{a.name}</span>
                   <span className="block truncate text-[10px] text-muted">
-                    {L(PURPOSES.find((p) => p.id === a.purpose)!.labelTh, PURPOSES.find((p) => p.id === a.purpose)!.label)} · {L(`ทุก ${a.freqDays} วัน`, `every ${a.freqDays} d`)}
+                    {L(PURPOSES.find((p) => p.id === a.purpose)!.labelTh, PURPOSES.find((p) => p.id === a.purpose)!.label)} · {L(`ทุก ${a.freqDays} วัน`, `every ${a.freqDays} d`)} · {L(satelliteOf(a.sensor).th, satelliteOf(a.sensor).en).replace(/ \(.*\)$/, '')}
                     {r ? ` · ${new Date(r.at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}` : ''}
                     {r?.status === 'ok' && r.stats ? ` · ${fmtArea(r.stats.interestKm2, unit, true)}` : ''}
                   </span>
@@ -573,12 +580,13 @@ function WatchList({ selId, onSelect, onRun, busy }: { selId: string | null; onS
 
 // ---------------------------------------------------------------- add by drawing / import
 
-function AddPanel({ viewer, onAdd }: { viewer: Cesium.Viewer | null; onAdd: (r: Region, p: Purpose, f: number, name: string) => void }) {
+function AddPanel({ viewer, onAdd }: { viewer: Cesium.Viewer | null; onAdd: (r: Region, p: Purpose, f: number, name: string, sat: SensorMode) => void }) {
   const L = useL();
   const { aoi } = useWorkspace();
   const [region, setRegion] = useState<Region>('TH-KH');
   const [purpose, setPurpose] = useState<Purpose>('clearing');
   const [freq, setFreq] = useState(7);
+  const [sat, setSat] = useState<SensorMode>('auto');
   const [name, setName] = useState('');
   return (
     <Panel title={L('เพิ่มพื้นที่จากการวาด / ค้นหา / นำเข้าไฟล์', 'Add an area: draw / search / import')}>
@@ -594,9 +602,14 @@ function AddPanel({ viewer, onAdd }: { viewer: Cesium.Viewer | null; onAdd: (r: 
         <Field label={L('สิ่งที่เฝ้าดู', 'Watch for')}>
           <Select value={purpose} onChange={(e) => setPurpose(e.target.value as Purpose)}>{PURPOSES.map((p) => <option key={p.id} value={p.id}>{L(p.labelTh, p.label)}</option>)}</Select>
         </Field>
+        <div className="col-span-2">
+        <Field label={L('ดาวเทียม', 'Satellite')}>
+          <Select value={sat} onChange={(e) => setSat(e.target.value as SensorMode)}>{SATELLITES.map((x) => <option key={x.id} value={x.id}>{L(x.th, x.en)}</option>)}</Select>
+        </Field>
+        </div>
       </div>
       <p className="mt-1 text-[10px] text-muted">{PURPOSES.find((p) => p.id === purpose)?.hint}</p>
-      <Button variant="primary" className="mt-2 w-full" disabled={!aoi} onClick={() => onAdd(region, purpose, freq, name)}>{L('เพิ่มเข้ารายการเฝ้าระวัง', 'Add to watchlist')}</Button>
+      <Button variant="primary" className="mt-2 w-full" disabled={!aoi} onClick={() => onAdd(region, purpose, freq, name, sat)}>{L('เพิ่มเข้ารายการเฝ้าระวัง', 'Add to watchlist')}</Button>
     </Panel>
   );
 }
@@ -615,12 +628,13 @@ function BorderPanel({
   shift: number;
   setShift: (v: number) => void;
   onGenerate: (nb: Neighbour, size: number) => Promise<[number, number][][]>;
-  onAdd: (t: Tile[], region: Region, purpose: Purpose, freq: number, prefix: string) => void;
+  onAdd: (t: Tile[], region: Region, purpose: Purpose, freq: number, prefix: string, sat: SensorMode) => void;
 }) {
   const L = useL();
   const [size, setSize] = useState(10);
   const [purpose, setPurpose] = useState<Purpose>('clearing');
   const [freq, setFreq] = useState(7);
+  const [sat, setSat] = useState<SensorMode>('auto');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [len, setLen] = useState(0);
@@ -658,6 +672,11 @@ function BorderPanel({
         <Field label={L('รอบตรวจ', 'Cycle')}>
           <Select value={freq} onChange={(e) => setFreq(+e.target.value)}>{[7, 14, 30].map((d) => <option key={d} value={d}>{L(`ทุก ${d} วัน`, `every ${d} days`)}</option>)}</Select>
         </Field>
+        <div className="col-span-2">
+        <Field label={L('ดาวเทียม', 'Satellite')}>
+          <Select value={sat} onChange={(e) => setSat(e.target.value as SensorMode)}>{SATELLITES.map((x) => <option key={x.id} value={x.id}>{L(x.th, x.en)}</option>)}</Select>
+        </Field>
+        </div>
       </div>
       <Button className="mt-2 w-full" onClick={gen} disabled={busy}>{busy ? <Spinner /> : L('แสดงช่องตามแนวชายแดน', 'Show tiles along the border')}</Button>
       {err && <p className="mt-1 text-[11px] text-bad">{err}</p>}
@@ -670,7 +689,7 @@ function BorderPanel({
           <div className="mt-1 flex flex-wrap gap-1">
             <Button onClick={() => setPicked(new Set(tiles.map((t) => t.id)))}>{L('เลือกทั้งหมด', 'Select all')}</Button>
             <Button onClick={() => setPicked(new Set())}>{L('ล้าง', 'Clear')}</Button>
-            <Button variant="primary" disabled={!picked.size} onClick={() => onAdd(tiles.filter((t) => picked.has(t.id)), meta.region, purpose, freq, L(`ชายแดน${meta.th}`, `${meta.en} border`))}>
+            <Button variant="primary" disabled={!picked.size} onClick={() => onAdd(tiles.filter((t) => picked.has(t.id)), meta.region, purpose, freq, L(`ชายแดน${meta.th}`, `${meta.en} border`), sat)}>
               {L(`เพิ่ม ${picked.size} ช่อง`, `Add ${picked.size} tile(s)`)}
             </Button>
           </div>
@@ -699,7 +718,7 @@ function BoundaryNote() {
 
 export function TileShift({ shift, setShift, nbTh, nbEn }: { shift: number; setShift: (v: number) => void; nbTh: string; nbEn: string }) {
   const L = useL();
-  const pctTh = Math.round(((1 - shift) / 2) * 100);
+  const pctTh = Math.round(((1 - shift * 0.85) / 2) * 100);
   return (
     <div className="mt-2 rounded border border-line p-1.5 text-[11px] text-slate-200">
       <div className="mb-0.5 font-semibold">{L('ตำแหน่งกรอบเฝ้าระวังเทียบแนวชายแดน', 'Watch-box position vs the border')}</div>
@@ -710,7 +729,7 @@ export function TileShift({ shift, setShift, nbTh, nbEn }: { shift: number; setS
         <button className="hover:text-white" onClick={() => setShift(0)}>{L('คร่อมแนว', 'straddle')}</button>
         <button className="hover:text-white" onClick={() => setShift(1)}>{L('ฝั่งเพื่อนบ้านทั้งกรอบ', 'all neighbour side')}</button>
       </div>
-      <p className="mt-0.5 text-[10px] text-muted">{L(`กรอบอยู่ฝั่งไทยราว ${pctTh}% และฝั่ง${nbTh}ราว ${100 - pctTh}% ของความกว้าง (วัดตั้งฉากกับแนวชายแดน Natural Earth ซึ่งเป็นเส้นโดยประมาณ)`, `About ${pctTh}% of each box on the Thai side, ${100 - pctTh}% on the ${nbEn} side (perpendicular to the approximate Natural Earth line)`)}</p>
+      <p className="mt-0.5 text-[10px] text-muted">{L(`กรอบอยู่ฝั่งไทยราว ${pctTh}% และฝั่ง${nbTh}ราว ${100 - pctTh}% ของความกว้าง · กรอบครอบเส้นแบ่งเขตครบทุกช่วง (เส้นจะอยู่ในกรอบเสมอ แม้เลื่อนสุด)`, `About ${pctTh}% of each box on the Thai side, ${100 - pctTh}% on the ${nbEn} side · boxes always cover the whole boundary line`)}</p>
     </div>
   );
 }
@@ -804,10 +823,8 @@ function AoiDetail({ aoi, onRun, onEdit, busy, lang, onSwipe, swipeOn }: { aoi: 
         <div className="font-mono text-[10px] text-muted">{info.lat.toFixed(4)}, {info.lon.toFixed(4)} · {fmtArea(info.km2, unit, lang === 'th')}</div>
         <div className="grid grid-cols-3 gap-1">
           <Select value={aoi.purpose} onChange={(e) => upd({ purpose: e.target.value as Purpose })} className="!py-1 text-xs">{PURPOSES.map((p) => <option key={p.id} value={p.id}>{L(p.labelTh, p.label)}</option>)}</Select>
-          <Select value={aoi.sensor} onChange={(e) => upd({ sensor: e.target.value as SensorMode })} className="!py-1 text-xs">
-            <option value="auto">{L('อัตโนมัติ', 'Auto')}</option>
-            <option value="optical">{L('ภาพปกติ', 'Optical')}</option>
-            <option value="sar">{L('เรดาร์', 'Radar')}</option>
+          <Select value={aoi.sensor ?? 'auto'} onChange={(e) => upd({ sensor: e.target.value as SensorMode })} className="!py-1 text-xs" title={L('ดาวเทียมที่ใช้ภาพ', 'Satellite')}>
+            {SATELLITES.map((x) => <option key={x.id} value={x.id}>{L(x.th, x.en)}</option>)}
           </Select>
           <Select value={aoi.freqDays} onChange={(e) => upd({ freqDays: +e.target.value })} className="!py-1 text-xs">{[7, 14, 30].map((d) => <option key={d} value={d}>{L(`ทุก ${d} วัน`, `every ${d} d`)}</option>)}</Select>
         </div>
@@ -817,7 +834,9 @@ function AoiDetail({ aoi, onRun, onEdit, busy, lang, onSwipe, swipeOn }: { aoi: 
           <Button onClick={() => upd({ active: !aoi.active })}>{aoi.active ? L('พักการตรวจ', 'Pause') : L('เปิดการตรวจ', 'Resume')}</Button>
           <Button variant="danger" onClick={() => setAois((l) => l.filter((a) => a.id !== aoi.id))}>{L('ลบพื้นที่', 'Remove')}</Button>
         </div>
-        <p className="text-[10px] text-muted">{methodText(aoi.purpose, aoi.sensor === 'sar' ? 'sar' : 'optical') || L('เรดาร์ใช้กับหัวข้อนี้ไม่ได้ จะใช้ภาพปกติแทน', 'Radar is not available for this purpose; optical is used.')}</p>
+        <p className="text-[10px] text-cyan-200">🛰 {satelliteOf(aoi.sensor).note}</p>
+        {aoi.sensor === 'sar' && !methodText(aoi.purpose, 'sar') && <p className="text-[10px] text-warn">{L('หัวข้อนี้วิเคราะห์ด้วยเรดาร์ไม่ได้ — เลือก Sentinel-2 หรือ Landsat', 'This purpose cannot use radar — pick Sentinel-2 or Landsat')}</p>}
+        <p className="text-[10px] text-muted">{methodText(aoi.purpose, aoi.sensor === 'sar' ? 'sar' : 'optical')}</p>
 
         {mine.length > 1 && (
           <Select value={run?.id} onChange={(e) => setRunId(e.target.value)} className="!py-1 text-xs">
@@ -840,7 +859,7 @@ function AoiDetail({ aoi, onRun, onEdit, busy, lang, onSwipe, swipeOn }: { aoi: 
             <div className="flex flex-wrap gap-1">
               <Badge tone={run.level === 'significant' ? 'bad' : run.level === 'minor' ? 'warn' : 'ok'}>{lang === 'th' ? levelTh(run.level) : run.level}</Badge>
               <Badge tone="cyan">{L('ความเชื่อมั่น', 'confidence')} {lang === 'th' ? confTh(run.confidence) : run.confidence}</Badge>
-              <Badge>{run.sensor === 'sar' ? 'Sentinel-1' : 'Sentinel-2'}</Badge>
+              <Badge>{run.B?.label ?? (run.sensor === 'sar' ? 'Sentinel-1' : 'Sentinel-2')}</Badge>
             </div>
             <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-slate-200">{narrative(run, lang, unit).map((x) => <li key={x}>{x}</li>)}</ul>
             {run.note && <p className="text-[10px] text-warn">{run.note}</p>}

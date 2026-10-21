@@ -143,7 +143,7 @@ export default function ExtentBar({
                 <div className="flex justify-between text-muted"><span>◀ {L('ฝั่งไทย', 'Thailand')}</span><span>{L(`ฝั่ง${NEIGHBOURS.find((x) => x.id === nb)?.th ?? ''}`, NEIGHBOURS.find((x) => x.id === nb)?.en ?? '')} ▶</span></div>
                 <input type="range" min={-1} max={1} step={0.1} value={shift} onChange={(e) => onShift(+e.target.value)} className="w-full" />
                 <div className="flex justify-between text-[10px] text-muted"><button className="hover:text-white" onClick={() => onShift(-1)}>{L('ฝั่งไทยทั้งกรอบ', 'all Thai side')}</button><button className="hover:text-white" onClick={() => onShift(0)}>{L('คร่อมแนว', 'straddle')}</button><button className="hover:text-white" onClick={() => onShift(1)}>{L('ฝั่งเพื่อนบ้านทั้งกรอบ', 'all neighbour side')}</button></div>
-                <p className="text-[10px] text-muted">{tileCount ? L(`${tileCount} กรอบตามแนว (ยังไม่บันทึก) — เลือกและเพิ่มเข้ารายการในแผง “+ ตามแนวชายแดน”`, `${tileCount} boxes along the line (not saved) — pick and add them in “+ Along border”`) : L('กำลังสร้างกรอบตามแนว…', 'Building boxes…')}</p>
+                <p className="text-[10px] text-muted">{tileCount ? L(`${tileCount} กรอบตามแนว (ยังไม่บันทึก) — ครอบเส้นแบ่งเขตครบทุกช่วง · เลือกและเพิ่มเข้ารายการในแผง “+ ตามแนวชายแดน”`, `${tileCount} boxes along the line (not saved) — pick and add them in “+ Along border”`) : L('กำลังสร้างกรอบตามแนว…', 'Building boxes…')}</p>
               </div>
             </>
           )}

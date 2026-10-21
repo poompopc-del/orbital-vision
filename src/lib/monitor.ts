@@ -22,7 +22,16 @@ const areaKm2 = (g: GeoJSON.Polygon) => geometryAreaKm2(g);
 
 export type Purpose = 'clearing' | 'construction' | 'water' | 'fire' | 'general';
 export type Region = 'TH-KH' | 'TH-MY' | 'TH-MM' | 'TH-LA' | 'TH' | 'OTHER';
-export type SensorMode = 'auto' | 'optical' | 'sar';
+/** Which satellite a watch area uses: 'optical' = Sentinel-2 (kept for older saved areas). */
+export type SensorMode = 'auto' | 'optical' | 'landsat' | 'optical-any' | 'sar';
+export const SATELLITES: { id: SensorMode; th: string; en: string; note: string }[] = [
+  { id: 'auto', th: 'อัตโนมัติ (Sentinel-2 → เรดาร์)', en: 'Auto (Sentinel-2 → radar)', note: 'ใช้ Sentinel-2 ก่อน ถ้าเมฆมากเกินเกณฑ์จะใช้เรดาร์ Sentinel-1 แทน (หัวข้อน้ำใช้เรดาร์ก่อน)' },
+  { id: 'optical', th: 'Sentinel-2 (10 ม.)', en: 'Sentinel-2 (10 m)', note: 'ภาพปกติ 10 ม. ถ่ายซ้ำราว 5 วัน · ใช้ไม่ได้เมื่อเมฆมาก' },
+  { id: 'landsat', th: 'Landsat 8/9 (30 ม.)', en: 'Landsat 8/9 (30 m)', note: 'ภาพปกติ 30 ม. ถ่ายซ้ำราว 8 วัน · หยาบกว่า เห็นการเปลี่ยนแปลงขนาดเล็กได้น้อยกว่า' },
+  { id: 'optical-any', th: 'Sentinel-2 หรือ Landsat', en: 'Sentinel-2 or Landsat', note: 'เลือกภาพที่เมฆน้อยที่สุดจากทั้งสองดวง · ภาพก่อน–หลังจะเป็นดาวเทียมเดียวกันเมื่อหาได้' },
+  { id: 'sar', th: 'Sentinel-1 เรดาร์ (10 ม.)', en: 'Sentinel-1 radar (10 m)', note: 'ถ่ายทะลุเมฆได้ · ใช้ได้กับหัวข้อถางป่า สิ่งปลูกสร้าง และน้ำ' },
+];
+export const satelliteOf = (m: SensorMode | undefined) => SATELLITES.find((x) => x.id === m) ?? SATELLITES[0];
 
 export interface MonitorAoi {
   id: string;
@@ -463,11 +472,13 @@ export interface RunProgress {
 const OPT_COLLECTIONS: StacCollectionId[] = ['sentinel-2-l2a'];
 
 /** Optical candidates in a window that pass the scene thresholds and the AOI-cloud threshold, best first. */
-async function passingOptical(aoi: GeoJSON.Polygon, from: string, to: string, qc: QcSettings, match: ImageryItem | null, signal: AbortSignal | undefined, seen: { it: ImageryItem; cl: AoiCloud | null; why: string[] }[]) {
-  const all = (await searchArchive({ aoi, collections: OPT_COLLECTIONS, from, to, maxCloud: qc.maxSceneCloud, limit: 40 })).filter((x) => x.source === 'planetary-computer');
+async function passingOptical(aoi: GeoJSON.Polygon, from: string, to: string, qc: QcSettings, match: ImageryItem | null, signal: AbortSignal | undefined, seen: { it: ImageryItem; cl: AoiCloud | null; why: string[] }[], collections: StacCollectionId[] = OPT_COLLECTIONS) {
+  const all = (await searchArchive({ aoi, collections, from, to, maxCloud: qc.maxSceneCloud, limit: 40 })).filter((x) => x.source === 'planetary-computer');
   const pre = all.filter((x) => checkScene(x, { cloudPct: 0, shadowPct: 0, noDataPct: 0 }, qc).ok || checkScene(x, null, qc).pending);
-  const sameGeom = (x: ImageryItem) => !match || x.raw?.properties?.['s2:mgrs_tile'] == null || x.raw.properties['s2:mgrs_tile'] === match.raw?.properties?.['s2:mgrs_tile'];
-  const ordered = [...pre].sort((a, b) => Number(sameGeom(b)) - Number(sameGeom(a)) || (a.cloudCover ?? 100) - (b.cloudCover ?? 100) || b.datetime.localeCompare(a.datetime)).slice(0, 6);
+  const sameGeom = (x: ImageryItem) =>
+    !match || (x.collection === match.collection && ['s2:mgrs_tile', 'landsat:wrs_path', 'landsat:wrs_row'].every((k) => x.raw?.properties?.[k] == null || x.raw.properties[k] === match.raw?.properties?.[k]));
+  const sameSat = (x: ImageryItem) => !match || x.collection === match.collection;
+  const ordered = [...pre].sort((a, b) => Number(sameSat(b)) - Number(sameSat(a)) || Number(sameGeom(b)) - Number(sameGeom(a)) || (a.cloudCover ?? 100) - (b.cloudCover ?? 100) || b.datetime.localeCompare(a.datetime)).slice(0, 6);
   for (const it of ordered) {
     const cl = await measureAoiCloud(it, aoi, signal).catch(() => null);
     const chk = checkScene(it, cl, qc);
@@ -491,7 +502,13 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
     mode: 'auto',
   };
   const aoi = a.geometry;
-  const wantSar = a.sensor === 'sar' || (a.sensor === 'auto' && a.purpose === 'water');
+  const mode: SensorMode = a.sensor ?? 'auto';
+  const wantSar = mode === 'sar' || (mode === 'auto' && a.purpose === 'water');
+  const optCols: StacCollectionId[] = mode === 'landsat' ? ['landsat-c2-l2'] : mode === 'optical-any' ? ['sentinel-2-l2a', 'landsat-c2-l2'] : ['sentinel-2-l2a'];
+  const optName = mode === 'landsat' ? 'Landsat 8/9' : mode === 'optical-any' ? 'Sentinel-2/Landsat' : 'Sentinel-2';
+  // choosing Landsat explicitly accepts its 30 m pixels; mixing both needs cross-sensor consent
+  if (mode === 'landsat' || mode === 'optical-any') qc = { ...qc, maxGsdM: Math.max(qc.maxGsdM, 30) };
+  base.qc = qc;
   const sarPossible = !!methodFor(a.purpose, 'sar');
   const tried: string[] = [];
   const seen: { it: ImageryItem; cl: AoiCloud | null; why: string[] }[] = [];
@@ -500,12 +517,13 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
     let A: ImageryItem | null = null, B: ImageryItem | null = null;
     let clA: AoiCloud | null = null, clB: AoiCloud | null = null;
     const optical = async () => {
-      progress(`ค้นหาภาพ Sentinel-2 ช่วงล่าสุด (เมฆรวม ≤ ${qc.maxSceneCloud}%, เมฆใน AOI ≤ ${qc.maxAoiCloud}%)…`);
-      const b = await passingOptical(aoi, w.after[0], w.after[1], qc, null, signal, seen);
-      if (!b) return void tried.push(`ไม่มีภาพ Sentinel-2 ช่วง ${w.after[0]} ถึง ${w.after[1]} ที่ผ่านเกณฑ์เมฆ`);
+      progress(`ค้นหาภาพ ${optName} ช่วงล่าสุด (เมฆรวม ≤ ${qc.maxSceneCloud}%, เมฆใน AOI ≤ ${qc.maxAoiCloud}%)…`);
+      const b = await passingOptical(aoi, w.after[0], w.after[1], qc, null, signal, seen, optCols);
+      if (!b) return void tried.push(`ไม่มีภาพ ${optName} ช่วง ${w.after[0]} ถึง ${w.after[1]} ที่ผ่านเกณฑ์เมฆ`);
       progress('ค้นหาภาพอ้างอิงช่วงก่อนหน้า…');
-      const aa = await passingOptical(aoi, w.before[0], w.before[1], qc, b.it, signal, seen);
-      if (!aa) return void tried.push(`ไม่มีภาพอ้างอิง Sentinel-2 ช่วง ${w.before[0]} ถึง ${w.before[1]} ที่ผ่านเกณฑ์เมฆ`);
+      const aa = await passingOptical(aoi, w.before[0], w.before[1], qc, b.it, signal, seen, optCols);
+      if (!aa) return void tried.push(`ไม่มีภาพอ้างอิง ${optName} ช่วง ${w.before[0]} ถึง ${w.before[1]} ที่ผ่านเกณฑ์เมฆ`);
+      if (aa.it.collection !== b.it.collection && !qc.allowCrossSensor) return void tried.push(`ภาพก่อน (${aa.it.collectionLabel}) กับภาพหลัง (${b.it.collectionLabel}) คนละดาวเทียม — เปิด “ยอมให้เทียบข้ามเซนเซอร์” ในเกณฑ์ถ้าต้องการ`);
       A = aa.it; B = b.it; clA = aa.cl; clB = b.cl;
     };
     const radar = async () => {
@@ -517,8 +535,11 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
       A = ra.item; B = rb.item;
     };
     if (!wantSar) await optical();
-    if (!A && (wantSar || (a.sensor === 'auto' && sarPossible))) await radar();
-    if (!A && wantSar && a.sensor === 'auto') await optical();
+    if (!A && (wantSar || (mode === 'auto' && sarPossible))) {
+      if (!sarPossible) tried.push('หัวข้อนี้ใช้เรดาร์ไม่ได้ (ต้องใช้ภาพปกติ)');
+      else await radar();
+    }
+    if (!A && wantSar && mode === 'auto') await optical();
     if (!A || !B) {
       const sugg = seen.filter((x) => !x.why.length && x.cl).map((x) => ({ id: x.it.id, datetime: x.it.datetime, cloud: x.it.cloudCover, collection: x.it.collection }));
       const rejected = seen.filter((x) => x.why.length).slice(0, 4).map((x) => `${x.it.datetime.slice(0, 10)}: ${x.why.join(', ')}`);
@@ -742,7 +763,7 @@ function findHotspots(res: Classified, interest: number[], minKm2: number): { li
 const fmt = (v: number, d = 1) => v.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
 export const rai = (km2: number) => km2 * 625;
 
-const SENSOR_TH: Record<string, string> = { 'sentinel-2-l2a': 'Sentinel-2', 'landsat-c2-l2': 'Landsat', 'sentinel-1-rtc': 'เรดาร์ Sentinel-1' };
+const SENSOR_TH: Record<string, string> = { 'sentinel-2-l2a': 'Sentinel-2', 'landsat-c2-l2': 'Landsat 8/9', 'sentinel-1-rtc': 'เรดาร์ Sentinel-1' };
 
 export function narrative(r: MonitorRun, lang: 'th' | 'en', unit: AreaUnit = 'km2'): string[] {
   const th = lang === 'th';
@@ -774,13 +795,13 @@ export function narrative(r: MonitorRun, lang: 'th' | 'en', unit: AreaUnit = 'km
 export const confTh = (c?: string) => (c === 'high' ? 'สูง' : c === 'medium' ? 'ปานกลาง' : c === 'low' ? 'ต่ำ' : '—');
 export const levelTh = (l?: Level) => (l === 'significant' ? 'มีนัยสำคัญ' : l === 'minor' ? 'เล็กน้อย' : l === 'none' ? 'ไม่พบ' : '—');
 
-export function aoiFromPolygon(name: string, geometry: GeoJSON.Polygon, region: Region, purpose: Purpose, freqDays = 7): MonitorAoi {
+export function aoiFromPolygon(name: string, geometry: GeoJSON.Polygon, region: Region, purpose: Purpose, freqDays = 7, sensor: SensorMode = 'auto'): MonitorAoi {
   return {
     id: `aoi_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     name,
     region,
     purpose,
-    sensor: 'auto',
+    sensor,
     geometry,
     freqDays,
     createdAt: new Date().toISOString(),
