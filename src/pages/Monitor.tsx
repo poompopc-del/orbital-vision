@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { create } from 'zustand';
 import { useLang } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
@@ -144,6 +144,12 @@ export function MonitorWatch() {
   const [extentLines, setExtentLines] = useState<[number, number][][]>([]);
   const [swipe, setSwipe] = useState<{ A: ImageryItem; B: ImageryItem } | null>(null);
   const [split, setSplit] = useState(0.5);
+  // clean view: hide everything drawn over the imagery (fills, numbers, lines, change overlay, legend)
+  const [clean, setClean] = useState(false);
+  const [outline, setOutline] = useState(true);
+  const [show, setShow] = useState<'split' | 'A' | 'B'>('split');
+  const [blink, setBlink] = useState(false);
+  const mapRef = useRef<HTMLDivElement>(null);
   const { qc } = useQc();
 
   const sel = aois.find((a) => a.id === selId) ?? null;
@@ -185,6 +191,17 @@ export function MonitorWatch() {
   useEffect(() => {
     if (!viewer) return;
     const ds = new Cesium.CustomDataSource('monitor');
+    if (clean) {
+      // only a thin outline of the selected area, nothing filled
+      const a = aois.find((x) => x.id === selId);
+      if (a && outline && a.id !== edit?.id)
+        ds.entities.add({ polyline: { positions: a.geometry.coordinates[0].map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: 1.5, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.WHITE.withAlpha(0.9), dashLength: 12 }) } });
+      void viewer.dataSources.add(ds);
+      viewer.scene.requestRender();
+      return () => {
+        if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
+      };
+    }
     extentLines.forEach((l) =>
       ds.entities.add({ polyline: { positions: l.map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: 2.5, material: Cesium.Color.fromCssColorString('#facc15'), clampToGround: false } }),
     );
@@ -219,7 +236,7 @@ export function MonitorWatch() {
     return () => {
       if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
     };
-  }, [viewer, aois, runs, selId, tiles, picked, borderLinesState, extentLines, edit?.id]);
+  }, [viewer, aois, runs, selId, tiles, picked, borderLinesState, extentLines, edit?.id, clean, outline]);
 
   // ---- before / after swipe of two real scenes
   useEffect(() => {
@@ -238,14 +255,42 @@ export function MonitorWatch() {
   }, [viewer, swipe?.A.id, swipe?.B.id]);
   useEffect(() => {
     if (viewer) {
-      viewer.scene.splitPosition = split;
+      viewer.scene.splitPosition = show === 'A' ? 1 : show === 'B' ? 0 : split;
       viewer.scene.requestRender();
     }
-  }, [viewer, split]);
+  }, [viewer, split, show]);
+  useEffect(() => {
+    if (!blink) return;
+    const t = setInterval(() => setShow((v) => (v === 'A' ? 'B' : 'A')), 900);
+    return () => clearInterval(t);
+  }, [blink]);
+  useEffect(() => {
+    setClean(!!swipe);
+    setShow('split');
+    setBlink(false);
+  }, [!!swipe]);
   const toggleSwipe = (A: ImageryItem, B: ImageryItem) => {
     if (swipe && swipe.A.id === A.id && swipe.B.id === B.id) return setSwipe(null);
     setSwipe({ A, B });
     setSplit(0.5);
+  };
+  const dragSplit = (e: RPointerEvent<HTMLDivElement>) => {
+    const el = mapRef.current;
+    if (!el) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setShow('split');
+    setBlink(false);
+    const move = (ev: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      setSplit(Math.min(0.995, Math.max(0.005, (ev.clientX - r.left) / r.width)));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   };
 
   // ---- edit box + handles (positions follow the live ref)
@@ -372,7 +417,7 @@ export function MonitorWatch() {
   // selected run overlay on the map
   const selRun = sel ? lastRunOf(sel.id, runs) : undefined;
   useEffect(() => {
-    if (!viewer || !selRun || selRun.status !== 'ok' || !selRun.overlayBounds) return;
+    if (!viewer || clean || !selRun || selRun.status !== 'ok' || !selRun.overlayBounds) return;
     let layer: Cesium.ImageryLayer | null = null;
     let dead = false;
     void getImage(`${selRun.id}:change`).then(async (url) => {
@@ -386,7 +431,7 @@ export function MonitorWatch() {
       dead = true;
       if (layer && !viewer.isDestroyed()) viewer.imageryLayers.remove(layer, true);
     };
-  }, [viewer, selRun?.id]);
+  }, [viewer, selRun?.id, clean]);
 
   const runList = async (list: MonitorAoi[], bl: Baseline = baseline) => {
     if (!list.length) return;
@@ -536,16 +581,51 @@ export function MonitorWatch() {
         {sel && panel === 'list' && !edit && <AoiDetail aoi={sel} baseline={baseline} onRun={(b) => runList([sel], b)} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
         {sel && panel === 'list' && !edit && <ComparePanel key={sel.id} aoi={sel} onRun={(r) => addRun(r)} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
       </aside>
-      <div className="relative min-h-[360px] flex-1">
+      <div ref={mapRef} className="relative min-h-[360px] flex-1">
         <GlobeHost onReady={setViewer} />
-        <ExtentBar viewer={viewer} customRect={customRect} onLines={setExtentLines} nb={borderNb} onNb={(n) => void showBorderTiles(n).catch(() => {})} shift={tileShift} onShift={setTileShift} tileCount={tiles.length} />
+        <div className={clean ? 'hidden' : ''}>
+          <ExtentBar viewer={viewer} customRect={customRect} onLines={setExtentLines} nb={borderNb} onNb={(n) => void showBorderTiles(n).catch(() => {})} shift={tileShift} onShift={setTileShift} tileCount={tiles.length} />
+        </div>
+        <div className="absolute left-3 top-3 z-20 flex items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px] backdrop-blur">
+          <button onClick={() => setClean(!clean)} className={cx('rounded px-2 py-1', clean ? 'bg-cyan-400/15 text-cyan-300' : 'text-slate-200 hover:text-white')} title={L('ซ่อนกรอบสี ตัวเลข เส้น ชั้นผลการเปลี่ยนแปลง และคำอธิบาย เพื่อดูภาพดาวเทียมล้วน ๆ', 'Hide fills, numbers, lines, the change layer and the legend to see the imagery alone')}>
+            {clean ? L('◉ ภาพล้วน', '◉ Imagery only') : L('◎ ซ่อนสิ่งที่บังภาพ', '◎ Hide overlays')}
+          </button>
+          {clean && (
+            <label className="flex items-center gap-1 px-1 text-slate-300">
+              <input type="checkbox" checked={outline} onChange={(e) => setOutline(e.target.checked)} />
+              {L('เส้นขอบพื้นที่', 'Area outline')}
+            </label>
+          )}
+        </div>
         {swipe && (
           <>
-            <div className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-white/90" style={{ left: `${split * 100}%` }} />
-            <div className="absolute bottom-24 left-1/2 z-20 w-[min(520px,80%)] -translate-x-1/2 rounded-md border border-line bg-ink-950/90 p-2 text-[11px] text-slate-200">
-              <div className="flex justify-between font-mono"><span>◀ A {swipe.A.datetime.slice(0, 10)} · {swipe.A.collectionLabel}</span><span>B {swipe.B.datetime.slice(0, 10)} · {swipe.B.collectionLabel} ▶</span></div>
-              <input type="range" min={0.02} max={0.98} step={0.005} value={split} onChange={(e) => setSplit(+e.target.value)} className="w-full" />
-              <div className="flex justify-between text-[10px] text-muted"><span>{L('ภาพจริงจาก Microsoft Planetary Computer · ซ้าย = ก่อน · ขวา = หลัง', 'Real imagery (Planetary Computer) · left = before · right = after')}</span><button className="text-cyan-300 hover:underline" onClick={() => setSwipe(null)}>{L('ปิด', 'Close')}</button></div>
+            {show === 'split' && (
+              <>
+                <div className="pointer-events-none absolute inset-y-0 z-10 w-px bg-white/90 shadow-[0_0_3px_rgba(0,0,0,.8)]" style={{ left: `${split * 100}%` }} />
+                <div
+                  onPointerDown={dragSplit}
+                  className="absolute top-1/2 z-20 flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none select-none items-center justify-center rounded-full border-2 border-white bg-ink-950/70 text-[11px] font-bold text-white shadow-lg"
+                  style={{ left: `${split * 100}%` }}
+                  title={L('ลากเพื่อเลื่อนเทียบ', 'Drag to compare')}
+                >
+                  ◀▶
+                </div>
+                <div className="pointer-events-none absolute top-14 z-10 -translate-x-full pr-2 font-mono text-[11px] font-semibold text-white [text-shadow:0_0_4px_#000,0_0_2px_#000]" style={{ left: `${split * 100}%` }}>A {swipe.A.datetime.slice(0, 10)}</div>
+                <div className="pointer-events-none absolute top-14 z-10 pl-2 font-mono text-[11px] font-semibold text-white [text-shadow:0_0_4px_#000,0_0_2px_#000]" style={{ left: `${split * 100}%` }}>B {swipe.B.datetime.slice(0, 10)}</div>
+              </>
+            )}
+            {show !== 'split' && (
+              <div className="pointer-events-none absolute left-1/2 top-14 z-10 -translate-x-1/2 rounded bg-ink-950/70 px-2 py-0.5 font-mono text-sm font-semibold text-white">
+                {show === 'A' ? `A · ${L('ก่อน', 'before')} · ${swipe.A.datetime.slice(0, 10)}` : `B · ${L('หลัง', 'after')} · ${swipe.B.datetime.slice(0, 10)}`}
+              </div>
+            )}
+            <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px] text-slate-200 backdrop-blur">
+              <Button variant={show === 'split' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('split'); }}>{L('เลื่อนเทียบ', 'Swipe')}</Button>
+              <Button variant={show === 'A' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('A'); }}>A {L('ก่อน', 'before')}</Button>
+              <Button variant={show === 'B' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('B'); }}>B {L('หลัง', 'after')}</Button>
+              <Button variant={blink ? 'active' : 'ghost'} onClick={() => { setBlink(!blink); if (!blink) setShow('A'); else setShow('split'); }} title={L('สลับภาพ A/B อัตโนมัติ — สิ่งที่เปลี่ยนจะ “กะพริบ” ให้เห็นชัด', 'Alternate A/B automatically — changes flicker so they stand out')}>⟳ {L('กะพริบ', 'Blink')}</Button>
+              <span className="hidden px-1 text-[10px] text-muted md:inline">{swipe.A.collectionLabel}</span>
+              <button className="px-2 text-cyan-300 hover:underline" onClick={() => setSwipe(null)}>{L('ปิด', 'Close')}</button>
             </div>
           </>
         )}
@@ -556,7 +636,7 @@ export function MonitorWatch() {
             <Button onClick={() => setEdit(null)}>{L('ยกเลิก', 'Cancel')}</Button>
           </div>
         )}
-        <div className="absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 p-2 text-[11px] text-slate-200 backdrop-blur">
+        <div className={cx('absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 p-2 text-[11px] text-slate-200 backdrop-blur', clean && 'hidden')}>
           {[['significant', L('เปลี่ยนแปลงมีนัยสำคัญ', 'Significant change')], ['minor', L('เล็กน้อย', 'Minor')], ['none', L('ไม่พบการเปลี่ยนแปลงเกินเกณฑ์', 'No significant change')], ['insufficient', L('ข้อมูลไม่พอ (ไม่สรุปผล)', 'Insufficient (no conclusion)')], ['new', L('ยังไม่ตรวจ', 'Not checked')]].map(([k, l]) => (
             <div key={k} className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: k === 'insufficient' ? 'repeating-linear-gradient(45deg,#94a3b8 0 2px,transparent 2px 4px)' : LEVEL_COLOR[k] }} />{l}</div>
           ))}
