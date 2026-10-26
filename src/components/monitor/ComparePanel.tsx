@@ -25,6 +25,42 @@ const COLL: { id: StacCollectionId; th: string }[] = [
 
 type Preset = 'event' | 'week' | 'month' | 'year';
 
+// ---------------------------------------------------------------- AOI-cloud cache (per area × scene, this browser)
+
+const CACHE_KEY = 'ov.aoicloud.v1';
+const CACHE_MAX = 4000;
+type CloudVal = AoiCloud | null | 'err';
+const aoiKey = (g: GeoJSON.Polygon) => {
+  let h = 5381;
+  const str = JSON.stringify(g.coordinates);
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+};
+function readCloudCache(key: string): Record<string, CloudVal> {
+  try {
+    const all = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}') as Record<string, CloudVal>;
+    const out: Record<string, CloudVal> = {};
+    const pre = `${key}|`;
+    for (const k in all) if (k.startsWith(pre) && all[k] !== 'err') out[k.slice(pre.length)] = all[k];
+    return out;
+  } catch {
+    return {};
+  }
+}
+function writeCloudCache(key: string, vals: Record<string, CloudVal>) {
+  try {
+    const all = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}') as Record<string, CloudVal>;
+    for (const id in vals) if (vals[id] && vals[id] !== 'err') { delete all[`${key}|${id}`]; all[`${key}|${id}`] = vals[id]; }
+    const keys = Object.keys(all);
+    for (let i = 0; i < keys.length - CACHE_MAX; i++) delete all[keys[i]]; // oldest first
+    localStorage.setItem(CACHE_KEY, JSON.stringify(all));
+  } catch {
+    /* storage full or unavailable — measurements just are not remembered */
+  }
+}
+
+const AUTO_MAX = 120; // scenes measured automatically per view; the rest on request
+
 export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: MonitorAoi; onRun: (r: MonitorRun) => void; onSwipe: (A: ImageryItem, B: ImageryItem) => void; swipeOn: boolean }) {
   const L = useL();
   const { qc } = useQc();
@@ -42,6 +78,41 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
   const [onlyPass, setOnlyPass] = useState(false);
   const [details, setDetails] = useState(false);
   const abort = useRef<AbortController | null>(null);
+  const akey = useMemo(() => aoiKey(aoi.geometry), [aoi.geometry]);
+  const [visibleIds, setVisibleIds] = useState<string[]>([]);
+  const [auto, setAuto] = useState<{ done: number; total: number; more: number } | null>(null);
+  const [autoAll, setAutoAll] = useState(false);
+
+  // remember measurements so colours are right next time without re-measuring
+  useEffect(() => writeCloudCache(akey, cl), [akey, cl]);
+
+  // measure the AOI cloud of the scenes in view automatically (newest first, 3 at a time)
+  useEffect(() => {
+    if (!list?.length) return;
+    const inView = new Set(visibleIds);
+    const todo = list
+      .filter((it) => inView.has(it.id) && familyOf(it) === 'optical' && cl[it.id] === undefined && checkScene(it, null, qc).pending)
+      .sort((a, b) => b.datetime.localeCompare(a.datetime));
+    const take = autoAll ? todo : todo.slice(0, AUTO_MAX);
+    if (!take.length) return setAuto(null);
+    const ac = new AbortController();
+    let done = 0, next = 0;
+    setAuto({ done: 0, total: take.length, more: todo.length - take.length });
+    const worker = async () => {
+      while (!ac.signal.aborted && next < take.length) {
+        const it = take[next++];
+        const v: CloudVal = await measureAoiCloud(it, aoi.geometry, ac.signal).catch((e) => (e?.name === 'AbortError' ? undefined : 'err')) as CloudVal;
+        if (ac.signal.aborted || v === undefined) return;
+        setCl((c) => (c[it.id] === undefined ? { ...c, [it.id]: v } : c));
+        done++;
+        setAuto({ done, total: take.length, more: todo.length - take.length });
+      }
+    };
+    void Promise.all([worker(), worker(), worker()]).then(() => !ac.signal.aborted && setAuto(null));
+    return () => ac.abort();
+    // re-plan when the view, list or thresholds change — not on every measurement
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, visibleIds, qc.maxSceneCloud, qc.maxGsdM, autoAll]);
 
   const check = (it: ImageryItem) => checkScene(it, cl[it.id] === 'err' ? null : cl[it.id], qc);
   const search = async () => {
@@ -52,7 +123,8 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
     try {
       const r = await searchArchive({ aoi: aoi.geometry, collections: [...colls], from, to, limit: 500 }); // newest first; 100 cut off the older half of a one-year search
       setList(r.filter((x) => x.source === 'planetary-computer').sort((a, b) => a.datetime.localeCompare(b.datetime)));
-      setCl({});
+      setCl(readCloudCache(akey));
+      setAutoAll(false);
     } catch (e: any) {
       setErr(e?.message ?? String(e));
     } finally {
@@ -219,6 +291,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
             <>
               <div className="rounded border border-line bg-ink-950/60 p-1">
                 <SceneTimeline
+                  onVisible={setVisibleIds}
                   items={shown}
                   t0={t0}
                   t1={t1}
@@ -238,6 +311,14 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
                   <label className="ml-auto flex items-center gap-1"><input type="checkbox" checked={onlyPass} onChange={(e) => setOnlyPass(e.target.checked)} />{L('ซ่อนภาพที่ไม่ผ่าน', 'hide failing')}</label>
                 </div>
               </div>
+              {auto && (
+                <p className="flex items-center gap-1.5 text-[10px] text-cyan-300">
+                  <Spinner /> {L(`กำลังวัดเมฆในพื้นที่ ${auto.done}/${auto.total} ภาพ — สีจุดจะอัปเดตเอง`, `Measuring AOI cloud ${auto.done}/${auto.total} — dot colours update as it goes`)}
+                </p>
+              )}
+              {!auto && list.some((it) => familyOf(it) === 'optical' && cl[it.id] === undefined && checkScene(it, null, qc).pending && visibleIds.includes(it.id)) && (
+                <button className="text-[10px] text-cyan-300 underline" onClick={() => setAutoAll(true)}>{L('วัดเมฆภาพที่เหลือในช่วงนี้ทั้งหมด', 'Measure all remaining scenes in view')}</button>
+              )}
               <p className="text-[10px] text-muted">{L(`คลิกจุดบนไทม์ไลน์เพื่อเลือกภาพ ${slot === 'A' ? '“ก่อน” (A)' : '“หลัง” (B)'} · ${list.length} ภาพ`, `Click a dot to set ${slot === 'A' ? 'BEFORE (A)' : 'AFTER (B)'} · ${list.length} scenes`)}</p>
 
               <div className="flex flex-wrap items-end gap-1">
@@ -313,8 +394,9 @@ const TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.'
  * quick ranges ending at the newest scene. Ticks switch from months to weeks to days as you zoom in.
  */
 function SceneTimeline({
-  items, t0, t1, rows, rowY, A, B, colour, tip, onPick,
+  items, t0, t1, rows, rowY, A, B, colour, tip, onPick, onVisible,
 }: {
+  onVisible?: (ids: string[]) => void;
   items: ImageryItem[];
   t0: number;
   t1: number;
@@ -429,6 +511,13 @@ function SceneTimeline({
     const t = new Date(it.datetime).getTime();
     return t >= v0 && t <= v1;
   });
+  const visKey = visible.map((x) => x.id).join(',');
+  useEffect(() => {
+    if (!onVisible) return;
+    const t = setTimeout(() => onVisible(visKey ? visKey.split(',') : []), 350); // wait until panning stops
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visKey]);
   const r = days < 20 ? 4.6 : days < 60 ? 3.8 : days < 150 ? 3.1 : 2.6;
   const newest = items.length ? Math.max(...items.map((x) => new Date(x.datetime).getTime())) : t1;
   const quick = (d: number) => setView(clampView(Math.min(newest + DAYMS, t1) - d * DAYMS, Math.min(newest + DAYMS, t1)));
