@@ -2,7 +2,7 @@
 // scene on a timeline with its real acquisition date and cloud figures, pick two dates (or use a
 // preset), check them against the quality thresholds and compare. Scenes that fail are shown with
 // the reason and are never used silently.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { useLang } from '../../i18n';
 import { Badge, Button, Field, Input, Notice, Panel, Select, Spinner, cx } from '../ui';
 import { searchArchive, type ImageryItem, type StacCollectionId } from '../../lib/stac';
@@ -50,7 +50,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
     setA(null);
     setB(null);
     try {
-      const r = await searchArchive({ aoi: aoi.geometry, collections: [...colls], from, to, limit: 100 });
+      const r = await searchArchive({ aoi: aoi.geometry, collections: [...colls], from, to, limit: 500 }); // newest first; 100 cut off the older half of a one-year search
       setList(r.filter((x) => x.source === 'planetary-computer').sort((a, b) => a.datetime.localeCompare(b.datetime)));
       setCl({});
     } catch (e: any) {
@@ -185,19 +185,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
   // ---- timeline geometry
   const shown = useMemo(() => (list ?? []).filter((x) => !onlyPass || check(x).ok || check(x).pending), [list, onlyPass, cl, qc]);
   const t0 = new Date(from).getTime(), t1 = new Date(to).getTime() + 86400e3;
-  const X = (iso: string) => 8 + ((new Date(iso).getTime() - t0) / Math.max(1, t1 - t0)) * 384;
   const rowY: Record<string, number> = { 'sentinel-2-l2a': 18, 'landsat-c2-l2': 34, 'sentinel-1-rtc': 50 };
-  const months = useMemo(() => {
-    const out: { x: number; t: string }[] = [];
-    const d = new Date(from);
-    d.setUTCDate(1);
-    while (d.getTime() < t1) {
-      if (d.getTime() >= t0) out.push({ x: X(d.toISOString()), t: `${d.getUTCMonth() + 1}/${String(d.getUTCFullYear()).slice(2)}` });
-      d.setUTCMonth(d.getUTCMonth() + 1);
-    }
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to]);
   const dotColour = (it: ImageryItem) => {
     const c = check(it);
     if (familyOf(it) === 'sar') return c.ok ? '#60a5fa' : '#64748b';
@@ -230,20 +218,18 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
           {list.length > 0 && (
             <>
               <div className="rounded border border-line bg-ink-950/60 p-1">
-                <svg viewBox="0 0 400 74" className="w-full">
-                  {months.map((m, i) => <g key={i}><line x1={m.x} x2={m.x} y1={8} y2={58} stroke="#1e293b" /><text x={m.x + 1} y={70} fontSize="6" fill="#64748b">{m.t}</text></g>)}
-                  {Object.entries(rowY).map(([k, y]) => colls.has(k as StacCollectionId) && <text key={k} x={1} y={y - 5} fontSize="5.5" fill="#64748b">{k === 'sentinel-2-l2a' ? 'S2' : k === 'landsat-c2-l2' ? 'Landsat' : 'S1'}</text>)}
-                  {shown.map((it) => {
-                    const sel = it.id === A?.id ? 'A' : it.id === B?.id ? 'B' : '';
-                    return (
-                      <g key={it.id} onClick={() => void pick(it)} className="cursor-pointer">
-                        <title>{`${dt(it.datetime)} · ${sensorName(it)}${it.cloudCover != null ? ` · เมฆรวม ${it.cloudCover.toFixed(0)}%` : ''}${check(it).reasons.length ? ` · ไม่ผ่าน: ${check(it).reasons.join(', ')}` : ''}`}</title>
-                        <circle cx={X(it.datetime)} cy={rowY[it.collection] ?? 18} r={sel ? 4.2 : 2.6} fill={dotColour(it)} stroke={sel ? '#fff' : 'none'} strokeWidth={1.2} />
-                        {sel && <text x={X(it.datetime)} y={(rowY[it.collection] ?? 18) - 6} fontSize="7" fill="#fff" textAnchor="middle" fontWeight="700">{sel}</text>}
-                      </g>
-                    );
-                  })}
-                </svg>
+                <SceneTimeline
+                  items={shown}
+                  t0={t0}
+                  t1={t1}
+                  rows={Object.entries(rowY).filter(([k]) => colls.has(k as StacCollectionId)).map(([k, y]) => ({ y, label: k === 'sentinel-2-l2a' ? 'S2' : k === 'landsat-c2-l2' ? 'Landsat' : 'S1' }))}
+                  rowY={rowY}
+                  A={A}
+                  B={B}
+                  colour={dotColour}
+                  tip={(it) => `${dt(it.datetime)} · ${sensorName(it)}${it.cloudCover != null ? ` · เมฆรวม ${it.cloudCover.toFixed(0)}%` : ''}${check(it).reasons.length ? ` · ไม่ผ่าน: ${check(it).reasons.join(', ')}` : ''}`}
+                  onPick={(it) => void pick(it)}
+                />
                 <div className="flex flex-wrap gap-2 px-1 text-[9px] text-muted">
                   <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#4fd18b]" />{L('ผ่านเกณฑ์', 'passes')}</span>
                   <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#f5b84b]" />{L('ต้องวัดเมฆใน AOI', 'AOI cloud not measured')}</span>
@@ -314,6 +300,198 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
         </div>
       )}
     </Panel>
+  );
+}
+
+// ---------------------------------------------------------------- zoomable scene timeline
+
+const DAYMS = 86400e3;
+const TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+
+/**
+ * Scene dots on a time axis. Zoom with the mouse wheel / pinch-free buttons / double-click, drag to pan,
+ * quick ranges ending at the newest scene. Ticks switch from months to weeks to days as you zoom in.
+ */
+function SceneTimeline({
+  items, t0, t1, rows, rowY, A, B, colour, tip, onPick,
+}: {
+  items: ImageryItem[];
+  t0: number;
+  t1: number;
+  rows: { y: number; label: string }[];
+  rowY: Record<string, number>;
+  A: ImageryItem | null;
+  B: ImageryItem | null;
+  colour: (it: ImageryItem) => string;
+  tip: (it: ImageryItem) => string;
+  onPick: (it: ImageryItem) => void;
+}) {
+  const lang = useLang((s) => s.lang);
+  const L = (th: string, en: string) => (lang === 'th' ? th : en);
+  const [view, setView] = useState<[number, number] | null>(null);
+  useEffect(() => setView(null), [t0, t1]);
+  const v0 = view?.[0] ?? t0, v1 = view?.[1] ?? t1;
+  const span = v1 - v0;
+  const W = 400, PADL = 22, PADR = 6, IW = W - PADL - PADR;
+  const X = (ms: number) => PADL + ((ms - v0) / Math.max(1, span)) * IW;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const drag = useRef<{ x: number; v: [number, number]; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+
+  const clampView = (a: number, b: number): [number, number] | null => {
+    const minSpan = 3 * DAYMS, full = t1 - t0;
+    let w = Math.min(full, Math.max(minSpan, b - a));
+    if (w >= full - 1) return null;
+    let s = a;
+    if (s < t0) s = t0;
+    if (s + w > t1) s = t1 - w;
+    return [s, s + w];
+  };
+  const zoomAt = (frac: number, factor: number) => {
+    const c = v0 + frac * span;
+    const w = span * factor;
+    setView(clampView(c - frac * w, c - frac * w + w));
+  };
+  const fracOf = (clientX: number) => {
+    const r = svgRef.current?.getBoundingClientRect();
+    if (!r) return 0.5;
+    const x = ((clientX - r.left) / r.width) * W;
+    return Math.min(1, Math.max(0, (x - PADL) / IW));
+  };
+
+  // wheel needs a non-passive listener to stop the page from scrolling
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const f = fracOf(e.clientX);
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        const d = ((e.deltaX || e.deltaY) / 400) * span;
+        setView(clampView(v0 + d, v1 + d));
+      } else zoomAt(f, e.deltaY > 0 ? 1.25 : 0.8);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  });
+
+  const onDown = (e: RPointerEvent<SVGSVGElement>) => {
+    // capture only once it turns into a drag, so a plain click still reaches the dot under it
+    drag.current = { x: e.clientX, v: [v0, v1], moved: false };
+  };
+  const onMove = (e: RPointerEvent<SVGSVGElement>) => {
+    const d = drag.current;
+    const r = svgRef.current?.getBoundingClientRect();
+    if (!d || !r) return;
+    const dx = e.clientX - d.x;
+    if (!d.moved && Math.abs(dx) > 3) {
+      d.moved = true;
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    }
+    if (!d.moved) return;
+    const dt = (-dx / r.width) * (W / IW) * (d.v[1] - d.v[0]);
+    setView(clampView(d.v[0] + dt, d.v[1] + dt));
+  };
+  const onUp = (e: RPointerEvent<SVGSVGElement>) => {
+    suppressClick.current = !!drag.current?.moved;
+    drag.current = null;
+    if ((e.currentTarget as Element).hasPointerCapture?.(e.pointerId)) (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+  };
+
+  // ticks: months → weeks → days depending on the visible span
+  const days = span / DAYMS;
+  const ticks = useMemo(() => {
+    const out: { x: number; t: string; major: boolean }[] = [];
+    if (days > 75) {
+      const d = new Date(v0);
+      d.setUTCDate(1);
+      d.setUTCHours(0, 0, 0, 0);
+      const stepM = days > 400 ? 2 : 1;
+      while (d.getTime() <= v1) {
+        if (d.getTime() >= v0) out.push({ x: X(d.getTime()), t: lang === 'th' ? `${TH_MON[d.getUTCMonth()]}${String(d.getUTCFullYear() + 543).slice(2)}` : `${d.getUTCMonth() + 1}/${String(d.getUTCFullYear()).slice(2)}`, major: d.getUTCMonth() === 0 });
+        d.setUTCMonth(d.getUTCMonth() + stepM);
+      }
+    } else {
+      const step = days > 28 ? 7 : days > 12 ? 2 : 1;
+      const d = new Date(v0);
+      d.setUTCHours(0, 0, 0, 0);
+      if (step === 7) d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); // Mondays
+      while (d.getTime() <= v1) {
+        if (d.getTime() >= v0) out.push({ x: X(d.getTime()), t: `${d.getUTCDate()} ${lang === 'th' ? TH_MON[d.getUTCMonth()] : d.toLocaleString('en', { month: 'short', timeZone: 'UTC' })}`, major: d.getUTCDate() === 1 });
+        d.setUTCDate(d.getUTCDate() + step);
+      }
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v0, v1, lang]);
+
+  const visible = items.filter((it) => {
+    const t = new Date(it.datetime).getTime();
+    return t >= v0 && t <= v1;
+  });
+  const r = days < 20 ? 4.6 : days < 60 ? 3.8 : days < 150 ? 3.1 : 2.6;
+  const newest = items.length ? Math.max(...items.map((x) => new Date(x.datetime).getTime())) : t1;
+  const quick = (d: number) => setView(clampView(Math.min(newest + DAYMS, t1) - d * DAYMS, Math.min(newest + DAYMS, t1)));
+  const fmt = (ms: number) => {
+    const d = new Date(ms);
+    return lang === 'th' ? `${d.getUTCDate()} ${TH_MON[d.getUTCMonth()]} ${String(d.getUTCFullYear() + 543).slice(2)}` : d.toISOString().slice(0, 10);
+  };
+
+  return (
+    <>
+      <div className="mb-1 flex flex-wrap items-center gap-1 px-1 text-[10px]">
+        <button className="rounded border border-line px-1.5 text-slate-200 hover:border-cyan-400/50" onClick={() => zoomAt(0.5, 0.5)} title={L('ซูมเข้า', 'Zoom in')}>＋</button>
+        <button className="rounded border border-line px-1.5 text-slate-200 hover:border-cyan-400/50 disabled:opacity-40" disabled={!view} onClick={() => zoomAt(0.5, 2)} title={L('ซูมออก', 'Zoom out')}>－</button>
+        {[[14, L('2 สัปดาห์', '2 wk')], [30, L('1 เดือน', '1 mo')], [90, L('3 เดือน', '3 mo')]].map(([d, l]) => (
+          <button key={d as number} className="rounded border border-line px-1.5 text-slate-300 hover:border-cyan-400/50" onClick={() => quick(d as number)}>{l}</button>
+        ))}
+        <button className="rounded border border-line px-1.5 text-slate-300 hover:border-cyan-400/50 disabled:opacity-40" disabled={!view} onClick={() => setView(null)}>{L('ทั้งหมด', 'All')}</button>
+        <span className="ml-auto font-mono text-muted">{fmt(v0)} – {fmt(v1 - 1)} · {visible.length} {L('ภาพ', 'scenes')}</span>
+      </div>
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} 76`}
+        className={cx('w-full touch-none select-none', view ? 'cursor-grab active:cursor-grabbing' : 'cursor-zoom-in')}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+        onDoubleClick={(e) => zoomAt(fracOf(e.clientX), 0.4)}
+      >
+        <defs><clipPath id="tl-clip"><rect x={PADL - 6} y={0} width={IW + 12} height={76} /></clipPath></defs>
+        {ticks.map((m, i) => (
+          <g key={i}>
+            <line x1={m.x} x2={m.x} y1={8} y2={58} stroke={m.major ? '#334155' : '#1e293b'} />
+            <text x={m.x + 1} y={70} fontSize="6" fill={m.major ? '#94a3b8' : '#64748b'}>{m.t}</text>
+          </g>
+        ))}
+        {rows.map((r0) => <text key={r0.label} x={1} y={r0.y + 2} fontSize="5.5" fill="#64748b">{r0.label}</text>)}
+        <g clipPath="url(#tl-clip)">
+          {visible.map((it) => {
+            const sel = it.id === A?.id ? 'A' : it.id === B?.id ? 'B' : '';
+            const x = X(new Date(it.datetime).getTime()), y = rowY[it.collection] ?? 18;
+            return (
+              <g
+                key={it.id}
+                onClick={() => {
+                  if (suppressClick.current) return;
+                  onPick(it);
+                }}
+                onDoubleClick={(e) => e.stopPropagation()}
+                className="cursor-pointer"
+              >
+                <title>{tip(it)}</title>
+                <circle cx={x} cy={y} r={r + 3} fill="transparent" />
+                <circle cx={x} cy={y} r={sel ? r + 1.6 : r} fill={colour(it)} stroke={sel ? '#fff' : '#0b1524'} strokeWidth={sel ? 1.2 : 0.5} />
+                {sel && <text x={x} y={y - r - 3} fontSize="7" fill="#fff" textAnchor="middle" fontWeight="700">{sel}</text>}
+                {days < 20 && !sel && <text x={x} y={y + r + 6} fontSize="4.5" fill="#94a3b8" textAnchor="middle">{new Date(it.datetime).getUTCDate()}</text>}
+              </g>
+            );
+          })}
+        </g>
+      </svg>
+      <p className="px-1 text-[9px] text-muted">{L('หมุนล้อเมาส์หรือดับเบิลคลิกเพื่อซูม · ลากเพื่อเลื่อน · ซูมใกล้จะเห็นวันที่ใต้จุด', 'Wheel or double-click to zoom · drag to pan · zoom in to see day numbers')}</p>
+    </>
   );
 }
 
