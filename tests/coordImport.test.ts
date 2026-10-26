@@ -348,3 +348,18 @@ test('placePolygon: point boxes, row sizes, line extents; swap; duplicates; old 
   assert.equal(xls.places.length, 0);
   assert.ok(xls.warnings[0].en.includes('.xls'));
 });
+
+test('boundary lines: shapefile parts kept separately, Web Mercator converted, rar refused', async () => {
+  const { boundaryGeoJsonFromFiles } = await import('../src/lib/coordImport');
+  const R = 6378137, m = (lo: number, la: number): [number, number] => [(lo * Math.PI / 180) * R, R * Math.log(Math.tan(Math.PI / 4 + (la * Math.PI) / 360))];
+  const ring = [m(100, 14), m(100.1, 14), m(100.1, 14.1), m(100, 14)];
+  const r = await boundaryGeoJsonFromFiles([
+    file('b.shp', shpPolygon(ring)),
+    file('b.prj', 'PROJCS["WGS_1984_Web_Mercator",GEOGCS["GCS_WGS_1984_Major_Auxiliary_Sphere"],PROJECTION["Mercator"]]'),
+    file('old.rar', new Uint8Array([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07])),
+  ]);
+  assert.equal(r.geojson.features.length, 1);
+  near(r.geojson.features[0].geometry.coordinates[1][0], 100.1, 1e-6);
+  near(r.geojson.features[0].geometry.coordinates[2][1], 14.1, 1e-6);
+  assert.ok(r.warnings.some((w) => w.en.includes('.rar')));
+});

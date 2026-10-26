@@ -51,7 +51,7 @@ const MAX_VERTICES = 1000;
 let seq = 0;
 const newId = () => `imp_${Date.now().toString(36)}_${(seq++).toString(36)}`;
 
-type Raw = { name: string; kind: PlaceKind; coords: [number, number][]; size?: number };
+type Raw = { name: string; kind: PlaceKind; coords: [number, number][]; size?: number; /** separate line parts / rings, kept for boundary import */ parts?: [number, number][][] };
 
 class Ctx {
   places: ImportedPlace[] = [];
@@ -769,7 +769,7 @@ function readShp(b: Uint8Array): (Raw[] | null)[] {
       const p0 = c + 44 + np * 4;
       const pts = Array.from({ length: n }, (_, i) => xy(p0 + i * 16));
       const rings = parts.map((s, i) => pts.slice(s, i + 1 < parts.length ? parts[i + 1] : n));
-      out.push([base === 5 ? { name: '', kind: 'polygon', coords: largestRing(rings) } : { name: '', kind: 'line', coords: pts }]);
+      out.push([base === 5 ? { name: '', kind: 'polygon', coords: largestRing(rings), parts: rings } : { name: '', kind: 'line', coords: pts, parts: rings }]);
     } else out.push(null);
   }
   return out;
@@ -993,3 +993,109 @@ export const TEMPLATE_CSV = [
   `ตัวอย่าง DMS,"13°45'22.7""N","100°30'06.5""E",`,
   '',
 ].join('\r\n');
+
+// ---------------------------------------------------------------- boundary lines (full detail, no thinning)
+
+/**
+ * Line work from any supported file set (shapefile in a .zip or as .shp+.dbf+.prj, KML/KMZ, GeoJSON, GPX)
+ * converted to WGS84, every part kept separately and at full detail — for the border-line import.
+ * Returns a GeoJSON FeatureCollection of LineStrings (polygons contribute their rings as lines).
+ */
+export async function boundaryGeoJsonFromFiles(files: InputFile[], opts?: ImportOptions): Promise<{ geojson: { type: 'FeatureCollection'; features: any[] }; warnings: Msg[]; name: string }> {
+  const o = withDefaults(opts);
+  const warnings: Msg[] = [];
+  const lines: [number, number][][] = [];
+  const flat: InputFile[] = [];
+  const expand = async (f: InputFile, depth: number) => {
+    const ext = extOf(f.name);
+    if (ext === 'rar' || (f.bytes[0] === 0x52 && f.bytes[1] === 0x61 && f.bytes[2] === 0x72 && f.bytes[3] === 0x21)) {
+      warnings.push({ th: `${f.name}: เว็บเปิดไฟล์ .rar ไม่ได้ — แตกไฟล์แล้วเลือก .shp .dbf .prj พร้อมกัน หรือบีบอัดใหม่เป็น .zip`, en: `${f.name}: .rar cannot be opened in the browser — extract it and pick the .shp/.dbf/.prj together, or re-pack as .zip` });
+      return;
+    }
+    if (isZip(f.bytes) && depth < 2) {
+      for (const [name, bytes] of await unzip(f.bytes)) if (!/(^|\/)(__MACOSX|\.)/.test(name)) await expand({ name, bytes }, depth + 1);
+      return;
+    }
+    flat.push(f);
+  };
+  for (const f of files) await expand(f, 0);
+
+  const push = (parts: [number, number][][], crs: Crs | null, source: string) => {
+    if (!parts.length) return;
+    let c = crs;
+    if (!c) {
+      const all = parts.flat();
+      if (all.every(([x, y]) => Math.abs(x) <= 180 && Math.abs(y) <= 90)) c = { kind: 'geo', datum: 'wgs84' };
+      else if (all.some(([x]) => Math.abs(x) > 1_000_000)) {
+        c = { kind: 'merc' };
+        warnings.push({ th: `${source}: ไม่ระบุระบบพิกัด ถือเป็น Web Mercator`, en: `${source}: no CRS — read as Web Mercator` });
+      } else {
+        c = { kind: 'utm', zone: o.utmZone, north: o.utmNorth, datum: 'wgs84' };
+        warnings.push({ th: `${source}: ไม่ระบุระบบพิกัด ถือเป็น UTM ${o.utmZone}N`, en: `${source}: no CRS — read as UTM ${o.utmZone}N` });
+      }
+    }
+    const cc = c;
+    if (cc.kind !== 'geo' || cc.datum !== 'wgs84') warnings.push({ th: `${source}: แปลงจาก ${crsLabel(cc)} เป็น WGS84`, en: `${source}: converted from ${crsLabel(cc)} to WGS84` });
+    for (const p of parts) {
+      const q = (cc.kind === 'geo' && cc.datum === 'wgs84' ? p : p.map(([x, y]) => toWgs84(x, y, cc))).map(([x, y]) => [round7(x), round7(y)] as [number, number]);
+      if (q.length > 1 && q.every(([x, y]) => Math.abs(x) <= 180 && Math.abs(y) <= 90)) lines.push(q);
+    }
+  };
+
+  // shapefiles, grouped by base name
+  const sets = new Map<string, Map<string, Uint8Array>>();
+  for (const f of flat) {
+    const ext = extOf(f.name);
+    if (!['shp', 'prj'].includes(ext)) continue;
+    const base = f.name.replace(/\.[^.]+$/, '').toLowerCase();
+    if (!sets.has(base)) sets.set(base, new Map());
+    sets.get(base)!.set(ext, f.bytes);
+  }
+  for (const [base, parts] of sets) {
+    const shp = parts.get('shp');
+    if (!shp) continue;
+    const src = `${base.split('/').pop()}.shp`;
+    const prj = parts.get('prj');
+    const crs = prj ? crsFromText(new TextDecoder().decode(prj)) : null;
+    if (prj && !crs) warnings.push({ th: `${src}: ไม่รู้จักระบบพิกัดใน .prj — เดาจากค่าพิกัด`, en: `${src}: unknown projection in .prj — guessing` });
+    push(readShp(shp).flatMap((r) => (r ?? []).flatMap((x) => x.parts ?? [x.coords])), crs, src);
+  }
+  // KML / GeoJSON / GPX
+  for (const f of flat) {
+    const ext = extOf(f.name);
+    if (['shp', 'dbf', 'prj', 'cpg', 'shx', 'sbn', 'sbx', 'qix', 'qmd', 'xml'].includes(ext)) continue;
+    const text = decodeText(f.bytes).replace(/^﻿/, '');
+    const t = text.trimStart();
+    if (t.startsWith('{') || t.startsWith('[')) {
+      try {
+        const doc = JSON.parse(t);
+        const parts: [number, number][][] = [];
+        const walk = (g: any) => {
+          if (!g) return;
+          if (g.type === 'FeatureCollection') return g.features?.forEach((x: any) => walk(x));
+          if (g.type === 'Feature') return walk(g.geometry);
+          if (g.type === 'GeometryCollection') return g.geometries?.forEach(walk);
+          const ln = (c: any) => c.map((p: number[]) => [+p[0], +p[1]] as [number, number]);
+          if (g.type === 'LineString') parts.push(ln(g.coordinates));
+          else if (g.type === 'MultiLineString' || g.type === 'Polygon') g.coordinates.forEach((c: any) => parts.push(ln(c)));
+          else if (g.type === 'MultiPolygon') g.coordinates.forEach((p: any) => p.forEach((c: any) => parts.push(ln(c))));
+        };
+        walk(doc);
+        const cn = doc?.crs?.properties?.name;
+        push(parts, cn ? crsFromText(String(cn)) : null, f.name);
+      } catch {
+        /* not JSON */
+      }
+    } else if (/<(?:\w+:)?(?:kml|Placemark)\b/.test(t)) {
+      const parts = [...t.matchAll(tagRe('coordinates'))].map((m) => kmlCoords(m[1])).filter((l) => l.length > 1);
+      push(parts, { kind: 'geo', datum: 'wgs84' }, f.name);
+    } else if (/<(?:\w+:)?gpx\b/i.test(t)) {
+      for (const m of t.matchAll(/<(?:\w+:)?(?:trkseg|rte)\b[\s\S]*?<\/(?:\w+:)?(?:trkseg|rte)>/g)) {
+        const pts = [...m[0].matchAll(/<(?:\w+:)?(?:trkpt|rtept)\b([^>]*?)(?:\/>|>)/g)].map((x) => [parseFloat(attr(x[1], 'lon') ?? ''), parseFloat(attr(x[1], 'lat') ?? '')] as [number, number]).filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+        if (pts.length > 1) push([pts], { kind: 'geo', datum: 'wgs84' }, f.name);
+      }
+    }
+  }
+  const name = files.map((f) => f.name).join(', ');
+  return { geojson: { type: 'FeatureCollection', features: lines.map((coordinates) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } })) }, warnings, name };
+}

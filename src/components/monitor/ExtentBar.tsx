@@ -46,11 +46,18 @@ export default function ExtentBar({
     load();
     return onBoundaryChange(load);
   }, []);
-  const doImport = async (f: File) => {
+  const doImport = async (list: File[]) => {
     setImpBusy(true);
     setImpErr('');
     try {
-      await importBoundary(f.name, await f.text());
+      const { boundaryGeoJsonFromFiles, filesFromInput } = await import('../../lib/coordImport');
+      const single = list.length === 1 && /\.(geo)?json$/i.test(list[0].name);
+      if (single) await importBoundary(list[0].name, await list[0].text());
+      else {
+        const r = await boundaryGeoJsonFromFiles(await filesFromInput(list));
+        if (!r.geojson.features.length) throw new Error(r.warnings.map((w) => L(w.th, w.en)).join(' · ') || L('ไม่พบเส้นในไฟล์', 'No lines found in the files'));
+        await importBoundary(list.map((f) => f.name.replace(/\.[^.]+$/, '')).filter((v, i, a) => a.indexOf(v) === i).join(', '), JSON.stringify(r.geojson));
+      }
       void apply(mode);
     } catch (e: any) {
       setImpErr(e?.message ?? String(e));
@@ -172,9 +179,10 @@ export default function ExtentBar({
             )}
             {srcOk === false && <div className="text-warn">{L('โหลดเส้นขอบประเทศไม่ได้ ใช้กรอบประเทศไทยสำรอง', 'outlines unavailable — fallback extent used')}</div>}
             <label className={cx('mt-1 inline-block cursor-pointer rounded border border-line px-2 py-0.5 hover:border-cyan-400/50', impBusy && 'opacity-50')}>
-              {impBusy ? L('กำลังนำเข้า…', 'Importing…') : custom ? L('นำเข้าไฟล์ใหม่แทน', 'Replace file') : L('นำเข้าเส้นเขตแดน (GeoJSON)', 'Import boundary (GeoJSON)')}
-              <input type="file" accept=".geojson,.json,application/geo+json,application/json" className="hidden" disabled={impBusy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void doImport(f); }} />
+              {impBusy ? L('กำลังนำเข้า…', 'Importing…') : custom ? L('นำเข้าไฟล์ใหม่แทน', 'Replace file') : L('นำเข้าเส้นเขตแดน', 'Import boundary')}
+              <input type="file" multiple accept=".zip,.shp,.dbf,.prj,.cpg,.shx,.kml,.kmz,.gpx,.geojson,.json,application/geo+json,application/json" className="hidden" disabled={impBusy} onChange={(e) => { const f = e.target.files ? [...e.target.files] : []; e.target.value = ''; if (f.length) void doImport(f); }} />
             </label>
+            <div className="text-[9px] text-muted">{L('Shapefile (.zip หรือเลือก .shp+.dbf+.prj พร้อมกัน), KML/KMZ, GeoJSON, GPX · แปลงระบบพิกัด UTM/Web Mercator ให้อัตโนมัติ', 'Shapefile (.zip or .shp+.dbf+.prj together), KML/KMZ, GeoJSON, GPX · UTM/Web Mercator converted automatically')}</div>
             {impErr && <div className="text-bad">{impErr}</div>}
           </div>
           <div className="rounded border border-line p-1.5 text-[10px]">
