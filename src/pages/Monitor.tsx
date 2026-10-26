@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { create } from 'zustand';
 import { useLang } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
@@ -7,7 +6,7 @@ import { Badge, Button, Field, Input, Notice, Panel, Select, Spinner, cx } from 
 import { Cesium, flyToPolygon } from '../lib/cesium';
 import { useWorkspace } from '../store';
 import {
-  aoiFromPolygon, aoiInfo, SATELLITES, satelliteOf, confTh, deleteImages, getImage, isDue, lastRunOf, levelTh, loadAois, loadRuns, methodText, narrative, PURPOSES, rai, REGIONS, runMonitor, saveAois, saveRuns,
+  aoiFromPolygon, aoiInfo, SATELLITES, satelliteOf, confTh, getImage, isDue, lastRunOf, levelTh, methodText, narrative, PURPOSES, rai, REGIONS, runMonitor,
   type MonitorAoi, type MonitorRun, type Purpose, type Region, type SensorMode,
 } from '../lib/monitor';
 import { borderLines, boundarySource, lineLength, NEIGHBOURS, tilesAlong, type Neighbour, type Tile } from '../lib/border';
@@ -20,6 +19,10 @@ import { downloadJson } from '../lib/geo';
 import ComparePanel, { QcPanel } from '../components/monitor/ComparePanel';
 import ResultQuality from '../components/monitor/ResultQuality';
 import ExtentBar from '../components/monitor/ExtentBar';
+import PointSlots from '../components/monitor/PointSlots';
+import { compareWithLastYear } from '../lib/slots';
+import { formatDMM } from '../lib/coords';
+import { useSearchParams } from 'react-router-dom';
 import { useQc } from '../lib/qcStore';
 import { fmtArea, km2ToRai, type AreaUnit } from '../lib/area';
 import { hotspotKm2 } from '../lib/monitor';
@@ -29,36 +32,8 @@ import { displayTemplate } from '../lib/export';
 
 // ---------------------------------------------------------------- shared state (persisted in this browser)
 
-interface MonState {
-  aois: MonitorAoi[];
-  runs: MonitorRun[];
-  setAois: (f: (a: MonitorAoi[]) => MonitorAoi[]) => void;
-  addRun: (r: MonitorRun) => void;
-  removeRun: (id: string) => void;
-}
-export const useMonitor = create<MonState>((set) => ({
-  aois: loadAois(),
-  runs: loadRuns(),
-  setAois: (f) =>
-    set((s) => {
-      const aois = f(s.aois);
-      saveAois(aois);
-      return { aois };
-    }),
-  addRun: (r) =>
-    set((s) => {
-      const runs = [r, ...s.runs];
-      saveRuns(runs);
-      return { runs };
-    }),
-  removeRun: (id) =>
-    set((s) => {
-      const runs = s.runs.filter((x) => x.id !== id);
-      saveRuns(runs);
-      void deleteImages(id);
-      return { runs };
-    }),
-}));
+export { useMonitor } from '../lib/monitorStore';
+import { useMonitor } from '../lib/monitorStore';
 
 const useL = () => {
   const lang = useLang((s) => s.lang);
@@ -66,6 +41,13 @@ const useL = () => {
 };
 
 const LEVEL_COLOR: Record<string, string> = { significant: '#ef4444', minor: '#f5b84b', none: '#4fd18b', insufficient: '#94a3b8', error: '#94a3b8', new: '#22d3ee' };
+const pinCache = new Map<string, string>();
+/** map pin (drawn once per colour/size) */
+function pinImage(color: string, big: boolean) {
+  const k = `${color}:${big}`;
+  if (!pinCache.has(k)) pinCache.set(k, new Cesium.PinBuilder().fromColor(Cesium.Color.fromCssColorString(color), big ? 48 : 38).toDataURL());
+  return pinCache.get(k)!;
+}
 const statusOf = (r?: MonitorRun) => (!r ? 'new' : r.status !== 'ok' ? (r.status === 'error' ? 'error' : 'insufficient') : r.level ?? 'none');
 
 // ---------------------------------------------------------------- page: watchlist
@@ -96,7 +78,9 @@ export function MonitorWatch() {
   const { aoi: wsAoi } = useWorkspace();
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
   const [selId, setSelId] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'list' | 'add' | 'border'>('list');
+  const [panel, setPanel] = useState<'list' | 'add' | 'border' | 'points'>('list');
+  const [params, setParams] = useSearchParams();
+  const [yearErr, setYearErr] = useState('');
   const [busy, setBusy] = useState<{ cur: string; msg: string; done: number; total: number } | null>(null);
   const [period, setPeriod] = useState(30);
   const abort = useRef<AbortController | null>(null);
@@ -188,6 +172,21 @@ export function MonitorWatch() {
         polygon: { hierarchy: Cesium.Cartesian3.fromDegreesArray(ring.flat()), material: col.withAlpha(a.id === selId ? 0.35 : 0.18), height: 0 },
       });
       ds.entities.add({ polyline: { positions: ring.map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: a.id === selId ? 3 : 1.5, material: col } });
+      if (a.point) {
+        // exact point the user entered: a pin with the slot name
+        const on = a.id === selId;
+        ds.entities.add({
+          id: `pin:${a.id}`,
+          position: Cesium.Cartesian3.fromDegrees(a.point.lon, a.point.lat),
+          billboard: { image: pinImage(LEVEL_COLOR[st], on), verticalOrigin: Cesium.VerticalOrigin.BOTTOM, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+          label: {
+            text: a.name, font: on ? '600 13px Inter, sans-serif' : '12px Inter, sans-serif', fillColor: Cesium.Color.WHITE, showBackground: true,
+            backgroundColor: Cesium.Color.fromCssColorString('#0b1524').withAlpha(0.85), verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, on ? -50 : -40),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, on ? 2e7 : 2e6),
+          },
+        });
+        return;
+      }
       const { lon, lat } = aoiInfo(a);
       ds.entities.add({
         id: `aoil:${a.id}`,
@@ -339,7 +338,7 @@ export function MonitorWatch() {
           n.has(k) ? n.delete(k) : n.add(k);
           return n;
         });
-      } else if (id.startsWith('aoi:') || id.startsWith('aoil:')) setSelId(id.split(':')[1]);
+      } else if (id.startsWith('aoi:') || id.startsWith('aoil:') || id.startsWith('pin:')) setSelId(id.split(':')[1]);
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     return () => h.destroy();
   }, [viewer]);
@@ -387,6 +386,54 @@ export function MonitorWatch() {
     }
   };
 
+  /** coordinate slot: newest clear image vs the same time last year, shown as a swipe on the map */
+  const runYear = async (a: MonitorAoi) => {
+    abort.current?.abort();
+    const ac = new AbortController();
+    abort.current = ac;
+    setYearErr('');
+    setSelId(a.id);
+    try {
+      setBusy({ cur: a.name, msg: '', done: 0, total: 1 });
+      const r = await compareWithLastYear(a, qc, (msg) => setBusy({ cur: a.name, msg, done: 0, total: 1 }), ac.signal);
+      addRun(r.run);
+      setSwipe({ A: r.A, B: r.B });
+      setSplit(0.5);
+      setAois((l) => l.map((x) => (x.id === a.id && x.watch ? { ...x, watch: { ...x.watch, newScenes: [] } } : x)));
+      if (viewer) flyToPolygon(viewer, a.geometry);
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') setYearErr(e?.message ?? String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const selectSlot = (a: MonitorAoi) => {
+    setEdit(null);
+    setSelId(a.id);
+    setYearErr('');
+    if (viewer) flyToPolygon(viewer, a.geometry);
+  };
+  // links from new-image alerts: ?slot=<id>&compare=1
+  const handledLink = useRef('');
+  useEffect(() => {
+    const id = params.get('slot');
+    if (!id || !viewer) return;
+    const key = `${id}:${params.get('compare') ?? ''}`;
+    if (handledLink.current === key) return;
+    handledLink.current = key;
+    const a = aois.find((x) => x.id === id);
+    if (!a) return;
+    setPanel('points');
+    selectSlot(a);
+    const n = new URLSearchParams(params);
+    n.delete('slot');
+    const cmp = n.get('compare') === '1';
+    n.delete('compare');
+    setParams(n, { replace: true });
+    if (cmp) void runYear(a);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, viewer, aois]);
+
   const addFromWorkspace = (region: Region, purpose: Purpose, freq: number, name: string, sat: SensorMode) => {
     if (!wsAoi) return;
     const a = aoiFromPolygon(name || wsAoi.name, wsAoi.geometry, region, purpose, freq, sat);
@@ -413,8 +460,12 @@ export function MonitorWatch() {
           </Notice>
         )}
 
-        <div className="grid grid-cols-3 gap-1">
+        <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
           <Button variant={panel === 'list' ? 'active' : 'ghost'} onClick={() => setPanel('list')}>{L(`รายการ (${aois.length})`, `Watchlist (${aois.length})`)}</Button>
+          <Button variant={panel === 'points' ? 'active' : 'ghost'} onClick={() => setPanel('points')}>
+            📍 {L('จุดพิกัด', 'Points')}
+            {aois.some((a) => a.watch?.newScenes?.length) && <span className="ml-1 inline-block h-2 w-2 rounded-full bg-cyan-400 align-middle" />}
+          </Button>
           <Button variant={panel === 'border' ? 'active' : 'ghost'} onClick={() => setPanel('border')}>{L('+ ตามแนวชายแดน', '+ Along border')}</Button>
           <Button variant={panel === 'add' ? 'active' : 'ghost'} onClick={() => setPanel('add')}>{L('+ วาด / นำเข้า', '+ Draw / import')}</Button>
         </div>
@@ -442,6 +493,8 @@ export function MonitorWatch() {
         )}
 
         {panel === 'add' && <AddPanel viewer={viewer} onAdd={addFromWorkspace} />}
+        {panel === 'points' && <PointSlots selId={selId} onSelect={selectSlot} onCompare={(a) => void runYear(a)} busy={!!busy} />}
+        {panel === 'points' && yearErr && <Notice tone="warn">{yearErr}</Notice>}
         {panel === 'border' && (
           <BorderPanel
             viewer={viewer}
@@ -486,8 +539,8 @@ export function MonitorWatch() {
             onSet={nudge}
           />
         )}
-        {sel && panel === 'list' && !edit && <AoiDetail aoi={sel} onRun={() => runList([sel])} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
-        {sel && panel === 'list' && !edit && <ComparePanel key={sel.id} aoi={sel} onRun={(r) => addRun(r)} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
+        {sel && (panel === 'list' || (panel === 'points' && sel.point)) && !edit && <AoiDetail aoi={sel} onRun={() => runList([sel])} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
+        {sel && (panel === 'list' || (panel === 'points' && sel.point)) && !edit && <ComparePanel key={sel.id} aoi={sel} onRun={(r) => addRun(r)} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
       </aside>
       <div className="relative min-h-[360px] flex-1">
         <GlobeHost onReady={setViewer} />
@@ -820,7 +873,9 @@ function AoiDetail({ aoi, onRun, onEdit, busy, lang, onSwipe, swipeOn }: { aoi: 
     <Panel title={L('รายละเอียดพื้นที่', 'Area detail')}>
       <div className="space-y-1.5">
         <Input value={aoi.name} onChange={(e) => upd({ name: e.target.value })} className="!py-1 text-sm" />
-        <div className="font-mono text-[10px] text-muted">{info.lat.toFixed(4)}, {info.lon.toFixed(4)} · {fmtArea(info.km2, unit, lang === 'th')}</div>
+        <div className="font-mono text-[10px] text-muted">
+          {aoi.point ? `📍 ${formatDMM(aoi.point)} (${aoi.point.lat.toFixed(6)}, ${aoi.point.lon.toFixed(6)})` : `${info.lat.toFixed(4)}, ${info.lon.toFixed(4)}`} · {fmtArea(info.km2, unit, lang === 'th')}
+        </div>
         <div className="grid grid-cols-3 gap-1">
           <Select value={aoi.purpose} onChange={(e) => upd({ purpose: e.target.value as Purpose })} className="!py-1 text-xs">{PURPOSES.map((p) => <option key={p.id} value={p.id}>{L(p.labelTh, p.label)}</option>)}</Select>
           <Select value={aoi.sensor ?? 'auto'} onChange={(e) => upd({ sensor: e.target.value as SensorMode })} className="!py-1 text-xs" title={L('ดาวเทียมที่ใช้ภาพ', 'Satellite')}>

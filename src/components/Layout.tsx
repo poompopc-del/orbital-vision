@@ -5,6 +5,7 @@ import { useOrbit } from '../store';
 import { useLang } from '../i18n';
 import { supabase, supabaseConfigured } from '../lib/supabase';
 import { Badge, Button, Input, cx } from './ui';
+import SlotWatcher from './monitor/SlotWatcher';
 
 const NAV = [
   { to: '/', label: 'Home', icon: 'M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z' },
@@ -143,6 +144,7 @@ export default function Layout() {
         </header>
         <main className="min-h-0 flex-1 overflow-hidden">
           <Outlet />
+          <SlotWatcher />
         </main>
       </div>
     </div>
