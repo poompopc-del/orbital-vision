@@ -320,11 +320,17 @@ export function QcPanel() {
             <Select value={unit} onChange={(e) => setUnit(e.target.value as 'km2' | 'rai')} className="!py-1 text-xs"><option value="km2">{L('ตร.กม. (ไร่)', 'km² (rai)')}</option><option value="rai">{L('ไร่ (ตร.กม.)', 'rai (km²)')}</option></Select>
           </Field>
         </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Field label={L('กันขอบเมฆ/เงาเมฆออก', 'Cloud edge buffer')}>
+            <Select value={qc.cloudBufferM} onChange={(e) => setQc({ cloudBufferM: +e.target.value })} className="!py-1 text-xs">{[0, 50, 100, 200, 300].map((v) => <option key={v} value={v}>{v ? `${v} ม.` : L('ไม่กัน', 'none')}</option>)}</Select>
+          </Field>
+          <label className="mt-4 flex items-center gap-1.5"><input type="checkbox" checked={qc.thinCloud} onChange={(e) => setQc({ thinCloud: e.target.checked })} />{L('ตัดเมฆบาง/หมอกใกล้เมฆ', 'Mask thin cloud near clouds')}</label>
+        </div>
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={qc.allowCrossSensor} onChange={(e) => setQc({ allowCrossSensor: e.target.checked })} />{L('ยอมให้เทียบข้ามเซนเซอร์ (Sentinel-2 ↔ Landsat)', 'Allow cross-sensor (Sentinel-2 ↔ Landsat)')}</label>
         <p className="text-[10px] leading-relaxed text-muted">
           {L(
-            'ใช้ทั้งการตรวจอัตโนมัติและการเลือกวันเอง · เมฆรวมมาจากแคตตาล็อก ส่วนเมฆในพื้นที่วัดจากหน้ากากเมฆของภาพ (Sentinel-2 SCL / Landsat QA_PIXEL) แยกเมฆ เงาเมฆ และไม่มีข้อมูล · เกณฑ์เหล่านี้เป็นตัวคัดกรอง ไม่ใช่หลักประกันว่าผลถูกต้องทั้งหมด · เรดาร์เทียบกับภาพปกติไม่ได้',
-            'Applies to automatic and manual checks · scene cloud from the catalogue; AOI cloud from the image mask (S2 SCL / Landsat QA_PIXEL), separating cloud, shadow and no data · these are screening thresholds, not a guarantee · radar is never compared with optical',
+            'ใช้ทั้งการตรวจอัตโนมัติและการเลือกวันเอง · เมฆรวมมาจากแคตตาล็อก ส่วนเมฆในพื้นที่วัดจากหน้ากากเมฆของภาพ (Sentinel-2 SCL / Landsat QA_PIXEL) แยกเมฆ เงาเมฆ และไม่มีข้อมูล แล้วขยายขอบเมฆออกตามระยะที่ตั้ง และตัดเมฆบาง/หมอก/เงาที่หน้ากากเดิมจับไม่ได้รอบเมฆ เพื่อไม่ให้ขอบเมฆถูกนับเป็นการเปลี่ยนแปลง · เกณฑ์เหล่านี้เป็นตัวคัดกรอง ไม่ใช่หลักประกันว่าผลถูกต้องทั้งหมด · เรดาร์เทียบกับภาพปกติไม่ได้',
+            'Applies to automatic and manual checks · scene cloud from the catalogue; AOI cloud from the image mask (S2 SCL / Landsat QA_PIXEL), separating cloud, shadow and no data, then buffered and extended to thin cloud / haze / shadow the mask misses near clouds so cloud edges are not counted as change · these are screening thresholds, not a guarantee · radar is never compared with optical',
           )}
         </p>
         <Badge tone="cyan">{L('1 ตร.กม. = 625 ไร่ · 1 ไร่ = 1,600 ตร.ม.', '1 km² = 625 rai · 1 rai = 1,600 m²')}</Badge>

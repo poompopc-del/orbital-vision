@@ -16,9 +16,13 @@ export interface QcSettings {
   maxGsdM: number;
   /** allow Sentinel-2 ↔ Landsat comparisons (radar ↔ optical is never allowed) */
   allowCrossSensor: boolean;
+  /** buffer added around cloud and cloud shadow before comparing, m (cloud edges look like change) */
+  cloudBufferM: number;
+  /** also mask thin cloud / haze and dark shadow pixels that the scene's own mask misses near clouds */
+  thinCloud: boolean;
 }
 
-export const QC_DEFAULT: QcSettings = { maxSceneCloud: 20, maxAoiCloud: 20, minValidPct: 90, maxGsdM: 10, allowCrossSensor: false };
+export const QC_DEFAULT: QcSettings = { maxSceneCloud: 20, maxAoiCloud: 20, minValidPct: 90, maxGsdM: 10, allowCrossSensor: false, cloudBufferM: 100, thinCloud: true };
 const KEY = 'ov.monitor.qc.v1';
 export function loadQc(): QcSettings {
   try {

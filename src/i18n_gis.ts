@@ -171,7 +171,7 @@ export const TH_GIS: Record<string, string> = {
   'Optical change needs Sentinel-2 or Landsat scenes': 'การเปลี่ยนแปลงแบบออปติคัลต้องใช้ภาพ Sentinel-2 หรือ Landsat',
   'Optical indices must not be applied to SAR. Wind-roughened water and wet snow complicate thresholds.': 'ห้ามใช้ดัชนีออปติคัลกับภาพ SAR ผิวน้ำที่มีคลื่นลมทำให้ตั้งค่าเกณฑ์ยากขึ้น',
   'Optical water indices need Sentinel-2 or Landsat': 'ดัชนีน้ำแบบออปติคัลต้องใช้ Sentinel-2 หรือ Landsat',
-  'Optical workflow: pixels above the index threshold are classed as water; Sentinel-2 clouds, shadows and cirrus (SCL) are removed as no data. Built-up areas and shadows can still be misclassified.': 'Workflow ออปติคัล: พิกเซลที่ดัชนีสูงกว่าเกณฑ์จัดเป็นน้ำ ส่วนเมฆ เงาเมฆ และเมฆซีร์รัสของ Sentinel-2 (SCL) ถูกตัดเป็นไม่มีข้อมูล พื้นที่เมืองและเงายังอาจจำแนกผิดได้',
+  'Optical workflow: pixels above the index threshold are classed as water; clouds, cloud edges, thin cloud and cloud shadows (Sentinel-2 SCL / Landsat QA_PIXEL plus a buffer) are removed as no data. Built-up areas and shadows can still be misclassified.': 'Workflow ออปติคัล: พิกเซลที่ดัชนีสูงกว่าเกณฑ์จัดเป็นน้ำ ส่วนเมฆ ขอบเมฆ เมฆบาง และเงาเมฆ (Sentinel-2 SCL / Landsat QA_PIXEL พร้อมระยะกันขอบ) ถูกตัดเป็นไม่มีข้อมูล พื้นที่เมืองและเงายังอาจจำแนกผิดได้',
   'Part of the AOI has no data in this scene (outside the footprint or masked).': 'บางส่วนของ AOI ไม่มีข้อมูลในภาพนี้ (อยู่นอกขอบภาพหรือถูกตัดออก)',
   'Permanent / pre-existing water': 'แหล่งน้ำเดิม / น้ำปกติ',
   'Pick scene A / B from “Identify imagery” or the Imagery Explorer results.': 'เลือกภาพ A / B จากเครื่องมือ “ค้นภาพ ณ จุด” หรือผลค้นหาในหน้าค้นหาภาพถ่าย',
