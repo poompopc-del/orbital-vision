@@ -1,17 +1,57 @@
-import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes } from 'react';
+import { useState, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes } from 'react';
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
-export function Panel({ title, right, children, className, bodyClass }: { title?: ReactNode; right?: ReactNode; children: ReactNode; className?: string; bodyClass?: string }) {
+export function Panel({
+  title, right, children, className, bodyClass, collapsible, storeKey, defaultOpen = true,
+}: {
+  title?: ReactNode;
+  right?: ReactNode;
+  children: ReactNode;
+  className?: string;
+  bodyClass?: string;
+  /** header becomes a toggle that folds the body away */
+  collapsible?: boolean;
+  /** remember open/closed in this browser under this key */
+  storeKey?: string;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpenS] = useState<boolean>(() => {
+    if (!collapsible || !storeKey) return defaultOpen;
+    try {
+      const v = localStorage.getItem(`ov.panel.${storeKey}`);
+      return v == null ? defaultOpen : v === '1';
+    } catch {
+      return defaultOpen;
+    }
+  });
+  const setOpen = (v: boolean) => {
+    setOpenS(v);
+    if (storeKey) {
+      try {
+        localStorage.setItem(`ov.panel.${storeKey}`, v ? '1' : '0');
+      } catch {
+        /* storage unavailable */
+      }
+    }
+  };
+  const shown = !collapsible || open;
   return (
     <section className={cx('rounded-md border border-line bg-navy-900/90 backdrop-blur-sm', className)}>
       {title != null && (
-        <header className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
-          <h2 className="label">{title}</h2>
-          {right}
+        <header className={cx('flex items-center justify-between gap-2 px-3 py-2', shown && 'border-b border-line')}>
+          {collapsible ? (
+            <button type="button" onClick={() => setOpen(!open)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left" aria-expanded={open}>
+              <span className={cx('inline-block text-[10px] text-muted transition-transform', open && 'rotate-90')}>▶</span>
+              <h2 className="label truncate">{title}</h2>
+            </button>
+          ) : (
+            <h2 className="label">{title}</h2>
+          )}
+          {shown && right}
         </header>
       )}
-      <div className={cx('p-3', bodyClass)}>{children}</div>
+      {shown && <div className={cx('p-3', bodyClass)}>{children}</div>}
     </section>
   );
 }

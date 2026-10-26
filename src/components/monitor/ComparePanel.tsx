@@ -40,6 +40,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
   const [err, setErr] = useState('');
   const [eventDate, setEventDate] = useState(daysAgo(14));
   const [onlyPass, setOnlyPass] = useState(false);
+  const [details, setDetails] = useState(false);
   const abort = useRef<AbortController | null>(null);
 
   const check = (it: ImageryItem) => checkScene(it, cl[it.id] === 'err' ? null : cl[it.id], qc);
@@ -204,7 +205,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
   };
 
   return (
-    <Panel title={L('เปรียบเทียบภาพย้อนหลัง (เลือกวันเอง)', 'Compare imagery over time (pick dates)')}>
+    <Panel collapsible storeKey="compare" title={L('เปรียบเทียบภาพย้อนหลัง (เลือกวันเอง)', 'Compare imagery over time (pick dates)')} right={A && B ? <span className="font-mono text-[10px] text-cyan-300">A {d10(A.datetime)} · B {d10(B.datetime)}</span> : undefined}>
       <div className="grid grid-cols-2 gap-1.5">
         <Field label={L('ค้นหาตั้งแต่', 'From')}><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="!py-1 text-xs" /></Field>
         <Field label={L('ถึง', 'To')}><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="!py-1 text-xs" /></Field>
@@ -274,20 +275,22 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
                   const d = it ? sceneDates(it) : null;
                   return (
                     <button key={k} onClick={() => setSlot(k)} className={cx('rounded border p-1.5 text-left text-[10px]', slot === k ? 'border-cyan-400/70 bg-cyan-400/10' : 'border-line')}>
-                      <div className="font-semibold text-white">{k === 'A' ? L('ก่อน (A)', 'Before (A)') : L('หลัง (B)', 'After (B)')}</div>
+                      <div className="font-semibold text-white">{k === 'A' ? L('ก่อน (A)', 'Before (A)') : L('หลัง (B)', 'After (B)')}{it && <span className="ml-1 font-mono font-normal">{d10(d!.acquired)}</span>}</div>
                       {it ? (
                         <div className="space-y-0.5 text-slate-300">
-                          <div>{L('ถ่ายภาพ', 'Acquired')}: <span className="font-mono text-white">{dt(d!.acquired)}</span></div>
-                          <div>{L('ประมวลผล', 'Processed')}: <span className="font-mono">{dt(d!.processed)}</span></div>
-                          <div>{L('เข้าคลัง', 'Catalogued')}: <span className="font-mono">{dt(d!.ingested)}</span></div>
-                          <div>{sensorName(it)} · {gsdMeters(it)} ม.</div>
                           {familyOf(it) === 'optical' ? (
+                            <div>{L('เมฆ/เงาใน AOI', 'AOI cloud/shadow')}: {c && c !== 'err' ? `${c.cloudPct.toFixed(1)}% / ${c.shadowPct.toFixed(1)}%` : c === 'err' ? L('วัดไม่ได้', 'n/a') : '…'}</div>
+                          ) : <div>{L('เรดาร์ (ไม่มีผลจากเมฆ)', 'Radar (no cloud effect)')}</div>}
+                          {details && (
                             <>
-                              <div>{L('เมฆรวมทั้งภาพ', 'Scene cloud')}: {it.cloudCover != null ? `${it.cloudCover.toFixed(1)}%` : '—'}</div>
-                              <div>{L('เมฆ / เงาเมฆใน AOI', 'AOI cloud / shadow')}: {c && c !== 'err' ? `${c.cloudPct.toFixed(1)}% / ${c.shadowPct.toFixed(1)}%` : c === 'err' ? L('วัดไม่ได้', 'n/a') : '…'}</div>
+                              <div>{L('ถ่ายภาพ', 'Acquired')}: <span className="font-mono text-white">{dt(d!.acquired)}</span></div>
+                              <div>{L('ประมวลผล', 'Processed')}: <span className="font-mono">{dt(d!.processed)}</span></div>
+                              <div>{L('เข้าคลัง', 'Catalogued')}: <span className="font-mono">{dt(d!.ingested)}</span></div>
+                              <div>{sensorName(it)} · {gsdMeters(it)} ม.</div>
+                              {familyOf(it) === 'optical' && <div>{L('เมฆรวมทั้งภาพ', 'Scene cloud')}: {it.cloudCover != null ? `${it.cloudCover.toFixed(1)}%` : '—'}</div>}
+                              <div className="break-all text-[9px] text-muted">{it.id}</div>
                             </>
-                          ) : <div>{L('เรดาร์: ไม่ได้รับผลจากเมฆ', 'Radar: unaffected by cloud')}</div>}
-                          <div className="text-[9px] text-muted">{it.id}</div>
+                          )}
                           {chk && !chk.ok && <div className="text-warn">{chk.pending ? L('ยังไม่ได้วัดเมฆใน AOI', 'AOI cloud not measured') : chk.reasons.join(' · ')}</div>}
                         </div>
                       ) : <div className="text-muted">{L('ยังไม่ได้เลือก', 'Not selected')}</div>}
@@ -295,8 +298,9 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
                   );
                 })}
               </div>
+              <button className="text-[10px] text-muted hover:text-white" onClick={() => setDetails(!details)}>{details ? L('▴ ซ่อนรายละเอียดภาพ', '▴ Hide scene details') : L('▾ รายละเอียดภาพ (วันประมวลผล, เมฆรวม, รหัสภาพ)', '▾ Scene details')}</button>
               {pair && !pair.ok && <Notice tone="bad">{pair.reasons.join(' · ')}</Notice>}
-              {pair?.notes.map((x) => <p key={x} className="text-[10px] text-warn">• {x}</p>)}
+              {!!pair?.notes.length && (details ? pair.notes.map((x) => <p key={x} className="text-[10px] text-warn">• {x}</p>) : <p className="text-[10px] text-warn">⚠ {L(`ข้อควรระวังในการเทียบ ${pair.notes.length} ข้อ`, `${pair.notes.length} comparison caveat(s)`)} — <button className="underline" onClick={() => setDetails(true)}>{L('ดู', 'show')}</button></p>)}
               {A && B && (checkScene(A, cl[A.id] === 'err' ? null : (cl[A.id] as AoiCloud | null | undefined), qc).reasons.length > 0 || checkScene(B, cl[B.id] === 'err' ? null : (cl[B.id] as AoiCloud | null | undefined), qc).reasons.length > 0) && (
                 <Notice tone="warn">{L('ภาพที่เลือกไม่ผ่านเกณฑ์คุณภาพ ระบบจะไม่สรุปผลการเปลี่ยนแปลงจากคู่นี้ ให้เลือกวันอื่น (จุดสีเขียวบนไทม์ไลน์)', 'A selected scene fails the quality thresholds; no change conclusion will be made from this pair — pick another date (green dots)')}</Notice>
               )}
@@ -317,7 +321,7 @@ export function QcPanel() {
   const L = useL();
   const { qc, setQc, unit, setUnit } = useQc();
   return (
-    <Panel title={L('เกณฑ์คุณภาพภาพและหน่วย', 'Quality thresholds & units')}>
+    <Panel collapsible storeKey="qc" defaultOpen={false} title={L('เกณฑ์คุณภาพภาพและหน่วย', 'Quality thresholds & units')}>
       <div className="space-y-1.5 text-[11px] text-slate-200">
         <div>
           <div className="flex justify-between"><span>{L('ข้ามภาพที่เมฆรวมทั้งภาพเกิน', 'Skip scenes with whole-scene cloud over')}</span><b className="font-mono">{qc.maxSceneCloud}%</b></div>

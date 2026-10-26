@@ -150,6 +150,8 @@ export function MonitorWatch() {
   const [show, setShow] = useState<'split' | 'A' | 'B'>('split');
   const [blink, setBlink] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
+  const [sideOpen, setSideOpenS] = useState(() => readPref('ov.monitor.side', true));
+  const setSideOpen = (v: boolean) => { setSideOpenS(v); writePref('ov.monitor.side', v); };
   const { qc } = useQc();
 
   const sel = aois.find((a) => a.id === selId) ?? null;
@@ -462,8 +464,11 @@ export function MonitorWatch() {
 
   return (
     <div className="flex h-full flex-col lg:flex-row">
-      <aside className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto border-line p-3 scroll-thin lg:w-[440px] lg:border-r">
-        <div>
+      <aside className={cx('w-full shrink-0 flex-col gap-3 overflow-y-auto border-line p-3 scroll-thin lg:w-[440px] lg:border-r', sideOpen ? 'flex' : 'hidden')}>
+        <div className="relative">
+          <button onClick={() => setSideOpen(false)} className="absolute right-0 top-0 rounded border border-line px-2 py-0.5 text-[11px] text-slate-300 hover:border-cyan-400/50 hover:text-white" title={L('ซ่อนแผงด้านซ้ายเพื่อดูแผนที่เต็มจอ', 'Hide this panel to see the map full width')}>
+            « {L('ซ่อนแผง', 'Hide panel')}
+          </button>
           <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-cyan-400">MODE · WATCH</div>
           <h2 className="text-lg font-semibold text-white">{L('เฝ้าระวังการเปลี่ยนแปลงพื้นที่', 'Area change monitoring')}</h2>
           <p className="text-[11px] text-muted">{L('ชายแดน ป่าไม้ และสาธารณภัย · เทียบภาพดาวเทียมล่าสุดกับภาพก่อนหน้าโดยอัตโนมัติ', 'Borders, forest and disasters · compares the latest imagery with an earlier reference automatically')}</p>
@@ -485,7 +490,7 @@ export function MonitorWatch() {
           <Button variant={panel === 'import' ? 'active' : 'ghost'} onClick={() => setPanel('import')}>{L('+ นำเข้าพิกัดหลายจุด', '+ Import many')}</Button>
         </div>
 
-        <Panel title={L('การตรวจอัตโนมัติ: เทียบกับช่วงไหน', 'Automatic check: compare against')}>
+        <Panel collapsible storeKey="checkwin" title={L('การตรวจอัตโนมัติ: เทียบกับช่วงไหน', 'Automatic check: compare against')} right={<span className="text-[10px] text-cyan-300">{baselineLabel(baseline, lang === 'th')}</span>}>
           <div className="grid grid-cols-3 gap-1">
             {BASELINES.map((b) => <Button key={b.id} variant={baseline === b.id ? 'active' : 'ghost'} onClick={() => setBaseline(b.id)}>{L(b.th, b.en)}</Button>)}
           </div>
@@ -587,6 +592,11 @@ export function MonitorWatch() {
           <ExtentBar viewer={viewer} customRect={customRect} onLines={setExtentLines} nb={borderNb} onNb={(n) => void showBorderTiles(n).catch(() => {})} shift={tileShift} onShift={setTileShift} tileCount={tiles.length} />
         </div>
         <div className="absolute left-3 top-3 z-20 flex items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px] backdrop-blur">
+          {!sideOpen && (
+            <button onClick={() => setSideOpen(true)} className="rounded px-2 py-1 text-cyan-300 hover:text-white" title={L('แสดงแผงควบคุม', 'Show the control panel')}>
+              » {L('แผงควบคุม', 'Panel')}{sel ? ` · ${sel.name.slice(0, 24)}` : ''}
+            </button>
+          )}
           <button onClick={() => setClean(!clean)} className={cx('rounded px-2 py-1', clean ? 'bg-cyan-400/15 text-cyan-300' : 'text-slate-200 hover:text-white')} title={L('ซ่อนกรอบสี ตัวเลข เส้น ชั้นผลการเปลี่ยนแปลง และคำอธิบาย เพื่อดูภาพดาวเทียมล้วน ๆ', 'Hide fills, numbers, lines, the change layer and the legend to see the imagery alone')}>
             {clean ? L('◉ ภาพล้วน', '◉ Imagery only') : L('◎ ซ่อนสิ่งที่บังภาพ', '◎ Hide overlays')}
           </button>
@@ -944,7 +954,7 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn 
   const series = useMemo(() => [...mine].filter((r) => r.status === 'ok').sort((x, y) => (x.B?.datetime ?? '').localeCompare(y.B?.datetime ?? '')), [mine]);
 
   return (
-    <Panel title={L('รายละเอียดพื้นที่', 'Area detail')}>
+    <Panel collapsible storeKey="aoidetail" title={L('รายละเอียดพื้นที่', 'Area detail')}>
       <div className="space-y-1.5">
         <Input value={aoi.name} onChange={(e) => upd({ name: e.target.value })} className="!py-1 text-sm" />
         <div className="font-mono text-[10px] text-muted">{info.lat.toFixed(4)}, {info.lon.toFixed(4)} · {fmtArea(info.km2, unit, lang === 'th')}</div>
