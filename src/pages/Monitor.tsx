@@ -4,7 +4,7 @@ import { useLang } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
 import { Badge, Button, Field, Input, Notice, Panel, Select, Spinner, cx } from '../components/ui';
-import { Cesium, flyToPolygon } from '../lib/cesium';
+import { Cesium, flyToPolygon, getLabelsLayer } from '../lib/cesium';
 import { useWorkspace } from '../store';
 import {
   aoiFromPolygon, aoiInfo, BASELINES, baselineLabel, windowsFor, SATELLITES, satelliteOf, confTh, deleteImages, getImage, isDue, lastRunOf, levelTh, loadAois, loadRuns, methodText, narrative, PURPOSES, rai, REGIONS, runMonitor, saveAois, saveRuns,
@@ -198,7 +198,7 @@ export function MonitorWatch() {
     const lc = Cesium.Color.fromCssColorString(line.color);
     const lineMat = () => (line.dashed ? new Cesium.PolylineDashMaterialProperty({ color: lc, dashLength: 12 }) : new Cesium.PolylineOutlineMaterialProperty({ color: lc, outlineColor: Cesium.Color.BLACK.withAlpha(0.55), outlineWidth: 1 }));
     const boundary = () =>
-      [...extentLines, ...borderLinesState].forEach((l) =>
+      (line.show ? [...extentLines, ...borderLinesState] : []).forEach((l) =>
         ds.entities.add({ polyline: { positions: l.map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: line.width + (line.dashed ? 0 : 2), material: lineMat(), clampToGround: false } }),
       );
     if (clean) {
@@ -243,6 +243,22 @@ export function MonitorWatch() {
       if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
     };
   }, [viewer, aois, runs, selId, tiles, picked, borderLinesState, extentLines, edit?.id, clean, outline, line]);
+
+  // ---- the base map's own borders/place names (Esri reference layer, added asynchronously)
+  useEffect(() => {
+    if (!viewer) return;
+    let tries = 0;
+    const apply = () => {
+      if (viewer.isDestroyed()) return;
+      const lab = getLabelsLayer(viewer);
+      if (lab) {
+        lab.show = line.baseBorders;
+        viewer.scene.requestRender();
+      } else if (tries++ < 20) t = setTimeout(apply, 500);
+    };
+    let t = setTimeout(apply, 0);
+    return () => clearTimeout(t);
+  }, [viewer, line.baseBorders]);
 
   // ---- before / after swipe of two real scenes
   useEffect(() => {

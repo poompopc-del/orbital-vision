@@ -213,6 +213,16 @@ export default function ExtentBar({
               <label className="flex items-center gap-1"><input type="checkbox" checked={line.dashed} onChange={(e) => setLine({ dashed: e.target.checked })} />{L('เส้นประ', 'Dashed')}</label>
               <label className="flex items-center gap-1"><input type="checkbox" checked={line.inClean} onChange={(e) => setLine({ inClean: e.target.checked })} />{L('แสดงในโหมดภาพล้วน', 'Show in imagery-only view')}</label>
             </div>
+            <div className="mt-1.5 space-y-0.5 border-t border-line pt-1.5">
+              <label className="flex items-center gap-1"><input type="checkbox" checked={line.show} onChange={(e) => setLine({ show: e.target.checked })} />{custom ? L('แสดงเส้นเขตแดนที่นำเข้า', 'Show the imported boundary') : L('แสดงเส้นเขตแดน (Natural Earth)', 'Show the boundary (Natural Earth)')}</label>
+              <label className="flex items-center gap-1"><input type="checkbox" checked={line.baseBorders} onChange={(e) => setLine({ baseBorders: e.target.checked })} />{L('เส้นเขตแดนเดิมของแผนที่ฐาน (Esri)', 'Base map’s own borders (Esri)')}</label>
+              <div className="pl-4 text-[9px] text-muted">{L('เป็นชั้นภาพเดียวกับชื่อประเทศ/จังหวัด/สถานที่ — ปิดแล้วชื่อเหล่านั้นจะหายไปด้วย', 'Same image layer as country/province/place names — turning it off hides those names too')}</div>
+              {custom && line.baseBorders && (
+                <button className="pl-4 text-[10px] text-cyan-300 hover:underline" onClick={() => setLine({ baseBorders: false, show: true })}>
+                  {L('→ ใช้เฉพาะเส้นที่นำเข้า (ปิดเส้นเดิม)', '→ Use only the imported line (hide the old one)')}
+                </button>
+              )}
+            </div>
             <svg viewBox="0 0 200 10" className="mt-1 h-2.5 w-full"><line x1={2} x2={198} y1={5} y2={5} stroke={line.color} strokeWidth={Math.min(8, line.width * 1.4)} strokeDasharray={line.dashed ? '10 6' : undefined} /></svg>
           </div>
         </div>

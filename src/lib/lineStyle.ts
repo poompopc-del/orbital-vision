@@ -7,8 +7,12 @@ export interface LineStyle {
   dashed: boolean;
   /** keep the boundary visible in the "imagery only" view */
   inClean: boolean;
+  /** draw our boundary lines (imported file, or Natural Earth where the file has none) */
+  show: boolean;
+  /** the base map's own reference layer (Esri World Boundaries and Places: borders + place names) */
+  baseBorders: boolean;
 }
-export const LINE_DEFAULT: LineStyle = { color: '#facc15', width: 2.5, dashed: false, inClean: true };
+export const LINE_DEFAULT: LineStyle = { color: '#facc15', width: 2.5, dashed: false, inClean: true, show: true, baseBorders: true };
 export const LINE_SWATCHES = ['#facc15', '#ef4444', '#ffffff', '#22d3ee', '#f472b6', '#fb923c', '#4ade80', '#000000'];
 const KEY = 'ov.monitor.lineStyle.v1';
 
