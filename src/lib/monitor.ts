@@ -46,6 +46,20 @@ export interface MonitorAoi {
   active: boolean;
   /** when the box was last moved/resized — results before this used the old box */
   editedAt?: string;
+  /** coordinate slot: the exact point entered by the user (the geometry is a square around it) */
+  point?: { lat: number; lon: number; text?: string; sizeKm: number };
+  /** new-imagery watch (coordinate slots) */
+  watch?: SlotWatch;
+}
+
+export interface SlotWatch {
+  /** notify when a new scene of this place appears in the catalogue */
+  notify: boolean;
+  /** scene ids already known (newest first, capped) */
+  seenIds: string[];
+  /** new scenes not looked at yet */
+  newScenes: { id: string; datetime: string; collection: string; cloud: number | null }[];
+  lastCheck?: string;
 }
 
 export interface SceneMeta {
