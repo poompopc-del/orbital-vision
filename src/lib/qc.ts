@@ -6,7 +6,11 @@
 import type { ImageryItem } from './stac';
 
 export interface QcSettings {
-  /** max cloud of the whole scene (catalogue eo:cloud_cover), % */
+  /**
+   * Skip (without measuring) optical scenes whose whole-scene cloud (catalogue eo:cloud_cover) is above this, %.
+   * A Sentinel-2 tile is ~110 km wide, so a cloudy scene can still be clear over a small AOI — once the
+   * AOI cloud has been measured, that decides and this value is not used.
+   */
   maxSceneCloud: number;
   /** max cloud + cloud shadow inside the AOI (from the per-pixel mask), % */
   maxAoiCloud: number;
@@ -18,18 +22,22 @@ export interface QcSettings {
   allowCrossSensor: boolean;
 }
 
-export const QC_DEFAULT: QcSettings = { maxSceneCloud: 20, maxAoiCloud: 20, minValidPct: 90, maxGsdM: 10, allowCrossSensor: false };
+export const QC_DEFAULT: QcSettings = { maxSceneCloud: 90, maxAoiCloud: 20, minValidPct: 90, maxGsdM: 10, allowCrossSensor: false };
 const KEY = 'ov.monitor.qc.v1';
 export function loadQc(): QcSettings {
   try {
-    return { ...QC_DEFAULT, ...JSON.parse(localStorage.getItem(KEY) || '{}') };
+    const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    // v2: scene cloud became a skip threshold (AOI cloud decides) — the old 20% default would hide every rainy-season image
+    if (!saved.v2 && saved.maxSceneCloud != null && saved.maxSceneCloud < QC_DEFAULT.maxSceneCloud) saved.maxSceneCloud = QC_DEFAULT.maxSceneCloud;
+    const { v2: _v2, ...rest } = saved;
+    return { ...QC_DEFAULT, ...rest };
   } catch {
     return QC_DEFAULT;
   }
 }
 export function saveQc(q: QcSettings) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(q));
+    localStorage.setItem(KEY, JSON.stringify({ ...q, v2: true }));
   } catch {
     /* ignore */
   }
@@ -76,10 +84,9 @@ export interface SceneCheck {
 export function checkScene(it: Pick<ImageryItem, 'collection' | 'gsd' | 'cloudCover' | 'coveragePct'>, aoi: AoiCloud | null | undefined, qc: QcSettings): SceneCheck {
   const reasons: string[] = [];
   const fam = familyOf(it);
-  if (fam === 'optical') {
-    if (it.cloudCover == null) reasons.push('ไม่มีค่าเมฆรวมในแคตตาล็อก');
-    else if (it.cloudCover > qc.maxSceneCloud) reasons.push(`เมฆรวมทั้งภาพ ${it.cloudCover.toFixed(0)}% เกินเกณฑ์ ${qc.maxSceneCloud}%`);
-  }
+  // whole-scene cloud only screens scenes whose AOI cloud has not been measured; a measured AOI decides
+  if (fam === 'optical' && aoi == null && it.cloudCover != null && it.cloudCover > qc.maxSceneCloud)
+    reasons.push(`เมฆรวมทั้งภาพ ${it.cloudCover.toFixed(0)}% เกินเกณฑ์ข้าม ${qc.maxSceneCloud}%`);
   if (gsdMeters(it) > qc.maxGsdM) reasons.push(`ความละเอียด ${gsdMeters(it)} ม. หยาบกว่าเกณฑ์ ${qc.maxGsdM} ม.`);
   if (it.coveragePct != null && it.coveragePct < 50) reasons.push(`ภาพครอบคลุม AOI เพียง ${it.coveragePct.toFixed(0)}%`);
   let pending = false;

@@ -502,7 +502,7 @@ const OPT_COLLECTIONS: StacCollectionId[] = ['sentinel-2-l2a'];
 /** Optical candidates in a window that pass the scene thresholds and the AOI-cloud threshold, best first. */
 async function passingOptical(aoi: GeoJSON.Polygon, from: string, to: string, qc: QcSettings, match: ImageryItem | null, signal: AbortSignal | undefined, seen: { it: ImageryItem; cl: AoiCloud | null; why: string[] }[], collections: StacCollectionId[] = OPT_COLLECTIONS) {
   const all = (await searchArchive({ aoi, collections, from, to, maxCloud: qc.maxSceneCloud, limit: 40 })).filter((x) => x.source === 'planetary-computer');
-  const pre = all.filter((x) => checkScene(x, { cloudPct: 0, shadowPct: 0, noDataPct: 0 }, qc).ok || checkScene(x, null, qc).pending);
+  const pre = all.filter((x) => { const c = checkScene(x, null, qc); return c.ok || c.pending; });
   const sameGeom = (x: ImageryItem) =>
     !match || (x.collection === match.collection && ['s2:mgrs_tile', 'landsat:wrs_path', 'landsat:wrs_row'].every((k) => x.raw?.properties?.[k] == null || x.raw.properties[k] === match.raw?.properties?.[k]));
   const sameSat = (x: ImageryItem) => !match || x.collection === match.collection;
@@ -552,7 +552,7 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
     let A: ImageryItem | null = null, B: ImageryItem | null = null;
     let clA: AoiCloud | null = null, clB: AoiCloud | null = null;
     const optical = async () => {
-      progress(`ค้นหาภาพ ${optName} ช่วงล่าสุด (เมฆรวม ≤ ${qc.maxSceneCloud}%, เมฆใน AOI ≤ ${qc.maxAoiCloud}%)…`);
+      progress(`ค้นหาภาพ ${optName} ช่วงล่าสุด (เมฆใน AOI ≤ ${qc.maxAoiCloud}%)…`);
       const b = await passingOptical(aoi, w.after[0], w.after[1], qc, null, signal, seen, optCols);
       if (!b) return void tried.push(`ไม่มีภาพ ${optName} ช่วง ${w.after[0]} ถึง ${w.after[1]} ที่ผ่านเกณฑ์เมฆ`);
       progress(`ค้นหาภาพอ้างอิง (${bl}) ช่วง ${w.before[0]} ถึง ${w.before[1]}…`);

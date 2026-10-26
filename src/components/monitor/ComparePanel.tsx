@@ -65,7 +65,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
     let i = 0;
     for (const it of items) {
       if (familyOf(it) !== 'optical' || cl[it.id] !== undefined || out[it.id] !== undefined) continue;
-      if (checkScene(it, { cloudPct: 0, shadowPct: 0, noDataPct: 0 }, qc).reasons.length) continue; // fails anyway
+      if (checkScene(it, null, qc).reasons.length) continue; // fails anyway (resolution, coverage, near-total cloud)
       setBusy(L(`วัดเมฆใน AOI ${++i}…`, `Measuring AOI cloud ${i}…`));
       out[it.id] = await measureAoiCloud(it, aoi.geometry, signal).catch(() => 'err' as const);
       setCl((c) => ({ ...c, [it.id]: out[it.id] }));
@@ -74,7 +74,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
   };
 
   /** passes everything that can be checked without measuring (scene cloud, pixel size, coverage) */
-  const sceneOk = (it: ImageryItem) => checkScene(it, { cloudPct: 0, shadowPct: 0, noDataPct: 0 }, qc).ok;
+  const sceneOk = (it: ImageryItem) => { const c = checkScene(it, null, qc); return c.ok || c.pending; };
   const passes = (it: ImageryItem, m: Record<string, AoiCloud | null | 'err'>) => checkScene(it, m[it.id] === 'err' ? null : (m[it.id] as AoiCloud | null | undefined), qc).ok;
 
   const preset = async (p: Preset) => {
@@ -100,7 +100,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
       const m1 = await measure(latest, ac.signal);
       const b = latest.find((x) => passes(x, m1)) ?? null;
       if (!b) {
-        setErr(L(`ไม่มีภาพในช่วงค้นหาที่ผ่านเกณฑ์ (ตรวจ ${latest.length} ภาพที่เมฆรวมไม่เกิน ${qc.maxSceneCloud}%) — ขยายช่วงค้นหา ผ่อนเกณฑ์เมฆ หรือเลือกเรดาร์`, 'No scene in the range passes — widen the range, relax the cloud limits or use radar'));
+        setErr(L(`${latest.length} ภาพล่าสุดมีเมฆในพื้นที่เกินเกณฑ์ — กด “ภาพล่าสุดที่มี” เพื่อดูภาพปัจจุบันแม้มีเมฆ หรือเลือก Sentinel-1 เรดาร์ซึ่งมองทะลุเมฆ`, `The ${latest.length} latest scenes are too cloudy over the area — use “Latest available” to view the current image anyway, or Sentinel-1 radar, which sees through cloud`));
         return;
       }
       const back = p === 'week' ? 7 : p === 'month' ? 30 : 365;
@@ -116,6 +116,20 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
     } finally {
       setBusy('');
     }
+  };
+
+  /** The newest scene in the list as "after", whatever its cloud — for seeing the current state (no conclusion if it fails). */
+  const pickLatest = async () => {
+    const it = list?.length ? list[list.length - 1] : null;
+    if (!it) return;
+    setErr('');
+    const m = familyOf(it) === 'optical' && cl[it.id] === undefined ? await measure([it]) : cl;
+    setBusy('');
+    setB(it);
+    setSlot('A');
+    const c = checkScene(it, m[it.id] === 'err' ? null : (m[it.id] as AoiCloud | null | undefined), qc);
+    if (!c.ok && !c.pending)
+      setErr(L(`ภาพล่าสุด ${d10(it.datetime)} ไม่ผ่านเกณฑ์ (${c.reasons.join(', ')}) — เลื่อนเทียบดูได้ แต่ระบบจะไม่สรุปผลการเปลี่ยนแปลงจากภาพนี้`, `Latest scene ${d10(it.datetime)} fails the thresholds (${c.reasons.join(', ')}) — you can swipe to look, but no change conclusion is made from it`));
   };
 
   const pick = async (it: ImageryItem) => {
@@ -240,6 +254,9 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
               <p className="text-[10px] text-muted">{L(`คลิกจุดบนไทม์ไลน์เพื่อเลือกภาพ ${slot === 'A' ? '“ก่อน” (A)' : '“หลัง” (B)'} · ${list.length} ภาพ`, `Click a dot to set ${slot === 'A' ? 'BEFORE (A)' : 'AFTER (B)'} · ${list.length} scenes`)}</p>
 
               <div className="flex flex-wrap items-end gap-1">
+                <Button disabled={!!busy} onClick={() => void pickLatest()} title={L('ตั้งภาพ “หลัง” (B) เป็นภาพใหม่ที่สุดในคลัง แม้มีเมฆ', 'Set AFTER (B) to the newest scene, even if cloudy')}>
+                  {L('ภาพล่าสุดที่มี', 'Latest available')} ({d10(list[list.length - 1].datetime)})
+                </Button>
                 <Button disabled={!!busy} onClick={() => preset('week')}>{L('รายสัปดาห์', 'Weekly')}</Button>
                 <Button disabled={!!busy} onClick={() => preset('month')}>{L('รายเดือน', 'Monthly')}</Button>
                 <Button disabled={!!busy} onClick={() => preset('year')}>{L('รายปี', 'Yearly')}</Button>
@@ -303,8 +320,9 @@ export function QcPanel() {
     <Panel title={L('เกณฑ์คุณภาพภาพและหน่วย', 'Quality thresholds & units')}>
       <div className="space-y-1.5 text-[11px] text-slate-200">
         <div>
-          <div className="flex justify-between"><span>{L('เมฆรวมทั้งภาพสูงสุด', 'Max scene cloud')}</span><b className="font-mono">{qc.maxSceneCloud}%</b></div>
+          <div className="flex justify-between"><span>{L('ข้ามภาพที่เมฆรวมทั้งภาพเกิน', 'Skip scenes with whole-scene cloud over')}</span><b className="font-mono">{qc.maxSceneCloud}%</b></div>
           <input type="range" min={0} max={100} value={qc.maxSceneCloud} onChange={(e) => setQc({ maxSceneCloud: +e.target.value })} className="w-full" />
+          <p className="text-[10px] text-muted">{L('ภาพหนึ่งภาพกว้าง ~110 กม. เมฆรวมสูงแต่พื้นที่ของเราอาจโปร่ง — ระบบตัดสินจากเมฆในพื้นที่ (AOI) เป็นหลัก ค่านี้ใช้แค่ข้ามภาพที่เมฆเกือบเต็มเพื่อประหยัดเวลา', 'A scene is ~110 km wide; it can be cloudy overall yet clear over your area — the AOI cloud decides, this only skips nearly fully clouded scenes to save time')}</p>
         </div>
         <div className="grid grid-cols-2 gap-1.5">
           <Field label={L('เมฆ+เงาใน AOI ไม่เกิน', 'AOI cloud+shadow ≤')}>

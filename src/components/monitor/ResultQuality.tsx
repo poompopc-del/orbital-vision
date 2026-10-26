@@ -101,7 +101,7 @@ export default function ResultQuality({ run, unit }: { run: MonitorRun; unit: Ar
         <span>{th ? confTh(run.confidence) : run.confidence ?? '—'}</span>
       </div>
       {!!run.confidenceNotes?.length && <ul className="list-disc pl-4 text-muted">{run.confidenceNotes.map((x) => <li key={x}>{x}</li>)}</ul>}
-      {run.qc && <p className="text-muted">{L('เกณฑ์ที่ใช้', 'Thresholds')}: {L('เมฆรวม', 'scene')} ≤ {run.qc.maxSceneCloud}% · {L('เมฆใน AOI', 'AOI')} ≤ {run.qc.maxAoiCloud}% · {L('วิเคราะห์ได้', 'analysable')} ≥ {run.qc.minValidPct}% · ≤ {run.qc.maxGsdM} ม.{run.mode === 'manual' ? ` · ${L('เลือกภาพเอง', 'manual pick')}` : ''}</p>}
+      {run.qc && <p className="text-muted">{L('เกณฑ์ที่ใช้', 'Thresholds')}: {L('เมฆใน AOI', 'AOI')} ≤ {run.qc.maxAoiCloud}% · {L('วิเคราะห์ได้', 'analysable')} ≥ {run.qc.minValidPct}% · ≤ {run.qc.maxGsdM} ม.{run.mode === 'manual' ? ` · ${L('เลือกภาพเอง', 'manual pick')}` : ''}</p>}
     </div>
   );
 }
