@@ -133,6 +133,8 @@ export interface MonitorRun {
   pairNotes?: string[];
   /** how the scenes were chosen */
   mode?: 'auto' | 'manual';
+  /** what the automatic check compared against */
+  baseline?: Baseline;
   /** other scenes that pass the thresholds (offered when this run could not conclude) */
   suggestions?: { id: string; datetime: string; cloud: number | null; collection: string }[];
 }
@@ -234,10 +236,36 @@ export function isDue(a: MonitorAoi, runs: MonitorRun[], now = Date.now()) {
 }
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-/** After = the last `periodDays`; before = the best reference in the 60 days preceding it. */
-export function windowsFor(periodDays: number, end = Date.now()) {
-  const aFrom = end - periodDays * 86400e3;
-  return { after: [day(aFrom), day(end)] as [string, string], before: [day(aFrom - 61 * 86400e3), day(aFrom - 86400e3)] as [string, string] };
+const DAY = 86400e3;
+
+/**
+ * What the "before" image is compared against:
+ * - previous: the best reference in the 60 days before the check window
+ * - month: clearest image of the previous 30 days vs clearest of the last 30 days
+ * - year: clearest image of the same 30 days one year earlier (same season) vs the last 30 days
+ */
+export type Baseline = 'previous' | 'month' | 'year';
+export const BASELINES: { id: Baseline; th: string; en: string }[] = [
+  { id: 'previous', th: 'ช่วงก่อนหน้า', en: 'Previous period' },
+  { id: 'month', th: 'เดือนที่แล้ว', en: 'Last month' },
+  { id: 'year', th: 'ปีที่แล้ว', en: 'Last year' },
+];
+export const baselineLabel = (b: Baseline | undefined, th: boolean) => {
+  const x = BASELINES.find((y) => y.id === (b ?? 'previous'))!;
+  return th ? x.th : x.en;
+};
+
+type Win = [string, string];
+/** Check windows. `fallback` is a wider "before" window tried when the main one has no usable image. */
+export function windowsFor(periodDays: number, end = Date.now(), baseline: Baseline = 'previous'): { after: Win; before: Win; fallback?: Win } {
+  if (baseline === 'previous') {
+    const aFrom = end - periodDays * DAY;
+    return { after: [day(aFrom), day(end)], before: [day(aFrom - 61 * DAY), day(aFrom - DAY)] };
+  }
+  const aFrom = end - 30 * DAY;
+  if (baseline === 'month') return { after: [day(aFrom), day(end)], before: [day(end - 60 * DAY), day(aFrom - DAY)], fallback: [day(end - 90 * DAY), day(aFrom - DAY)] };
+  const y = 365 * DAY;
+  return { after: [day(aFrom), day(end)], before: [day(aFrom - y), day(end - y)], fallback: [day(aFrom - y - 30 * DAY), day(end - y + 30 * DAY)] };
 }
 
 // ---------------------------------------------------------------- method per purpose
@@ -479,17 +507,23 @@ async function passingOptical(aoi: GeoJSON.Polygon, from: string, to: string, qc
     !match || (x.collection === match.collection && ['s2:mgrs_tile', 'landsat:wrs_path', 'landsat:wrs_row'].every((k) => x.raw?.properties?.[k] == null || x.raw.properties[k] === match.raw?.properties?.[k]));
   const sameSat = (x: ImageryItem) => !match || x.collection === match.collection;
   const ordered = [...pre].sort((a, b) => Number(sameSat(b)) - Number(sameSat(a)) || Number(sameGeom(b)) - Number(sameGeom(a)) || (a.cloudCover ?? 100) - (b.cloudCover ?? 100) || b.datetime.localeCompare(a.datetime)).slice(0, 6);
+  // clearest over the AOI: after the first passing scene, look at up to two more of the same satellite and keep the clearest
+  let best: { it: ImageryItem; cl: AoiCloud } | null = null;
+  let extra = 0;
   for (const it of ordered) {
+    if (best && (extra++ >= 2 || it.collection !== best.it.collection)) break;
     const cl = await measureAoiCloud(it, aoi, signal).catch(() => null);
     const chk = checkScene(it, cl, qc);
     seen.push({ it, cl, why: chk.reasons });
-    if (cl && chk.ok) return { it, cl };
+    if (cl && chk.ok && (!best || cl.cloudPct + cl.shadowPct < best.cl.cloudPct + best.cl.shadowPct)) best = { it, cl };
   }
-  return null;
+  return best;
 }
 
-export async function runMonitor(a: MonitorAoi, periodDays: number, progress: RunProgress, signal?: AbortSignal, qc: QcSettings = loadQc()): Promise<MonitorRun> {
-  const w = windowsFor(periodDays);
+export async function runMonitor(a: MonitorAoi, periodDays: number, progress: RunProgress, signal?: AbortSignal, qc: QcSettings = loadQc(), baseline: Baseline = 'previous'): Promise<MonitorRun> {
+  const w = windowsFor(periodDays, Date.now(), baseline);
+  const bl = baselineLabel(baseline, true);
+  let widened = '';
   const base: MonitorRun = {
     id: `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     aoiId: a.id,
@@ -497,9 +531,10 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
     purpose: a.purpose,
     at: new Date().toISOString(),
     status: 'insufficient',
-    windows: w,
+    windows: { before: w.before, after: w.after },
     qc,
     mode: 'auto',
+    baseline,
   };
   const aoi = a.geometry;
   const mode: SensorMode = a.sensor ?? 'auto';
@@ -520,9 +555,14 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
       progress(`ค้นหาภาพ ${optName} ช่วงล่าสุด (เมฆรวม ≤ ${qc.maxSceneCloud}%, เมฆใน AOI ≤ ${qc.maxAoiCloud}%)…`);
       const b = await passingOptical(aoi, w.after[0], w.after[1], qc, null, signal, seen, optCols);
       if (!b) return void tried.push(`ไม่มีภาพ ${optName} ช่วง ${w.after[0]} ถึง ${w.after[1]} ที่ผ่านเกณฑ์เมฆ`);
-      progress('ค้นหาภาพอ้างอิงช่วงก่อนหน้า…');
-      const aa = await passingOptical(aoi, w.before[0], w.before[1], qc, b.it, signal, seen, optCols);
-      if (!aa) return void tried.push(`ไม่มีภาพอ้างอิง ${optName} ช่วง ${w.before[0]} ถึง ${w.before[1]} ที่ผ่านเกณฑ์เมฆ`);
+      progress(`ค้นหาภาพอ้างอิง (${bl}) ช่วง ${w.before[0]} ถึง ${w.before[1]}…`);
+      let aa = await passingOptical(aoi, w.before[0], w.before[1], qc, b.it, signal, seen, optCols);
+      if (!aa && w.fallback) {
+        progress(`ไม่มีภาพผ่านเกณฑ์ ขยายช่วงอ้างอิงเป็น ${w.fallback[0]} ถึง ${w.fallback[1]}…`);
+        aa = await passingOptical(aoi, w.fallback[0], w.fallback[1], qc, b.it, signal, seen, optCols);
+        if (aa) widened = `ช่วงอ้างอิง ${w.before[0]}–${w.before[1]} ไม่มีภาพผ่านเกณฑ์ จึงขยายเป็น ${w.fallback[0]}–${w.fallback[1]}`;
+      }
+      if (!aa) return void tried.push(`ไม่มีภาพอ้างอิง ${optName} (${bl}) ช่วง ${(w.fallback ?? w.before)[0]} ถึง ${(w.fallback ?? w.before)[1]} ที่ผ่านเกณฑ์เมฆ`);
       if (aa.it.collection !== b.it.collection && !qc.allowCrossSensor) return void tried.push(`ภาพก่อน (${aa.it.collectionLabel}) กับภาพหลัง (${b.it.collectionLabel}) คนละดาวเทียม — เปิด “ยอมให้เทียบข้ามเซนเซอร์” ในเกณฑ์ถ้าต้องการ`);
       A = aa.it; B = b.it; clA = aa.cl; clB = b.cl;
     };
@@ -530,8 +570,12 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
       progress('ค้นหาภาพเรดาร์ Sentinel-1…');
       const rb = await pickBestScene(aoi, RAD, w.after[0], w.after[1]);
       if (!rb.item) return void tried.push('ไม่มีภาพเรดาร์ใหม่ในช่วงที่ตรวจ');
-      const ra = await pickBestScene(aoi, RAD, w.before[0], w.before[1], { match: rb.item });
-      if (!ra.item) return void tried.push('ไม่มีภาพเรดาร์อ้างอิง');
+      let ra = await pickBestScene(aoi, RAD, w.before[0], w.before[1], { match: rb.item });
+      if (!ra.item && w.fallback) {
+        ra = await pickBestScene(aoi, RAD, w.fallback[0], w.fallback[1], { match: rb.item });
+        if (ra.item) widened = `ช่วงอ้างอิง ${w.before[0]}–${w.before[1]} ไม่มีภาพเรดาร์ จึงขยายเป็น ${w.fallback[0]}–${w.fallback[1]}`;
+      }
+      if (!ra.item) return void tried.push(`ไม่มีภาพเรดาร์อ้างอิง (${bl})`);
       A = ra.item; B = rb.item;
     };
     if (!wantSar) await optical();
@@ -547,7 +591,8 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
     }
     const sarUsedInstead = familyOf(B) === 'sar' && !wantSar && tried.length ? `ภาพปกติใช้ไม่ได้ (${tried.join('; ')}) จึงใช้เรดาร์แทน` : undefined;
     const r = await compareScenes(a, A, B, progress, signal, { qc, clA, clB, base });
-    return sarUsedInstead ? { ...r, note: [sarUsedInstead, r.note].filter(Boolean).join(' · ') } : r;
+    const note = [sarUsedInstead, widened, r.note].filter(Boolean).join(' · ');
+    return { ...r, baseline, note: note || undefined };
   } catch (e: any) {
     if (e?.name === 'AbortError') throw e;
     return { ...base, status: 'error', reason: e?.message ?? String(e) };
@@ -781,7 +826,8 @@ export function narrative(r: MonitorRun, lang: 'th' | 'en', unit: AreaUnit = 'km
   if (big && r.level !== 'none') lines.push(th ? `จุดใหญ่ที่สุด ${A(hotspotKm2(big))} ที่พิกัด ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}` : `Largest patch ${A(hotspotKm2(big))} at ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}.`);
   const sa = SENSOR_TH[r.A?.collection ?? ''] ?? r.A?.label, sb = SENSOR_TH[r.B?.collection ?? ''] ?? r.B?.label;
   const sens = sa === sb ? sa : `${sa} / ${sb}`;
-  lines.push(th ? `เปรียบเทียบภาพถ่ายวันที่ ${r.A?.datetime.slice(0, 10)} กับ ${r.B?.datetime.slice(0, 10)} (${sens})` : `Compared images acquired ${r.A?.datetime.slice(0, 10)} and ${r.B?.datetime.slice(0, 10)} (${sens}).`);
+  const vs = r.baseline && r.baseline !== 'previous' ? (th ? ` · เทียบกับ${baselineLabel(r.baseline, true)}` : ` · vs ${baselineLabel(r.baseline, false).toLowerCase()}`) : '';
+  lines.push(th ? `เปรียบเทียบภาพถ่ายวันที่ ${r.A?.datetime.slice(0, 10)} กับ ${r.B?.datetime.slice(0, 10)} (${sens})${vs}` : `Compared images acquired ${r.A?.datetime.slice(0, 10)} and ${r.B?.datetime.slice(0, 10)} (${sens})${vs}.`);
   const cov = (100 * s.validKm2) / Math.max(s.aoiKm2, 1e-9);
   const unc = s.noDataKm2;
   lines.push(

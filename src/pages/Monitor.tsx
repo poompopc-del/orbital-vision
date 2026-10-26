@@ -7,8 +7,8 @@ import { Badge, Button, Field, Input, Notice, Panel, Select, Spinner, cx } from 
 import { Cesium, flyToPolygon } from '../lib/cesium';
 import { useWorkspace } from '../store';
 import {
-  aoiFromPolygon, aoiInfo, SATELLITES, satelliteOf, confTh, deleteImages, getImage, isDue, lastRunOf, levelTh, loadAois, loadRuns, methodText, narrative, PURPOSES, rai, REGIONS, runMonitor, saveAois, saveRuns,
-  type MonitorAoi, type MonitorRun, type Purpose, type Region, type SensorMode,
+  aoiFromPolygon, aoiInfo, BASELINES, baselineLabel, windowsFor, SATELLITES, satelliteOf, confTh, deleteImages, getImage, isDue, lastRunOf, levelTh, loadAois, loadRuns, methodText, narrative, PURPOSES, rai, REGIONS, runMonitor, saveAois, saveRuns,
+  type Baseline, type MonitorAoi, type MonitorRun, type Purpose, type Region, type SensorMode,
 } from '../lib/monitor';
 import { borderLines, boundarySource, lineLength, NEIGHBOURS, tilesAlong, type Neighbour, type Tile } from '../lib/border';
 import { roughCentre } from '../lib/extent';
@@ -66,6 +66,22 @@ const useL = () => {
   return (th: string, en: string) => (lang === 'th' ? th : en);
 };
 
+function readPref<T>(k: string, d: T): T {
+  try {
+    const v = localStorage.getItem(k);
+    return v == null ? d : (JSON.parse(v) as T);
+  } catch {
+    return d;
+  }
+}
+function writePref(k: string, v: unknown) {
+  try {
+    localStorage.setItem(k, JSON.stringify(v));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 const LEVEL_COLOR: Record<string, string> = { significant: '#ef4444', minor: '#f5b84b', none: '#4fd18b', insufficient: '#94a3b8', error: '#94a3b8', new: '#22d3ee' };
 const statusOf = (r?: MonitorRun) => (!r ? 'new' : r.status !== 'ok' ? (r.status === 'error' ? 'error' : 'insufficient') : r.level ?? 'none');
 
@@ -99,7 +115,10 @@ export function MonitorWatch() {
   const [selId, setSelId] = useState<string | null>(null);
   const [panel, setPanel] = useState<'list' | 'add' | 'border' | 'import'>('list');
   const [busy, setBusy] = useState<{ cur: string; msg: string; done: number; total: number } | null>(null);
-  const [period, setPeriod] = useState(30);
+  const [period, setPeriodS] = useState(() => readPref('ov.monitor.period', 30));
+  const [baseline, setBaselineS] = useState<Baseline>(() => readPref('ov.monitor.baseline', 'previous' as Baseline));
+  const setPeriod = (v: number) => { setPeriodS(v); writePref('ov.monitor.period', v); };
+  const setBaseline = (v: Baseline) => { setBaselineS(v); writePref('ov.monitor.baseline', v); };
   const abort = useRef<AbortController | null>(null);
   // candidate tiles along a border; the shift slider moves them into Thailand (−) or the neighbour (+)
   const [borderNb, setBorderNb] = useState<Neighbour>('KHM');
@@ -369,7 +388,7 @@ export function MonitorWatch() {
     };
   }, [viewer, selRun?.id]);
 
-  const runList = async (list: MonitorAoi[]) => {
+  const runList = async (list: MonitorAoi[], bl: Baseline = baseline) => {
     if (!list.length) return;
     abort.current?.abort();
     const ac = new AbortController();
@@ -378,7 +397,7 @@ export function MonitorWatch() {
       for (let i = 0; i < list.length; i++) {
         const a = list[i];
         setBusy({ cur: a.name, msg: '', done: i, total: list.length });
-        const r = await runMonitor(a, period, (msg) => setBusy({ cur: a.name, msg, done: i, total: list.length }), ac.signal, qc);
+        const r = await runMonitor(a, period, (msg) => setBusy({ cur: a.name, msg, done: i, total: list.length }), ac.signal, qc, bl);
         addRun(r);
       }
     } catch (e: any) {
@@ -421,15 +440,29 @@ export function MonitorWatch() {
           <Button variant={panel === 'import' ? 'active' : 'ghost'} onClick={() => setPanel('import')}>{L('+ นำเข้าพิกัดหลายจุด', '+ Import many')}</Button>
         </div>
 
-        <Panel title={L('ช่วงเวลาที่ตรวจ', 'Check window')}>
-          <div className="flex flex-wrap items-center gap-1">
-            {[7, 14, 30, 60].map((d) => <Button key={d} variant={period === d ? 'active' : 'ghost'} onClick={() => setPeriod(d)}>{d} {L('วัน', 'days')}</Button>)}
+        <Panel title={L('การตรวจอัตโนมัติ: เทียบกับช่วงไหน', 'Automatic check: compare against')}>
+          <div className="grid grid-cols-3 gap-1">
+            {BASELINES.map((b) => <Button key={b.id} variant={baseline === b.id ? 'active' : 'ghost'} onClick={() => setBaseline(b.id)}>{L(b.th, b.en)}</Button>)}
           </div>
+          {baseline === 'previous' && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+              <span className="text-[10px] text-muted">{L('ช่วงภาพ “หลัง”', '“After” window')}</span>
+              {[7, 14, 30, 60].map((d) => <Button key={d} variant={period === d ? 'active' : 'ghost'} onClick={() => setPeriod(d)}>{d} {L('วัน', 'days')}</Button>)}
+            </div>
+          )}
           <p className="mt-1.5 text-[10px] leading-relaxed text-muted">
-            {L(
-              `ภาพ “หลัง” = ภาพที่เมฆน้อยที่สุดใน ${period} วันล่าสุด · ภาพ “ก่อน” = ภาพอ้างอิงที่ดีที่สุดใน 60 วันก่อนหน้านั้น ถ้าไม่มีภาพใช้ได้ ระบบจะรายงานว่า “ข้อมูลไม่พอ” ไม่สร้างผลขึ้นเอง ช่วงฤดูฝนแนะนำ 30 วัน`,
-              `“After” = clearest image in the last ${period} days · “Before” = best reference in the 60 days before that. With no usable image the result is “insufficient data”, never made up. 30 days is recommended in the rainy season.`,
-            )}
+            {(() => {
+              const w = windowsFor(period, Date.now(), baseline);
+              if (baseline === 'month')
+                return L(`ภาพที่ชัดที่สุดของ 30 วันล่าสุด (${w.after[0]} – ${w.after[1]}) เทียบกับภาพที่ชัดที่สุดของ 30 วันก่อนหน้านั้น (${w.before[0]} – ${w.before[1]}) ถ้าไม่มีภาพผ่านเกณฑ์ จะขยายย้อนไปถึง ${w.fallback![0]}`, `Clearest image of the last 30 days (${w.after[0]} – ${w.after[1]}) vs the clearest of the 30 days before (${w.before[0]} – ${w.before[1]}); widened back to ${w.fallback![0]} if none passes.`);
+              if (baseline === 'year')
+                return L(`ภาพที่ชัดที่สุดของ 30 วันล่าสุด เทียบกับภาพที่ชัดที่สุดช่วงเดียวกันของปีที่แล้ว (${w.before[0]} – ${w.before[1]}) — ฤดูเดียวกัน จึงไม่สับสนการเปลี่ยนตามฤดู (นา/ป่าผลัดใบ/น้ำหลาก) ถ้าไม่มีภาพผ่านเกณฑ์ จะขยายเป็น ±30 วัน`, `Clearest image of the last 30 days vs the clearest of the same 30 days last year (${w.before[0]} – ${w.before[1]}) — same season, so seasonal change (crops, leaf-off, floods) is not mistaken for real change; widened ±30 days if none passes.`);
+              return L(
+                `ภาพ “หลัง” = ภาพที่ชัดที่สุดใน ${period} วันล่าสุด · ภาพ “ก่อน” = ภาพอ้างอิงที่ดีที่สุดใน 60 วันก่อนหน้านั้น ช่วงฤดูฝนแนะนำ 30 วัน`,
+                `“After” = clearest image in the last ${period} days · “Before” = best reference in the 60 days before that. 30 days is recommended in the rainy season.`,
+              );
+            })()}{' '}
+            {L('ใช้กับปุ่ม “ตรวจทั้งหมด” และ “ตรวจตอนนี้” เท่านั้น — ดูภาพช่วงอื่นได้เสมอใน “เปรียบเทียบภาพย้อนหลัง” · ถ้าไม่มีภาพใช้ได้ ระบบจะรายงานว่า “ข้อมูลไม่พอ” ไม่สร้างผลขึ้นเอง', 'Used only by “Run all” and “Check now” — any other date can still be compared in “Compare imagery over time” · with no usable image the result is “insufficient data”, never made up.')}
           </p>
         </Panel>
 
@@ -500,7 +533,7 @@ export function MonitorWatch() {
             onSet={nudge}
           />
         )}
-        {sel && panel === 'list' && !edit && <AoiDetail aoi={sel} onRun={() => runList([sel])} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
+        {sel && panel === 'list' && !edit && <AoiDetail aoi={sel} baseline={baseline} onRun={(b) => runList([sel], b)} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
         {sel && panel === 'list' && !edit && <ComparePanel key={sel.id} aoi={sel} onRun={(r) => addRun(r)} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
       </aside>
       <div className="relative min-h-[360px] flex-1">
@@ -801,7 +834,7 @@ function EditPanel({ b, orig, onSave, onCancel, onSet }: { b: BB; orig: BB; onSa
   );
 }
 
-function AoiDetail({ aoi, onRun, onEdit, busy, lang, onSwipe, swipeOn }: { aoi: MonitorAoi; onRun: () => void; onEdit: () => void; busy: boolean; lang: 'th' | 'en'; onSwipe: (A: ImageryItem, B: ImageryItem) => void; swipeOn: boolean }) {
+function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn }: { aoi: MonitorAoi; baseline: Baseline; onRun: (b?: Baseline) => void; onEdit: () => void; busy: boolean; lang: 'th' | 'en'; onSwipe: (A: ImageryItem, B: ImageryItem) => void; swipeOn: boolean }) {
   const L = useL();
   const { unit } = useQc();
   const [swErr, setSwErr] = useState('');
@@ -843,10 +876,24 @@ function AoiDetail({ aoi, onRun, onEdit, busy, lang, onSwipe, swipeOn }: { aoi: 
           <Select value={aoi.freqDays} onChange={(e) => upd({ freqDays: +e.target.value })} className="!py-1 text-xs">{[7, 14, 30].map((d) => <option key={d} value={d}>{L(`ทุก ${d} วัน`, `every ${d} d`)}</option>)}</Select>
         </div>
         <div className="flex flex-wrap gap-1">
-          <Button variant="primary" disabled={busy} onClick={onRun}>{L('ตรวจตอนนี้', 'Check now')}</Button>
+          <Button variant="primary" disabled={busy} onClick={() => onRun()} title={L(`เทียบกับ${baselineLabel(baseline, true)} (ตามที่ตั้งไว้ด้านบน)`, `vs ${baselineLabel(baseline, false).toLowerCase()} (setting above)`)}>{L('ตรวจตอนนี้', 'Check now')}</Button>
           <Button disabled={busy} onClick={onEdit}>{L('✥ ย้าย / ปรับขนาดกรอบ', '✥ Move / resize box')}</Button>
           <Button onClick={() => upd({ active: !aoi.active })}>{aoi.active ? L('พักการตรวจ', 'Pause') : L('เปิดการตรวจ', 'Resume')}</Button>
           <Button variant="danger" onClick={() => setAois((l) => l.filter((a) => a.id !== aoi.id))}>{L('ลบพื้นที่', 'Remove')}</Button>
+        </div>
+        <div className="rounded border border-cyan-400/30 bg-cyan-400/5 p-1.5">
+          <div className="mb-1 text-[10px] text-cyan-200">{L('เทียบภาพที่ชัดที่สุดทันที', 'Compare the clearest images now')}</div>
+          <div className="grid grid-cols-2 gap-1">
+            {(['month', 'year'] as const).map((b) => {
+              const w = windowsFor(30, Date.now(), b);
+              return (
+                <Button key={b} disabled={busy} onClick={() => onRun(b)} className="flex-col !items-start !gap-0 text-left">
+                  <span>{b === 'month' ? L('เดือนที่แล้ว → ปัจจุบัน', 'Last month → now') : L('ปีที่แล้ว → ปัจจุบัน', 'Last year → now')}</span>
+                  <span className="font-mono text-[9px] font-normal text-muted">{w.before[0].slice(2)}…{w.before[1].slice(5)} → {w.after[0].slice(5)}…{w.after[1].slice(5)}</span>
+                </Button>
+              );
+            })}
+          </div>
         </div>
         <p className="text-[10px] text-cyan-200">🛰 {satelliteOf(aoi.sensor).note}</p>
         {aoi.sensor === 'sar' && !methodText(aoi.purpose, 'sar') && <p className="text-[10px] text-warn">{L('หัวข้อนี้วิเคราะห์ด้วยเรดาร์ไม่ได้ — เลือก Sentinel-2 หรือ Landsat', 'This purpose cannot use radar — pick Sentinel-2 or Landsat')}</p>}
@@ -854,7 +901,7 @@ function AoiDetail({ aoi, onRun, onEdit, busy, lang, onSwipe, swipeOn }: { aoi: 
 
         {mine.length > 1 && (
           <Select value={run?.id} onChange={(e) => setRunId(e.target.value)} className="!py-1 text-xs">
-            {mine.map((r) => <option key={r.id} value={r.id}>{new Date(r.at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}{r.A && r.B ? ` · ภาพ ${r.A.datetime.slice(0, 10)}→${r.B.datetime.slice(0, 10)}` : ''} · {r.status === 'ok' ? fmtArea(r.stats!.interestKm2, unit, lang === 'th') : L('ข้อมูลไม่พอ', 'insufficient')}{r.mode === 'manual' ? ` · ${L('เลือกเอง', 'manual')}` : ''}</option>)}
+            {mine.map((r) => <option key={r.id} value={r.id}>{new Date(r.at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}{r.A && r.B ? ` · ภาพ ${r.A.datetime.slice(0, 10)}→${r.B.datetime.slice(0, 10)}` : ''} · {r.status === 'ok' ? fmtArea(r.stats!.interestKm2, unit, lang === 'th') : L('ข้อมูลไม่พอ', 'insufficient')}{r.mode === 'manual' ? ` · ${L('เลือกเอง', 'manual')}` : r.baseline && r.baseline !== 'previous' ? ` · ${L('เทียบ', 'vs ')}${baselineLabel(r.baseline, lang === 'th')}` : ''}</option>)}
           </Select>
         )}
 
