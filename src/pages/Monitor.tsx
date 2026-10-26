@@ -21,6 +21,7 @@ import ComparePanel, { QcPanel } from '../components/monitor/ComparePanel';
 import ResultQuality from '../components/monitor/ResultQuality';
 import ExtentBar from '../components/monitor/ExtentBar';
 import CoordImport from '../components/monitor/CoordImport';
+import { useLineStyle } from '../lib/lineStyle';
 import { useQc } from '../lib/qcStore';
 import { fmtArea, km2ToRai, type AreaUnit } from '../lib/area';
 import { hotspotKm2 } from '../lib/monitor';
@@ -150,6 +151,7 @@ export function MonitorWatch() {
   const [show, setShow] = useState<'split' | 'A' | 'B'>('split');
   const [blink, setBlink] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
+  const line = useLineStyle((s) => s.style);
   const [sideOpen, setSideOpenS] = useState(() => readPref('ov.monitor.side', true));
   const setSideOpen = (v: boolean) => { setSideOpenS(v); writePref('ov.monitor.side', v); };
   const { qc } = useQc();
@@ -193,7 +195,14 @@ export function MonitorWatch() {
   useEffect(() => {
     if (!viewer) return;
     const ds = new Cesium.CustomDataSource('monitor');
+    const lc = Cesium.Color.fromCssColorString(line.color);
+    const lineMat = () => (line.dashed ? new Cesium.PolylineDashMaterialProperty({ color: lc, dashLength: 12 }) : new Cesium.PolylineOutlineMaterialProperty({ color: lc, outlineColor: Cesium.Color.BLACK.withAlpha(0.55), outlineWidth: 1 }));
+    const boundary = () =>
+      [...extentLines, ...borderLinesState].forEach((l) =>
+        ds.entities.add({ polyline: { positions: l.map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: line.width + (line.dashed ? 0 : 2), material: lineMat(), clampToGround: false } }),
+      );
     if (clean) {
+      if (line.inClean) boundary();
       // only a thin outline of the selected area, nothing filled
       const a = aois.find((x) => x.id === selId);
       if (a && outline && a.id !== edit?.id)
@@ -204,12 +213,7 @@ export function MonitorWatch() {
         if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
       };
     }
-    extentLines.forEach((l) =>
-      ds.entities.add({ polyline: { positions: l.map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: 2.5, material: Cesium.Color.fromCssColorString('#facc15'), clampToGround: false } }),
-    );
-    borderLinesState.forEach((l) =>
-      ds.entities.add({ polyline: { positions: l.map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.YELLOW, dashLength: 10 }), clampToGround: false } }),
-    );
+    boundary();
     tiles.forEach((tl) => {
       const on = picked.has(tl.id);
       ds.entities.add({
@@ -238,7 +242,7 @@ export function MonitorWatch() {
     return () => {
       if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
     };
-  }, [viewer, aois, runs, selId, tiles, picked, borderLinesState, extentLines, edit?.id, clean, outline]);
+  }, [viewer, aois, runs, selId, tiles, picked, borderLinesState, extentLines, edit?.id, clean, outline, line]);
 
   // ---- before / after swipe of two real scenes
   useEffect(() => {

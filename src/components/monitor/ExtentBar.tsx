@@ -9,6 +9,7 @@ import { borderLines, NEIGHBOURS, type Neighbour } from '../../lib/border';
 import { clearBoundary, getBoundary, importBoundary, onBoundaryChange, type CustomBoundary } from '../../lib/boundary';
 import { bboxOfCoords, bboxOfGeometry, borderFocusRect, outsideShare, overviewRect, roughCentre, THAILAND_BBOX_FALLBACK, type BBox4 } from '../../lib/extent';
 import { cx } from '../ui';
+import { LINE_SWATCHES, useLineStyle } from '../../lib/lineStyle';
 
 const useL = () => {
   const lang = useLang((s) => s.lang);
@@ -30,6 +31,7 @@ export default function ExtentBar({
   tileCount: number;
 }) {
   const L = useL();
+  const { style: line, set: setLine, reset: resetLine } = useLineStyle();
   const [mode, setMode] = useState<ExtentMode>('overview');
   const share = 0.5; // camera frames the border line centred; the slider moves the watch boxes
   const [measured, setMeasured] = useState<number | null>(null);
@@ -174,6 +176,36 @@ export default function ExtentBar({
               <input type="file" accept=".geojson,.json,application/geo+json,application/json" className="hidden" disabled={impBusy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void doImport(f); }} />
             </label>
             {impErr && <div className="text-bad">{impErr}</div>}
+          </div>
+          <div className="rounded border border-line p-1.5 text-[10px]">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-semibold">{L('สีและลักษณะเส้นเขตแดน', 'Boundary line style')}</span>
+              <button className="text-muted hover:text-white" onClick={resetLine}>{L('ค่าเริ่มต้น', 'Default')}</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-1">
+              {LINE_SWATCHES.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setLine({ color: c })}
+                  className={cx('h-5 w-5 rounded-full border', line.color.toLowerCase() === c ? 'border-cyan-300 ring-2 ring-cyan-300/60' : 'border-white/30')}
+                  style={{ background: c }}
+                  title={c}
+                />
+              ))}
+              <label className="ml-1 flex items-center gap-1 text-muted" title={L('เลือกสีเอง', 'Custom colour')}>
+                <input type="color" value={line.color} onChange={(e) => setLine({ color: e.target.value })} className="h-5 w-7 cursor-pointer rounded border border-line bg-transparent p-0" />
+              </label>
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <label className="flex items-center gap-1">
+                {L('ความหนา', 'Width')}
+                <input type="range" min={1} max={6} step={0.5} value={line.width} onChange={(e) => setLine({ width: +e.target.value })} className="w-20" />
+                <span className="font-mono">{line.width}</span>
+              </label>
+              <label className="flex items-center gap-1"><input type="checkbox" checked={line.dashed} onChange={(e) => setLine({ dashed: e.target.checked })} />{L('เส้นประ', 'Dashed')}</label>
+              <label className="flex items-center gap-1"><input type="checkbox" checked={line.inClean} onChange={(e) => setLine({ inClean: e.target.checked })} />{L('แสดงในโหมดภาพล้วน', 'Show in imagery-only view')}</label>
+            </div>
+            <svg viewBox="0 0 200 10" className="mt-1 h-2.5 w-full"><line x1={2} x2={198} y1={5} y2={5} stroke={line.color} strokeWidth={Math.min(8, line.width * 1.4)} strokeDasharray={line.dashed ? '10 6' : undefined} /></svg>
           </div>
         </div>
       )}
