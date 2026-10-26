@@ -133,9 +133,9 @@ export default function AoiPicker({ viewer, compact }: { viewer?: Cesium.Viewer 
         </p>
       )}
       <div className="flex items-center gap-1.5">
-        <Button onClick={() => fileRef.current?.click()} className="flex-1">{t('Import GeoJSON / KML')}</Button>
+        <Button onClick={() => fileRef.current?.click()} className="flex-1" title="GeoJSON · KML/KMZ · Shapefile (.zip) · GPX · CSV · Excel">{t('Import area file')}</Button>
         {aoi && <Button variant="danger" onClick={() => setAoi(null)}>{t('Clear')}</Button>}
-        <input ref={fileRef} type="file" accept=".geojson,.json,.kml" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+        <input ref={fileRef} type="file" accept=".geojson,.json,.kml,.kmz,.gpx,.zip,.csv,.txt,.xlsx,.wkt" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
       </div>
       {err && <p className="text-[11px] text-bad">{err}</p>}
       {aoi && (() => {

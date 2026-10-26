@@ -43,6 +43,7 @@ export const TH: Record<string, string> = {
   rectangle: 'สี่เหลี่ยม',
   polygon: 'รูปหลายเหลี่ยม',
   'Import GeoJSON / KML': 'นำเข้า GeoJSON / KML',
+  'Import area file': 'นำเข้าไฟล์พื้นที่ (KML, SHP, CSV…)',
   Clear: 'ล้าง',
   'Area of interest': 'พื้นที่สนใจ (AOI)',
   'No match': 'ไม่พบผลลัพธ์',

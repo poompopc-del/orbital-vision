@@ -20,6 +20,7 @@ import { downloadJson } from '../lib/geo';
 import ComparePanel, { QcPanel } from '../components/monitor/ComparePanel';
 import ResultQuality from '../components/monitor/ResultQuality';
 import ExtentBar from '../components/monitor/ExtentBar';
+import CoordImport from '../components/monitor/CoordImport';
 import { useQc } from '../lib/qcStore';
 import { fmtArea, km2ToRai, type AreaUnit } from '../lib/area';
 import { hotspotKm2 } from '../lib/monitor';
@@ -96,7 +97,7 @@ export function MonitorWatch() {
   const { aoi: wsAoi } = useWorkspace();
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
   const [selId, setSelId] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'list' | 'add' | 'border'>('list');
+  const [panel, setPanel] = useState<'list' | 'add' | 'border' | 'import'>('list');
   const [busy, setBusy] = useState<{ cur: string; msg: string; done: number; total: number } | null>(null);
   const [period, setPeriod] = useState(30);
   const abort = useRef<AbortController | null>(null);
@@ -413,10 +414,11 @@ export function MonitorWatch() {
           </Notice>
         )}
 
-        <div className="grid grid-cols-3 gap-1">
+        <div className="grid grid-cols-2 gap-1">
           <Button variant={panel === 'list' ? 'active' : 'ghost'} onClick={() => setPanel('list')}>{L(`รายการ (${aois.length})`, `Watchlist (${aois.length})`)}</Button>
           <Button variant={panel === 'border' ? 'active' : 'ghost'} onClick={() => setPanel('border')}>{L('+ ตามแนวชายแดน', '+ Along border')}</Button>
-          <Button variant={panel === 'add' ? 'active' : 'ghost'} onClick={() => setPanel('add')}>{L('+ วาด / นำเข้า', '+ Draw / import')}</Button>
+          <Button variant={panel === 'add' ? 'active' : 'ghost'} onClick={() => setPanel('add')}>{L('+ วาด / ค้นหา', '+ Draw / search')}</Button>
+          <Button variant={panel === 'import' ? 'active' : 'ghost'} onClick={() => setPanel('import')}>{L('+ นำเข้าพิกัดหลายจุด', '+ Import many')}</Button>
         </div>
 
         <Panel title={L('ช่วงเวลาที่ตรวจ', 'Check window')}>
@@ -442,6 +444,18 @@ export function MonitorWatch() {
         )}
 
         {panel === 'add' && <AddPanel viewer={viewer} onAdd={addFromWorkspace} />}
+        {panel === 'import' && (
+          <CoordImport
+            viewer={viewer}
+            onAdd={(list, region, purpose, freq, sat) => {
+              const now = Date.now().toString(36);
+              const added = list.map((x, i) => ({ ...aoiFromPolygon(x.name, x.geometry, region, purpose, freq, sat), id: `aoi_${now}_i${i.toString(36)}` }));
+              setAois((l) => [...l, ...added]);
+              if (added.length === 1) setSelId(added[0].id);
+              setPanel('list');
+            }}
+          />
+        )}
         {panel === 'border' && (
           <BorderPanel
             viewer={viewer}

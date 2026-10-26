@@ -133,15 +133,13 @@ export function polygonFromKml(text: string): GeoJSON.Polygon | null {
   return null;
 }
 
-export async function aoiFromFile(file: File): Promise<GeoJSON.Polygon> {
-  const text = await file.text();
-  const name = file.name.toLowerCase();
-  let poly: GeoJSON.Polygon | null = null;
-  if (name.endsWith('.kml')) poly = polygonFromKml(text);
-  else if (name.endsWith('.kmz')) throw new Error('KMZ (zipped KML) is not supported yet — unzip and import the .kml file');
-  else poly = polygonFromGeoJson(JSON.parse(text));
-  if (!poly) throw new Error('No polygon or point found in the file');
-  return poly;
+/** First area in a file (any format the coordinate importer reads); points become a `pointKm` square. */
+export async function aoiFromFile(file: File, pointKm = 10): Promise<GeoJSON.Polygon> {
+  const { importCoordFiles, placePolygon } = await import('./coordImport');
+  const r = await importCoordFiles([{ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }]);
+  const p = r.places.find((x) => x.kind === 'polygon') ?? r.places[0];
+  if (!p) throw new Error(r.warnings[0]?.en ?? 'No polygon or point found in the file');
+  return placePolygon(p, pointKm);
 }
 
 export function downloadJson(filename: string, data: unknown) {

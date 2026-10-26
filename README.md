@@ -57,7 +57,7 @@ git push -u origin main
 
 | | หน้า | สิ่งที่ทำได้จริงตอนนี้ |
 |---|---|---|
-| A | Mission Control | globe 3D/2D, ตำแหน่งดาวเทียมคำนวณด้วย SGP4 จาก TLE จริง, วงโคจร, ground track, swath, คลิกดูรายละเอียดดาว, filter, ค้นสถานที่/พิกัด, วาด POI/สี่เหลี่ยม/polygon, import GeoJSON/KML, timeline, โหมด Live / Historical / Coverage |
+| A | Mission Control | globe 3D/2D, ตำแหน่งดาวเทียมคำนวณด้วย SGP4 จาก TLE จริง, วงโคจร, ground track, swath, คลิกดูรายละเอียดดาว, filter, ค้นสถานที่/พิกัด, วาด POI/สี่เหลี่ยม/polygon, import GeoJSON/KML/KMZ/Shapefile/GPX/CSV/Excel, timeline, โหมด Live / Historical / Coverage |
 | B | Imagery Explorer | ค้นภาพจริงจาก Earth Search STAC (Sentinel-2 L2A, Landsat C2 L2, Sentinel-1 GRD), กรองเมฆ/วันที่, % ครอบคลุม AOI, footprint บน globe, ลิงก์ portal ทางการของผู้ให้บริการเชิงพาณิชย์ |
 | C | New Acquisition | wizard 5 ขั้น แสดงตัวเลือกตามชนิดเซนเซอร์ (optical/SAR), เลือกผู้ให้บริการที่รับ tasking, export request package (GeoJSON), ลิงก์ช่องทางสั่งซื้อทางการ |
 | D | Satellite Catalog | ตาราง mission + ดาวเทียมทุกดวงพร้อม metadata ครบ (NORAD, designator, perigee/apogee, inclination, period, epoch, TLE, sensor) |
@@ -66,6 +66,22 @@ git push -u origin main
 | G | Image Analysis | swipe เปรียบเทียบภาพ 2 ภาพ, timeline การถ่ายภาพบน AOI, metadata, วัดระยะ/พื้นที่, export metadata |
 | H | Orders & Projects | ติดตามสถานะคำขอทั้ง 13 สถานะ พร้อมประวัติว่าใครเป็นคนรายงาน (platform / user-reported / provider API), จัดคำขอเป็นโปรเจกต์ |
 | I | Administration | ผู้ใช้/role, สถานะ integration, การตั้งค่า credential, quota การเรียก API สาธารณะ, audit log |
+
+## นำเข้าพิกัดจากไฟล์ (หน้าเฝ้าระวัง → “+ นำเข้าพิกัดหลายจุด”)
+
+นำเข้าจุด/แปลงทีละมาก ๆ แล้วเพิ่มเข้ารายการเฝ้าระวังได้ในครั้งเดียว (ตัวอ่านอยู่ที่ `src/lib/coordImport.ts` ทดสอบใน `tests/coordImport.test.ts`)
+
+| รูปแบบ | สิ่งที่อ่าน |
+|---|---|
+| CSV / TSV / TXT | ต้องมีหัวคอลัมน์ เช่น `name, lat, lon` หรือ `ชื่อ, ละติจูด, ลองจิจูด` (มีคอลัมน์ `size_km` ได้) · รองรับ UTF-8, UTF-16 และ Windows-874 (CSV ภาษาไทยจาก Excel) · คั่นด้วย `,` `;` แท็บ หรือ `\|` |
+| Excel `.xlsx` | ทุกชีต ใช้หัวคอลัมน์แบบเดียวกับ CSV (ไฟล์ `.xls` รุ่นเก่าต้องบันทึกเป็น `.xlsx`/`.csv` ก่อน) |
+| KML / KMZ | ทุก Placemark: จุด, Polygon (ขอบนอก), LineString, gx:Track พร้อมชื่อ |
+| GeoJSON / JSON | ทุก feature, อ่าน `crs` (UTM / 3857) · JSON ที่เป็น array ของ record อ่านแบบตาราง |
+| GPX | waypoint, track, route |
+| Shapefile | `.zip` หรือเลือก `.shp` + `.dbf` + `.prj` พร้อมกัน · point / polygon / polyline / multipoint · ชื่อจาก `.dbf` (UTF-8 หรือ TIS-620) |
+| WKT / ข้อความที่วาง | หนึ่งจุดต่อบรรทัด: `13.7563, 100.5018` · `13°45'22"N 100°30'06"E` · `47P 668000 1520000` · ลิงก์ Google Maps / OSM · `POLYGON((…))` |
+
+ระบบพิกัด: WGS84, UTM (WGS84 และ Indian 1975 ที่ใช้ในแผนที่ทหาร/ระวางเก่า แปลงด้วยพารามิเตอร์ EPSG:1153), Web Mercator · ถ้าไฟล์ไม่บอกระบบพิกัด ระบบจะเดาจากช่วงค่าและแจ้งเตือนเสมอ ค่า UTM ที่ไม่มีโซนใช้โซนที่เลือก (ค่าเริ่มต้น 47N) · ก่อนเพิ่ม จะแสดงทุกรายการบนแผนที่ให้เลือก/ตัดออก สลับ lat/lon ได้ และจุดจะถูกขยายเป็นกรอบตามขนาดที่เลือก (0.5–10 กม.)
 
 ## หลักความถูกต้องที่ฝังไว้ในระบบ
 
