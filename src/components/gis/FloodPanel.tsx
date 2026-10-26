@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { t } from '../../i18n';
 import { Button, Field, Input, KV, Notice, Select, Spinner } from '../ui';
 import { fetchRaster, gridFor, classify, type Classified, type Raster } from '../../lib/change';
-import { indexExpression, INDICES, S2_CLEAR_EXPR, sarDbExpression, SAR_WATER_DEFAULT_DB, sensorOf } from '../../lib/spectral';
+import { indexExpression, INDICES, sarDbExpression, SAR_WATER_DEFAULT_DB, sensorOf } from '../../lib/spectral';
 import { areaKm2, downloadJson } from '../../lib/geo';
 import { fmtNum } from '../../lib/format';
 import { useWorkspace } from '../../store';
@@ -10,6 +10,7 @@ import { useGis } from './GisContext';
 import { imageProvider, sceneLabel } from './sceneLayer';
 import ResultDownloads from './ResultDownloads';
 import { compareWarnings } from './compareChecks';
+import { maskCloudsInPlace } from '../../lib/cloudmask';
 import type { ImageryItem } from '../../lib/stac';
 
 type Method = 'mndwi' | 'ndwi' | 'sar';
@@ -83,11 +84,8 @@ export default function FloodPanel() {
       const load = async (it: ImageryItem, label: string): Promise<Raster> => {
         setBusy(`${t('Reading')} ${label}…`);
         const r = await fetchRaster(it, exprFor(it), range, grid, ac.signal, (d, n) => setBusy(`${t('Reading')} ${label} ${d}/${n}`));
-        if (sensorOf(it) === 's2') {
-          // treat cloud, cloud shadow, cirrus, saturated and no-data pixels (SCL) as no data
-          const clear = await fetchRaster(it, S2_CLEAR_EXPR, [0, 1], grid, ac.signal);
-          for (let p = 0; p < r.values.length; p++) if (!(clear.values[p] > 0.5)) r.values[p] = NaN;
-        }
+        // cloud, cloud edges, thin cloud and cloud shadow (which mimics water) → no data
+        await maskCloudsInPlace(it, r, ac.signal);
         return r;
       };
       const rb = await load(post, t('after'));
@@ -169,7 +167,7 @@ export default function FloodPanel() {
       <p className="text-[10px] leading-snug text-muted">
         {method === 'sar'
           ? t('SAR workflow: water returns little backscatter. Pixels with VV below the threshold (dB) are classed as water. Wind, rain cells, radar shadow and smooth tarmac can mislead. Optical indices are not applied to SAR.')
-          : t('Optical workflow: pixels above the index threshold are classed as water; Sentinel-2 clouds, shadows and cirrus (SCL) are removed as no data. Built-up areas and shadows can still be misclassified.')}
+          : t('Optical workflow: pixels above the index threshold are classed as water; clouds, cloud edges, thin cloud and cloud shadows (Sentinel-2 SCL / Landsat QA_PIXEL plus a buffer) are removed as no data. Built-up areas and shadows can still be misclassified.')}
       </p>
       <div className="grid grid-cols-2 gap-1.5">
         <Field label={method === 'sar' ? t('Threshold (dB)') : t('Threshold')}>

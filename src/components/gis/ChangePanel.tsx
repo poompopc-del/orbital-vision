@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { t } from '../../i18n';
 import { Button, Field, Input, KV, Notice, Select, Spinner } from '../ui';
 import { classify, fetchRaster, gridFor, type Classified } from '../../lib/change';
-import { compositeTileUrl, DEFAULT_STRETCH, indexAvailability, indexExpression, indexSummary, indexTileUrl, INDICES, refl, S2_CLEAR_EXPR, sarDbExpression, sensorOf } from '../../lib/spectral';
+import { compositeTileUrl, DEFAULT_STRETCH, indexAvailability, indexExpression, indexSummary, indexTileUrl, INDICES, refl, sarDbExpression, sensorOf } from '../../lib/spectral';
 import { Cesium } from '../../lib/cesium';
 import { downloadJson } from '../../lib/geo';
 import { fmtNum } from '../../lib/format';
@@ -12,6 +12,7 @@ import { useGis } from './GisContext';
 import { imageProvider, pcProvider, sceneLabel } from './sceneLayer';
 import ResultDownloads from './ResultDownloads';
 import { compareWarnings } from './compareChecks';
+import { maskCloudsInPlace } from '../../lib/cloudmask';
 
 type Kind = 'ndvi' | 'ndwi' | 'mndwi' | 'ndbi' | 'dnbr' | 'sar' | 'general';
 
@@ -105,10 +106,9 @@ export default function ChangePanel() {
       const read = async (it: ImageryItem, lbl: string) => {
         const { expr, range } = exprFor(it, kind);
         const r = await fetchRaster(it, expr, range, grid, ac.signal, (d, n) => setBusy(`${t('Reading')} ${lbl} ${d}/${n}`));
-        if (sensorOf(it) === 's2') {
-          const clear = await fetchRaster(it, S2_CLEAR_EXPR, [0, 1], grid, ac.signal);
-          for (let p = 0; p < r.values.length; p++) if (!(clear.values[p] > 0.5)) r.values[p] = NaN;
-        }
+        // cloud, cloud edges, thin cloud and shadows → no data (Sentinel-2 SCL / Landsat QA_PIXEL + buffer)
+        setBusy(`${t('Reading')} ${lbl} · cloud mask`);
+        await maskCloudsInPlace(it, r, ac.signal);
         return r;
       };
       const ra = await read(A, 'A');

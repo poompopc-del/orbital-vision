@@ -13,6 +13,7 @@ import { aoiStatistics, indexExpression, indexSummary, INDICES, S2_CLEAR_EXPR, s
 import { renderScene } from './export';
 import { centroid } from './geo';
 import { geometryAreaKm2, fmtArea, type AreaUnit } from './area';
+import { buildMask, hotExpr, maskOptsFor, stateExpr, ST_CLEAR } from './cloudmask';
 import { checkPair, checkScene, comparisonQuality, familyOf, gsdMeters, loadQc, sameSeason, type AoiCloud, type Quality, type QcSettings } from './qc';
 import { searchArchive } from './stac';
 import type { ImageryItem, StacCollectionId } from './stac';
@@ -261,7 +262,7 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
     switch (p) {
       case 'clearing':
         return {
-          sensor, text: 'Sentinel-2 NDVI: loss = NDVI(before) ≥ 0.45 and drop ≥ 0.20, only on tree/shrub cover (ESA WorldCover 2021); gain = rise ≥ 0.20 to ≥ 0.45. Cloud/shadow masked with SCL.',
+          sensor, text: 'Sentinel-2 NDVI: loss = NDVI(before) ≥ 0.45 and drop ≥ 0.20, only on tree/shrub cover (ESA WorldCover 2021); gain = rise ≥ 0.20 to ≥ 0.45. Cloud/shadow masked (SCL + edge buffer + thin-cloud check).',
           inputs: (it) => [idx('ndvi')(it)],
           fn: ([a], [b]) => (a >= 0.45 && a - b >= 0.2 ? 1 : b >= 0.45 && b - a >= 0.2 ? 2 : 3),
           legend: [
@@ -272,7 +273,7 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
         };
       case 'construction':
         return {
-          sensor, text: 'Sentinel-2: new bare/built surface = NDVI drop ≥ 0.15 and NDBI rise ≥ 0.10, outside cropland and existing built-up (ESA WorldCover 2021). Cloud/shadow masked with SCL.',
+          sensor, text: 'Sentinel-2: new bare/built surface = NDVI drop ≥ 0.15 and NDBI rise ≥ 0.10, outside cropland and existing built-up (ESA WorldCover 2021). Cloud/shadow masked (SCL + edge buffer + thin-cloud check).',
           inputs: (it) => [idx('ndvi')(it), idx('ndbi')(it)],
           fn: ([na, ba], [nb, bb]) => (na - nb >= 0.15 && bb - ba >= 0.1 ? 1 : 3),
           legend: [{ id: 1, label: 'New bare / built surface (possible road, clearing or structure)', labelTh: 'ผิวดินเปิด / สิ่งปลูกสร้างใหม่ (อาจเป็นทาง ที่โล่ง หรืออาคาร)', color: '#f97316' }],
@@ -280,7 +281,7 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
         };
       case 'water':
         return {
-          sensor, text: 'Sentinel-2 MNDWI > 0 = water. New water = dry before, wet after. Cloud/shadow masked with SCL.',
+          sensor, text: 'Sentinel-2 MNDWI > 0 = water. New water = dry before, wet after. Cloud/shadow masked (SCL + edge buffer + thin-cloud check).',
           inputs: (it) => [idx('mndwi')(it)],
           fn: ([a], [b]) => (a <= 0 && b > 0 ? 1 : a > 0 && b <= 0 ? 2 : a > 0 && b > 0 ? 4 : 3),
           legend: [
@@ -292,7 +293,7 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
         };
       case 'fire':
         return {
-          sensor, text: 'Sentinel-2 dNBR = NBR(before) − NBR(after); ≥ 0.27 moderate–high, 0.10–0.27 low (Key & Benson 2006). Cloud masked.',
+          sensor, text: 'Sentinel-2 dNBR = NBR(before) − NBR(after); ≥ 0.27 moderate–high, 0.10–0.27 low (Key & Benson 2006). Cloud/shadow masked (SCL + edge buffer + thin-cloud check).',
           inputs: (it) => [idx('nbr')(it)],
           fn: ([a], [b]) => (a - b >= 0.27 ? 1 : a - b >= 0.1 ? 2 : 3),
           legend: [
@@ -303,7 +304,7 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
         };
       default:
         return {
-          sensor, text: 'Sentinel-2 NDVI change ≥ 0.20 either way. Cloud masked.',
+          sensor, text: 'Sentinel-2 NDVI change ≥ 0.20 either way. Cloud/shadow masked (SCL + edge buffer + thin-cloud check).',
           inputs: (it) => [idx('ndvi')(it)],
           fn: ([a], [b]) => (a - b >= 0.2 ? 1 : b - a >= 0.2 ? 2 : 3),
           legend: [
@@ -445,13 +446,6 @@ function despeckle(r: Raster): Raster {
 // ---------------------------------------------------------------- cloud / shadow / no-data masks
 
 const lsBit = (k: number) => `(((qa_pixel/${2 ** k})%2)>=1)`;
-/** per-pixel state codes: 0 no data · 3 cloud shadow · 8 cloud · 4 clear */
-function stateExpr(it: ImageryItem): string | null {
-  const k = sensorOf(it);
-  if (k === 's2') return 'where((SCL==0)|(SCL==1),0,where(SCL==3,3,where((SCL==8)|(SCL==9)|(SCL==10),8,4)))';
-  if (k === 'landsat') return `where(${lsBit(0)},0,where(${lsBit(1)}|${lsBit(2)}|${lsBit(3)},8,where(${lsBit(4)},3,4)))`;
-  return null;
-}
 const cloudExpr = (it: ImageryItem) => (sensorOf(it) === 's2' ? 'where((SCL==8)|(SCL==9)|(SCL==10),1,0)' : `where(${lsBit(1)}|${lsBit(2)}|${lsBit(3)},1,0)`);
 const shadowExpr = (it: ImageryItem) => (sensorOf(it) === 's2' ? 'where(SCL==3,1,0)' : `where(${lsBit(4)}&(~${lsBit(3)}),1,0)`);
 
@@ -608,8 +602,14 @@ export async function compareScenes(
       const ins = m.inputs(it);
       for (let k = 0; k < ins.length; k++) out.push(await fetchRaster(it, ins[k].expr, ins[k].range, grid, signal, (d, n) => progress(`อ่านภาพ${lbl} ${k + 1}/${ins.length} · ${d}/${n}`)));
       const se = stateExpr(it);
-      const state = se ? await fetchRaster(it, se, [0, 255], grid, signal, (d, n) => progress(`อ่านหน้ากากเมฆภาพ${lbl} ${d}/${n}`)) : null;
-      return { vals: sensorOf(it) === 's1' ? out.map(despeckle) : out, state };
+      let mask: Uint8Array | null = null;
+      if (se) {
+        const state = await fetchRaster(it, se, [0, 255], grid, signal, (d, n) => progress(`อ่านหน้ากากเมฆภาพ${lbl} ${d}/${n}`));
+        const he = qc.thinCloud ? hotExpr(it) : null;
+        const hot = he ? await fetchRaster(it, he.expr, he.range, grid, signal, (d, n) => progress(`ตรวจเมฆบาง/ขอบเมฆภาพ${lbl} ${d}/${n}`)).catch(() => null) : null;
+        mask = buildMask(state.values, hot?.values ?? null, grid.width, grid.height, maskOptsFor(grid, qc));
+      }
+      return { vals: sensorOf(it) === 's1' ? out.map(despeckle) : out, mask };
     };
     const ra = await read(A, 'ก่อน');
     const rb = await read(B, 'หลัง');
@@ -619,13 +619,7 @@ export async function compareScenes(
     progress('จำแนกการเปลี่ยนแปลง (แยกเมฆ เงาเมฆ และไม่มีข้อมูลออก)…');
     const n = ra.vals.length;
     const idxR: Raster = { grid, values: new Float32Array(ra.vals[0].values.length).map((_, p) => p) };
-    const st = (s: Raster | null, p: number) => {
-      if (!s) return 4;
-      const v = s.values[p];
-      if (Number.isNaN(v)) return 0;
-      const c = Math.round(v);
-      return c <= 1 ? 0 : c <= 5 ? (c === 3 ? 3 : 4) : 8;
-    };
+    const st = (m: Uint8Array | null, p: number) => (m ? m[p] : ST_CLEAR);
     const anyNaN = (rs: Raster[], p: number) => rs.some((r) => Number.isNaN(r.values[p]));
     const defs: ClassDef[] = [
       ...m.legend.map((l) => ({ id: l.id, label: l.label, rgba: hexRgba(l.color, 215) })),
@@ -636,7 +630,7 @@ export async function compareScenes(
     ];
     const res: Classified = classify(aoi, idxR, idxR, (pa) => {
       const p = pa as number;
-      const sa = st(ra.state, p), sb = st(rb.state, p);
+      const sa = st(ra.mask, p), sb = st(rb.mask, p);
       if (sa === 8 || sb === 8) return CLOUD;
       if (sa === 3 || sb === 3) return SHADOW;
       if (sa === 0 || sb === 0 || anyNaN(ra.vals, p) || anyNaN(rb.vals, p)) return NODATA;
