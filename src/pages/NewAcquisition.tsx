@@ -135,7 +135,7 @@ export default function NewAcquisition() {
         {step === 1 && (
           <Panel title={t('Acquisition method')}>
             <div className="space-y-2">
-              <Link to="/gis?tab=search" className="block rounded border border-line p-3 hover:border-cyan-400/40">
+              <Link to="/imagery" className="block rounded border border-line p-3 hover:border-cyan-400/40">
                 <div className="text-sm text-white">{t('Search existing imagery archives')}</div>
                 <div className="text-xs text-muted">{t('Fastest and often free — Sentinel-1/2 and Landsat are searchable now.')}</div>
               </Link>

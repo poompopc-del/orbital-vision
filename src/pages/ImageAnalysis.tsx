@@ -172,7 +172,7 @@ export default function ImageAnalysis() {
 
         <Panel title={`${t('Comparison')} (${compare.length}/2)`} right={compare.length > 0 && <button onClick={clearCompare} className="text-[11px] text-muted hover:text-white">{t('Clear')}</button>}>
           {compare.length === 0 && (
-            <p className="text-xs text-muted">{t('Pick two scenes from the timeline below or in')} <Link to="/gis?tab=search" className="text-cyan-300 underline">{t('Imagery Explorer')}</Link>{t('. Different dates or providers can be compared.')} </p>
+            <p className="text-xs text-muted">{t('Pick two scenes from the timeline below or in')} <Link to="/imagery" className="text-cyan-300 underline">{t('Imagery Explorer')}</Link>{t('. Different dates or providers can be compared.')} </p>
           )}
           <div className="space-y-2">
             {compare.map((it, i) => (

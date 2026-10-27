@@ -15,6 +15,7 @@ import Admin from './pages/Admin';
 import ImagingView from './pages/ImagingView';
 import PassTracker from './pages/PassTracker';
 import GisWorkspace from './pages/GisWorkspace';
+import ImageryFlow from './pages/ImageryFlow';
 import { MonitorReport, MonitorWatch } from './pages/Monitor';
 import { DisasterMap, DisasterReport, DisasterSources } from './pages/Disaster';
 import { NewsFloodMap, NewsFloodReport } from './pages/NewsFlood';
@@ -22,6 +23,14 @@ import { refreshOrbits } from './lib/orbitLoader';
 import { useLang } from './i18n';
 
 /** Old page URLs → new section + tab (other query params are kept). */
+/** /monitor?tab=… → /imagery with the same tab (watch / report), other params kept */
+function MovedKeepTab({ to, fallback }: { to: string; fallback: string }) {
+  const loc = useLocation();
+  const p = new URLSearchParams(loc.search);
+  if (!p.get('tab')) p.set('tab', fallback);
+  return <Navigate to={`${to}?${p.toString()}`} replace />;
+}
+
 function Moved({ to, tab }: { to: string; tab: string }) {
   const loc = useLocation();
   const p = new URLSearchParams(loc.search);
@@ -81,16 +90,19 @@ export default function App() {
           }
         />
         <Route
-          path="monitor"
+          path="imagery"
           element={
             <Section
               tabs={[
+                { id: 'flow', label: 'Find & analyse images', hint: 'Area → images on a timeline → what to do with them', el: <ImageryFlow /> },
                 { id: 'watch', label: 'Area watchlist', hint: 'Border, forest and disaster areas checked against new imagery', el: <MonitorWatch /> },
                 { id: 'report', label: 'Monitoring report', hint: 'OPP-style report from the latest results', el: <MonitorReport /> },
+                { id: 'advanced', label: 'Advanced analysis map', hint: 'Layers, terrain, dams and every GIS tool on one map', el: <GisWorkspace /> },
               ]}
             />
           }
         />
+        <Route path="monitor" element={<MovedKeepTab to="/imagery" fallback="watch" />} />
         <Route
           path="request"
           element={
@@ -118,7 +130,6 @@ export default function App() {
         <Route path="imaging" element={<Moved to="/track" tab="imaging" />} />
         <Route path="passes" element={<Moved to="/track" tab="passes" />} />
         <Route path="coverage" element={<Moved to="/track" tab="coverage" />} />
-        <Route path="imagery" element={<Moved to="/gis" tab="search" />} />
         <Route path="analysis" element={<Moved to="/gis" tab="compare" />} />
         <Route path="acquire" element={<Moved to="/request" tab="new" />} />
         <Route path="orders" element={<Moved to="/request" tab="list" />} />

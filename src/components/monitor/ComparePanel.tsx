@@ -2,7 +2,7 @@
 // scene on a timeline with its real acquisition date and cloud figures, pick two dates (or use a
 // preset), check them against the quality thresholds and compare. Scenes that fail are shown with
 // the reason and are never used silently.
-import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 import { useLang } from '../../i18n';
 import { Badge, Button, Field, Input, Notice, Panel, Select, Spinner, cx } from '../ui';
 import { searchArchive, type ImageryItem, type StacCollectionId } from '../../lib/stac';
@@ -30,7 +30,7 @@ type Preset = 'event' | 'week' | 'month' | 'year';
 const CACHE_KEY = 'ov.aoicloud.v1';
 const CACHE_MAX = 4000;
 type CloudVal = AoiCloud | null | 'err';
-const aoiKey = (g: GeoJSON.Polygon) => {
+export const aoiKey = (g: GeoJSON.Polygon) => {
   let h = 5381;
   const str = JSON.stringify(g.coordinates);
   for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
@@ -61,7 +61,41 @@ function writeCloudCache(key: string, vals: Record<string, CloudVal>) {
 
 const AUTO_MAX = 120; // scenes measured automatically per view; the rest on request
 
-export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: MonitorAoi; onRun: (r: MonitorRun) => void; onSwipe: (A: ImageryItem, B: ImageryItem) => void; swipeOn: boolean }) {
+export interface PickerCtx {
+  A: ImageryItem | null;
+  B: ImageryItem | null;
+  /** measured AOI cloud per scene id */
+  cl: Record<string, CloudVal>;
+  /** AOI cloud of a scene, or null when not measured / not measurable */
+  cloudOf: (it: ImageryItem) => AoiCloud | null;
+  list: ImageryItem[] | null;
+  pair: ReturnType<typeof checkPair> | null;
+  /** both scenes pass the quality thresholds and the pair can be compared fairly */
+  pairOk: boolean;
+  busy: string;
+  setBusy: (s: string) => void;
+  setErr: (s: string) => void;
+  abort: { current: AbortController | null };
+  measure: (items: ImageryItem[], signal?: AbortSignal) => Promise<Record<string, CloudVal>>;
+  passes: (it: ImageryItem, m: Record<string, CloudVal>) => boolean;
+}
+
+/**
+ * Search the archive over an area, see every scene on a zoomable timeline coloured by its real
+ * AOI cloud, and pick a BEFORE (A) and AFTER (B) scene (by hand or with presets).
+ * What to do with the pair is up to the caller (`footer`).
+ */
+export function ScenePicker({
+  geometry, footer, onPair, panel = true, title, storeKey = 'compare',
+}: {
+  geometry: GeoJSON.Polygon;
+  footer?: (c: PickerCtx) => ReactNode;
+  onPair?: (c: PickerCtx) => void;
+  /** wrap in a collapsible Panel (default) */
+  panel?: boolean;
+  title?: string;
+  storeKey?: string;
+}) {
   const L = useL();
   const { qc } = useQc();
   const [from, setFrom] = useState(daysAgo(365));
@@ -78,7 +112,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
   const [onlyPass, setOnlyPass] = useState(false);
   const [details, setDetails] = useState(false);
   const abort = useRef<AbortController | null>(null);
-  const akey = useMemo(() => aoiKey(aoi.geometry), [aoi.geometry]);
+  const akey = useMemo(() => aoiKey(geometry), [geometry]);
   const [visibleIds, setVisibleIds] = useState<string[]>([]);
   const [auto, setAuto] = useState<{ done: number; total: number; more: number } | null>(null);
   const [autoAll, setAutoAll] = useState(false);
@@ -101,7 +135,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
     const worker = async () => {
       while (!ac.signal.aborted && next < take.length) {
         const it = take[next++];
-        const v: CloudVal = await measureAoiCloud(it, aoi.geometry, ac.signal).catch((e) => (e?.name === 'AbortError' ? undefined : 'err')) as CloudVal;
+        const v: CloudVal = await measureAoiCloud(it, geometry, ac.signal).catch((e) => (e?.name === 'AbortError' ? undefined : 'err')) as CloudVal;
         if (ac.signal.aborted || v === undefined) return;
         setCl((c) => (c[it.id] === undefined ? { ...c, [it.id]: v } : c));
         done++;
@@ -114,14 +148,14 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list, visibleIds, qc.maxSceneCloud, qc.maxGsdM, autoAll]);
 
-  const check = (it: ImageryItem) => checkScene(it, cl[it.id] === 'err' ? null : cl[it.id], qc);
+  const check = (it: ImageryItem) => { const v = cl[it.id]; return checkScene(it, v === 'err' ? null : v, qc); };
   const search = async () => {
     setBusy(L('ค้นหาภาพในคลัง…', 'Searching the archive…'));
     setErr('');
     setA(null);
     setB(null);
     try {
-      const r = await searchArchive({ aoi: aoi.geometry, collections: [...colls], from, to, limit: 500 }); // newest first; 100 cut off the older half of a one-year search
+      const r = await searchArchive({ aoi: geometry, collections: [...colls], from, to, limit: 500 }); // newest first; 100 cut off the older half of a one-year search
       setList(r.filter((x) => x.source === 'planetary-computer').sort((a, b) => a.datetime.localeCompare(b.datetime)));
       setCl(readCloudCache(akey));
       setAutoAll(false);
@@ -140,7 +174,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
       if (familyOf(it) !== 'optical' || cl[it.id] !== undefined || out[it.id] !== undefined) continue;
       if (checkScene(it, null, qc).reasons.length) continue; // fails anyway (resolution, coverage, near-total cloud)
       setBusy(L(`วัดเมฆใน AOI ${++i}…`, `Measuring AOI cloud ${i}…`));
-      out[it.id] = await measureAoiCloud(it, aoi.geometry, signal).catch(() => 'err' as const);
+      out[it.id] = await measureAoiCloud(it, geometry, signal).catch(() => 'err' as const);
       setCl((c) => ({ ...c, [it.id]: out[it.id] }));
     }
     return { ...cl, ...out };
@@ -218,42 +252,6 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
   };
 
   const pair = A && B ? checkPair(A, B, qc) : null;
-  const run = async () => {
-    if (!A || !B) return;
-    const ac = new AbortController();
-    abort.current = ac;
-    setErr('');
-    try {
-      const r = await compareScenes(aoi, A, B, (m) => setBusy(m), ac.signal, { qc, clA: cl[A.id] === 'err' ? null : (cl[A.id] as AoiCloud | null), clB: cl[B.id] === 'err' ? null : (cl[B.id] as AoiCloud | null), mode: 'manual' });
-      onRun(r);
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') setErr(e?.message ?? String(e));
-    } finally {
-      setBusy('');
-    }
-  };
-  /** Trend: compare the reference A with every later passing scene of the same sensor (max 6). */
-  const trend = async () => {
-    if (!A || !list) return;
-    const ac = new AbortController();
-    abort.current = ac;
-    try {
-      const later = list.filter((x) => x.collection === A.collection && x.datetime > A.datetime).slice(-12);
-      const m = await measure(later, ac.signal);
-      const use = later.filter((x) => passes(x, m)).slice(-6);
-      if (!use.length) return setErr(L('ไม่มีภาพหลังจากภาพอ้างอิงที่ผ่านเกณฑ์', 'No later scene passes the thresholds'));
-      for (let i = 0; i < use.length; i++) {
-        setBusy(L(`แนวโน้ม ${i + 1}/${use.length} · ${d10(use[i].datetime)}`, `Trend ${i + 1}/${use.length}`));
-        const r = await compareScenes(aoi, A, use[i], (msg) => setBusy(`${i + 1}/${use.length} · ${msg}`), ac.signal, { qc, clA: m[A.id] === 'err' ? null : (m[A.id] as AoiCloud), clB: m[use[i].id] === 'err' ? null : (m[use[i].id] as AoiCloud), mode: 'manual' });
-        onRun(r);
-      }
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') setErr(e?.message ?? String(e));
-    } finally {
-      setBusy('');
-    }
-  };
-
   // ---- timeline geometry
   const shown = useMemo(() => (list ?? []).filter((x) => !onlyPass || check(x).ok || check(x).pending), [list, onlyPass, cl, qc]);
   const t0 = new Date(from).getTime(), t1 = new Date(to).getTime() + 86400e3;
@@ -264,8 +262,18 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
     return c.ok ? '#4fd18b' : c.pending ? '#f5b84b' : '#ef4444';
   };
 
-  return (
-    <Panel collapsible storeKey="compare" title={L('เปรียบเทียบภาพย้อนหลัง (เลือกวันเอง)', 'Compare imagery over time (pick dates)')} right={A && B ? <span className="font-mono text-[10px] text-cyan-300">A {d10(A.datetime)} · B {d10(B.datetime)}</span> : undefined}>
+  const cloudOf = (it: ImageryItem) => (cl[it.id] && cl[it.id] !== 'err' ? (cl[it.id] as AoiCloud) : null);
+  const pairOk = !!(A && B && pair?.ok && checkScene(A, cloudOf(A), qc).ok && checkScene(B, cloudOf(B), qc).ok);
+  const ctx: PickerCtx = { A, B, cl, cloudOf, list, pair, pairOk, busy, setBusy, setErr, abort, measure, passes };
+  const ctxRef = useRef(ctx);
+  ctxRef.current = ctx;
+  useEffect(() => {
+    onPair?.(ctxRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [A?.id, B?.id, A && cl[A.id], B && cl[B.id]]);
+
+  const inner = (
+    <>
       <div className="grid grid-cols-2 gap-1.5">
         <Field label={L('ค้นหาตั้งแต่', 'From')}><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="!py-1 text-xs" /></Field>
         <Field label={L('ถึง', 'To')}><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="!py-1 text-xs" /></Field>
@@ -371,16 +379,73 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
               {A && B && (checkScene(A, cl[A.id] === 'err' ? null : (cl[A.id] as AoiCloud | null | undefined), qc).reasons.length > 0 || checkScene(B, cl[B.id] === 'err' ? null : (cl[B.id] as AoiCloud | null | undefined), qc).reasons.length > 0) && (
                 <Notice tone="warn">{L('ภาพที่เลือกไม่ผ่านเกณฑ์คุณภาพ ระบบจะไม่สรุปผลการเปลี่ยนแปลงจากคู่นี้ ให้เลือกวันอื่น (จุดสีเขียวบนไทม์ไลน์)', 'A selected scene fails the quality thresholds; no change conclusion will be made from this pair — pick another date (green dots)')}</Notice>
               )}
-              <div className="flex flex-wrap gap-1.5">
-                <Button variant="primary" disabled={!A || !B || !!busy || (pair ? !pair.ok : true)} onClick={run}>{L('เปรียบเทียบ A กับ B', 'Compare A with B')}</Button>
-                <Button disabled={!A || !B || (pair ? !pair.ok : true)} onClick={() => A && B && onSwipe(A, B)}>{swipeOn ? L('ปิดเลื่อนเทียบภาพ', 'Close swipe') : L('เลื่อนเทียบภาพบนแผนที่', 'Swipe on map')}</Button>
-                <Button disabled={!A || !!busy} onClick={trend}>{L('แนวโน้ม: A เทียบทุกภาพหลังจากนั้น', 'Trend: A vs each later scene')}</Button>
-              </div>
+              {footer?.(ctx)}
             </>
           )}
         </div>
       )}
+    </>
+  );
+  if (!panel) return inner;
+  return (
+    <Panel collapsible storeKey={storeKey} title={title ?? L('เปรียบเทียบภาพย้อนหลัง (เลือกวันเอง)', 'Compare imagery over time (pick dates)')} right={A && B ? <span className="font-mono text-[10px] text-cyan-300">A {d10(A.datetime)} · B {d10(B.datetime)}</span> : undefined}>
+      {inner}
     </Panel>
+  );
+}
+
+/** Watchlist: pick dates for one watch area, then compare / swipe / trend. */
+export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: MonitorAoi; onRun: (r: MonitorRun) => void; onSwipe: (A: ImageryItem, B: ImageryItem) => void; swipeOn: boolean }) {
+  const L = useL();
+  const { qc } = useQc();
+  return (
+    <ScenePicker
+      geometry={aoi.geometry}
+      footer={(c) => {
+        const { A, B, busy, pair, list } = c;
+        const run = async () => {
+          if (!A || !B) return;
+          const ac = new AbortController();
+          c.abort.current = ac;
+          c.setErr('');
+          try {
+            onRun(await compareScenes(aoi, A, B, (m) => c.setBusy(m), ac.signal, { qc, clA: c.cloudOf(A), clB: c.cloudOf(B), mode: 'manual' }));
+          } catch (e: any) {
+            if (e?.name !== 'AbortError') c.setErr(e?.message ?? String(e));
+          } finally {
+            c.setBusy('');
+          }
+        };
+        /** Trend: compare the reference A with every later passing scene of the same sensor (max 6). */
+        const trend = async () => {
+          if (!A || !list) return;
+          const ac = new AbortController();
+          c.abort.current = ac;
+          try {
+            const later = list.filter((x) => x.collection === A.collection && x.datetime > A.datetime).slice(-12);
+            const m = await c.measure(later, ac.signal);
+            const use = later.filter((x) => c.passes(x, m)).slice(-6);
+            if (!use.length) return c.setErr(L('ไม่มีภาพหลังจากภาพอ้างอิงที่ผ่านเกณฑ์', 'No later scene passes the thresholds'));
+            for (let i = 0; i < use.length; i++) {
+              c.setBusy(L(`แนวโน้ม ${i + 1}/${use.length} · ${d10(use[i].datetime)}`, `Trend ${i + 1}/${use.length}`));
+              const cv = (x: ImageryItem) => (m[x.id] && m[x.id] !== 'err' ? (m[x.id] as AoiCloud) : null);
+              onRun(await compareScenes(aoi, A, use[i], (msg) => c.setBusy(`${i + 1}/${use.length} · ${msg}`), ac.signal, { qc, clA: cv(A), clB: cv(use[i]), mode: 'manual' }));
+            }
+          } catch (e: any) {
+            if (e?.name !== 'AbortError') c.setErr(e?.message ?? String(e));
+          } finally {
+            c.setBusy('');
+          }
+        };
+        return (
+          <div className="flex flex-wrap gap-1.5">
+            <Button variant="primary" disabled={!A || !B || !!busy || (pair ? !pair.ok : true)} onClick={run}>{L('เปรียบเทียบ A กับ B', 'Compare A with B')}</Button>
+            <Button disabled={!A || !B || (pair ? !pair.ok : true)} onClick={() => A && B && onSwipe(A, B)}>{swipeOn ? L('ปิดเลื่อนเทียบภาพ', 'Close swipe') : L('เลื่อนเทียบภาพบนแผนที่', 'Swipe on map')}</Button>
+            <Button disabled={!A || !!busy} onClick={trend}>{L('แนวโน้ม: A เทียบทุกภาพหลังจากนั้น', 'Trend: A vs each later scene')}</Button>
+          </div>
+        );
+      }}
+    />
   );
 }
 

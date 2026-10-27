@@ -377,7 +377,7 @@ function DetailPanel({ e, onClose }: { e: DEvent; onClose: () => void }) {
               <li>{L('ไม่มีการประเมินจำนวนผู้ประสบภัยหรือความเสียหายทางเศรษฐกิจ', 'No estimate of people affected or economic loss is made')}</li>
             </ul>
           </Section>
-          {run && <Link to="/monitor?tab=watch" className="text-[11px] text-cyan-300 hover:underline">{L('ดูภาพก่อน–หลังและรายละเอียดในหน้าเฝ้าระวัง →', 'See before/after images in the watchlist →')}</Link>}
+          {run && <Link to="/imagery?tab=watch" className="text-[11px] text-cyan-300 hover:underline">{L('ดูภาพก่อน–หลังและรายละเอียดในหน้าเฝ้าระวัง →', 'See before/after images in the watchlist →')}</Link>}
         </div>
       )}
     </div>

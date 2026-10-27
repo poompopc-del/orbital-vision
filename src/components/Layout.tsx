@@ -9,9 +9,8 @@ import { Badge, Button, Input, cx } from './ui';
 const NAV = [
   { to: '/', label: 'Home', icon: 'M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z' },
   { to: '/track', label: 'Track satellites', icon: 'M12 3a9 9 0 100 18 9 9 0 000-18zm-9 9h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18' },
-  { to: '/gis', label: 'Analyse area', icon: 'M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17l9 5 9-5' },
+  { to: '/imagery', label: 'Satellite imagery', icon: 'M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17l9 5 9-5' },
   { to: '/disaster', label: 'Disasters', icon: 'M12 3l10 17H2L12 3zm0 6v5m0 3v.5' },
-  { to: '/monitor', label: 'Monitor areas', icon: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10-3a3 3 0 100 6 3 3 0 000-6z' },
   { to: '/request', label: 'Order imagery', icon: 'M6 3h12v18H6zM9 8h6M9 12h6M9 16h4' },
   { to: '/data', label: 'Data & settings', icon: 'M12 8a4 4 0 100 8 4 4 0 000-8zM12 2v3M12 19v3M2 12h3M19 12h3' },
 ];

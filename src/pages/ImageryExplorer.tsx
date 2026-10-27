@@ -174,7 +174,7 @@ export default function ImageryExplorer() {
             {compare.length > 0 && (
               <div className="flex items-center justify-between rounded border border-cyan-400/30 px-2 py-1.5 text-xs">
                 <span className="text-slate-300">{compare.length}/2 selected for comparison</span>
-                <Link to="/gis?tab=compare"><Button variant="primary">{t('Open analysis')}</Button></Link>
+                <Link to="/imagery"><Button variant="primary">{t('Open analysis')}</Button></Link>
               </div>
             )}
             {viewErr && <Notice tone="bad">{viewErr}</Notice>}

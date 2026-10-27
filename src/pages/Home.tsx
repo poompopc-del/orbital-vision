@@ -6,12 +6,12 @@ import { Badge } from '../components/ui';
 
 const MAIN = [
   { to: '/disaster?tab=map', code: 'HAZARD', icon: '⚠', title: 'Disaster situation mode', desc: 'Floods, hotspots, earthquakes, heavy rain, drought and PM2.5 across Thailand from open agency data — with a situation report.' },
-  { to: '/monitor?tab=watch', code: 'WATCH', icon: '🛡', title: 'Border & area watch mode', desc: 'Weekly change checks along the Cambodia, Malaysia and Myanmar borders, forests and disaster areas — with an OPP-style report.' },
-  { to: '/gis?task=flood', code: 'FLOOD', icon: '🌊', title: 'Flood mode', desc: 'Pick an area and the flood date — radar images before and after are found for you and water is mapped.' },
-  { to: '/gis?task=vegetation', code: 'NDVI', icon: '🌾', title: 'Vegetation mode', desc: 'NDVI from the clearest recent Sentinel-2 image of your area, with statistics.' },
-  { to: '/gis?task=urban', code: 'NDBI', icon: '🏙', title: 'Urban growth mode', desc: 'Compare built-up areas (NDBI) between two years.' },
-  { to: '/gis?task=latest', code: 'IMAGE', icon: '📷', title: 'Latest imagery mode', desc: 'Find the clearest recent image of an area and download it (GeoTIFF / PNG).' },
-  { to: '/gis?task=dams', code: 'RID', icon: '💧', title: 'Dam monitoring mode', desc: 'Current storage, inflow and release from the Royal Irrigation Department.' },
+  { to: '/imagery?tab=watch', code: 'WATCH', icon: '🛡', title: 'Border & area watch mode', desc: 'Weekly change checks along the Cambodia, Malaysia and Myanmar borders, forests and disaster areas — with an OPP-style report.' },
+  { to: '/imagery?tab=advanced&task=flood', code: 'FLOOD', icon: '🌊', title: 'Flood mode', desc: 'Pick an area and the flood date — radar images before and after are found for you and water is mapped.' },
+  { to: '/imagery?tab=advanced&task=vegetation', code: 'NDVI', icon: '🌾', title: 'Vegetation mode', desc: 'NDVI from the clearest recent Sentinel-2 image of your area, with statistics.' },
+  { to: '/imagery?tab=advanced&task=urban', code: 'NDBI', icon: '🏙', title: 'Urban growth mode', desc: 'Compare built-up areas (NDBI) between two years.' },
+  { to: '/imagery', code: 'IMAGE', icon: '📷', title: 'Latest imagery mode', desc: 'Find the clearest recent image of an area and download it (GeoTIFF / PNG).' },
+  { to: '/imagery?tab=advanced&task=dams', code: 'RID', icon: '💧', title: 'Dam monitoring mode', desc: 'Current storage, inflow and release from the Royal Irrigation Department.' },
   { to: '/track?tab=passes', code: 'PASS', icon: '🛰', title: 'Satellite pass mode', desc: 'Pass times for NAPA, ISS or any satellite over your location.' },
 ];
 
