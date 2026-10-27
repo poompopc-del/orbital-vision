@@ -19,7 +19,7 @@ import RunResult from '../components/monitor/RunResult';
 import SwipeView from '../components/imagery/SwipeView';
 import { GisCtx } from '../components/gis/GisContext';
 import { useGisHost } from '../components/gis/useGisHost';
-import { LegendBox } from '../components/gis/LayersPanel';
+import type { GisApi, LayerEntry } from '../components/gis/GisContext';
 import SpectralPanel from '../components/gis/SpectralPanel';
 import FloodPanel from '../components/gis/FloodPanel';
 import SceneDownload from '../components/gis/SceneDownload';
@@ -200,12 +200,26 @@ export default function ImageryFlow() {
                     onClick={() => setMode(m.id)}
                     className={cx('rounded border p-2 text-left transition disabled:opacity-40', mode === m.id ? 'border-cyan-400 bg-cyan-400/10' : 'border-line hover:border-cyan-400/50')}
                   >
-                    <div className="text-sm">{m.icon} <span className="font-semibold text-white">{m.label}</span></div>
+                    <div className="flex items-start gap-1 text-sm">
+                      <span>{m.icon} <span className="font-semibold text-white">{m.label}</span></span>
+                      {layersOfMode(g.layers, m.id).length > 0 && <span className="ml-auto shrink-0 rounded bg-ok/15 px-1 text-[9px] font-normal text-ok" title={L('ผลของโหมดนี้แสดงอยู่บนแผนที่', 'This mode’s result is on the map')}>● {L('แสดงอยู่', 'on map')}</span>}
+                    </div>
                     <div className="mt-0.5 text-[10px] leading-snug text-muted">{m.desc}</div>
                   </button>
                 );
               })}
             </div>
+            {mode && (() => {
+              const others = g.layers.filter((l) => l.show && modeOfLayer(l) && modeOfLayer(l) !== mode && !(mode === 'ndvi' || mode === 'ndbi' ? modeOfLayer(l) === 'ndvi' || modeOfLayer(l) === 'ndbi' : false));
+              if (!others.length) return null;
+              return (
+                <div className="mt-2 flex items-center gap-2 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[10px] text-warn">
+                  <span className="flex-1">{L(`ผลจากงานก่อนหน้ายังซ้อนอยู่บนแผนที่: ${others.map((l) => modeName(L, l)).join(', ')}`, `Earlier results are still on the map: ${others.map((l) => modeName(L, l)).join(', ')}`)}</span>
+                  <button className="shrink-0 rounded border border-warn/50 px-1.5 py-0.5 hover:bg-warn/10" onClick={() => others.forEach((l) => g.setLayer(l.id, { show: false }))}>{L('ซ่อน', 'Hide')}</button>
+                  <button className="shrink-0 rounded border border-warn/50 px-1.5 py-0.5 hover:bg-warn/10" onClick={() => others.forEach((l) => g.removeLayer(l.id))}>{L('ลบ', 'Remove')}</button>
+                </div>
+              );
+            })()}
             {mode && <div className="mt-3 border-t border-line pt-3">{aoi && pick && <ModeBody mode={mode} pick={pick} watch={watch} onWatch={(a) => { setAois((l) => [...l, a]); setWatchId(a.id); }} addRun={addRun} />}</div>}
           </Step>
         </aside>
@@ -218,11 +232,7 @@ export default function ImageryFlow() {
             </button>
           )}
           {viewing && A && B && <SwipeView viewer={viewer} A={A} B={B} containerRef={mapRef} onClose={() => setMode(null)} />}
-          {!viewing && (
-            <div className="absolute bottom-8 left-3 z-10 max-w-[280px]">
-              <LegendBox />
-            </div>
-          )}
+          {!viewing && <OnMap g={g} />}
           {!aoi && (
             <div className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-md border border-line bg-ink-950/85 px-3 py-1.5 text-xs text-slate-200">
               {L('เริ่มที่ ① เลือกพื้นที่ทางซ้าย', 'Start with ① choose an area on the left')}
@@ -418,6 +428,83 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
       {err && <p className="text-[10px] text-bad">{err}</p>}
       {run && <RunResult run={run} />}
       {run && !watch && <p className="text-[10px] text-muted">{L('ผลนี้ยังไม่ได้บันทึกในรายการเฝ้าระวัง — ไปที่ “ดาวน์โหลด · รายงาน · เฝ้าระวัง” เพื่อออกรายงานหรือเพิ่มพื้นที่นี้', 'Not saved to the watchlist — use “Download · report · watch” to make a report or add this area')}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- what is on the map
+
+/** Which step-3 mode put a layer on the map. */
+function modeOfLayer(l: LayerEntry): Mode | null {
+  if (l.id === 'change-result') return 'change';
+  if (l.id === 'flood' || l.id.startsWith('flood')) return 'flood';
+  if (l.id.startsWith('spectral')) return /^NDBI/i.test(l.name) ? 'ndbi' : 'ndvi';
+  return null;
+}
+const layersOfMode = (ls: LayerEntry[], m: Mode) => ls.filter((l) => modeOfLayer(l) === m);
+function modeName(L: (a: string, b: string) => string, l: LayerEntry) {
+  const m = modeOfLayer(l);
+  return m ? MODES(L).find((x) => x.id === m)!.label : l.name;
+}
+
+/** Results on the map: show/hide, opacity, remove, legend per layer, clear all — so work does not pile up. */
+function OnMap({ g }: { g: GisApi }) {
+  const L = useL();
+  const [open, setOpen] = useState(true);
+  const [legendOf, setLegendOf] = useState<string | null>(null);
+  const ls = g.layers;
+  if (!ls.length) return null;
+  const newest = ls[ls.length - 1]?.id;
+  const shownLegend = legendOf ?? newest;
+  return (
+    <div className="absolute bottom-8 left-3 z-10 w-[min(300px,calc(100%-24px))] rounded-md border border-line bg-ink-950/90 text-[11px] text-slate-200 shadow-xl backdrop-blur">
+      <div className="flex items-center gap-1.5 px-2 py-1.5">
+        <button onClick={() => setOpen(!open)} className="flex flex-1 items-center gap-1.5 text-left">
+          <span className={cx('inline-block text-[10px] text-muted transition-transform', open && 'rotate-90')}>▶</span>
+          <span className="font-semibold">{L('สิ่งที่แสดงบนแผนที่', 'On the map')}</span>
+          <span className="rounded bg-cyan-400/15 px-1 font-mono text-[10px] text-cyan-300">{ls.filter((l) => l.show).length}/{ls.length}</span>
+        </button>
+        {open && <button className="text-[10px] text-muted hover:text-bad" onClick={() => ls.forEach((l) => g.removeLayer(l.id))}>{L('ล้างทั้งหมด', 'Clear all')}</button>}
+      </div>
+      {open && (
+        <ul className="max-h-[45vh] overflow-y-auto border-t border-line scroll-thin">
+          {[...ls].reverse().map((l) => {
+            const m = modeOfLayer(l);
+            const icon = m ? MODES(L).find((x) => x.id === m)!.icon : '▦';
+            return (
+              <li key={l.id} className="border-b border-white/5 px-2 py-1.5 last:border-0">
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => g.setLayer(l.id, { show: !l.show })} className={cx('w-5 shrink-0 text-center', l.show ? 'text-cyan-300' : 'text-muted')} title={l.show ? L('ซ่อน', 'Hide') : L('แสดง', 'Show')}>{l.show ? '👁' : '◌'}</button>
+                  <button className={cx('min-w-0 flex-1 truncate text-left', !l.show && 'text-muted line-through')} onClick={() => setLegendOf(shownLegend === l.id ? '' : l.id)} title={l.name}>
+                    {icon} {m ? `${modeName(L, l)} · ` : ''}{l.name}
+                  </button>
+                  <button onClick={() => g.removeLayer(l.id)} className="shrink-0 text-muted hover:text-bad" title={L('ลบออกจากแผนที่', 'Remove from the map')}>✕</button>
+                </div>
+                {l.layer && l.show && (
+                  <label className="mt-0.5 flex items-center gap-1 pl-6 text-[9px] text-muted">
+                    {L('ความทึบ', 'Opacity')}
+                    <input type="range" min={0.1} max={1} step={0.05} value={l.alpha} onChange={(e) => g.setLayer(l.id, { alpha: +e.target.value })} className="h-1 flex-1" />
+                  </label>
+                )}
+                {shownLegend === l.id && l.show && l.legend && (
+                  <div className="mt-1 pl-6">
+                    {l.legend.ramp && (
+                      <>
+                        <div className="h-2 rounded" style={{ background: l.legend.ramp }} />
+                        {l.legend.range && <div className="flex justify-between font-mono text-[9px] text-muted"><span>{l.legend.range[0]}</span><span>{l.legend.unit ?? ''}</span><span>{l.legend.range[1]}</span></div>}
+                      </>
+                    )}
+                    {l.legend.items?.map((it) => (
+                      <div key={it.label} className="flex items-center gap-1.5 text-[10px] text-slate-300"><span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: it.color }} />{it.label}</div>
+                    ))}
+                    {l.legend.note && <p className="mt-0.5 text-[9px] text-muted">{l.legend.note}</p>}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
