@@ -17,13 +17,14 @@ import Histogram from './Histogram';
 
 type Mode = 'index' | 'composite' | 'custom';
 
-export default function SpectralPanel() {
+/** `initialIndex` picks the index shown first (e.g. 'ndbi' for urban growth). */
+export default function SpectralPanel({ initialIndex = 'ndvi' }: { initialIndex?: string } = {}) {
   const g = useGis();
   const { aoi, lastResults, setLastResults } = useWorkspace();
   const [which, setWhich] = useState<'A' | 'B'>('A');
   const scene = which === 'A' ? g.sceneA : g.sceneB;
   const [mode, setMode] = useState<Mode>('index');
-  const [indexId, setIndexId] = useState('ndvi');
+  const [indexId, setIndexId] = useState(initialIndex);
   const def = INDICES.find((i) => i.id === indexId)!;
   const [range, setRange] = useState<[number, number]>(def.range);
   const [cmap, setCmap] = useState(def.colormap);

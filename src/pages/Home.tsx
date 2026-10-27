@@ -4,13 +4,20 @@ import { useOrbit, useWorkspace } from '../store';
 import { areaKm2 } from '../lib/geo';
 import { Badge } from '../components/ui';
 
-const MAIN = [
+const MAIN: { to: string; code: string; icon: string; title: string; desc: string; modes?: { start: string; icon: string; label: string }[] }[] = [
   { to: '/disaster?tab=map', code: 'HAZARD', icon: '⚠', title: 'Disaster situation mode', desc: 'Floods, hotspots, earthquakes, heavy rain, drought and PM2.5 across Thailand from open agency data — with a situation report.' },
+  {
+    to: '/imagery?tab=flow', code: 'IMAGERY', icon: '🛰', title: 'Satellite imagery', desc: 'Choose an area, pick images on the timeline, then choose what to do with them.',
+    modes: [
+      { start: 'change', icon: '🔍', label: 'Change analysis' },
+      { start: 'view', icon: '◐', label: 'Swipe / blink' },
+      { start: 'flood', icon: '🌊', label: 'Flood' },
+      { start: 'ndvi', icon: '🌾', label: 'Vegetation (NDVI)' },
+      { start: 'ndbi', icon: '🏙', label: 'Urban growth (NDBI)' },
+      { start: 'export', icon: '📷', label: 'Latest image / download' },
+    ],
+  },
   { to: '/imagery?tab=watch', code: 'WATCH', icon: '🛡', title: 'Border & area watch mode', desc: 'Weekly change checks along the Cambodia, Malaysia and Myanmar borders, forests and disaster areas — with an OPP-style report.' },
-  { to: '/imagery?tab=advanced&task=flood', code: 'FLOOD', icon: '🌊', title: 'Flood mode', desc: 'Pick an area and the flood date — radar images before and after are found for you and water is mapped.' },
-  { to: '/imagery?tab=advanced&task=vegetation', code: 'NDVI', icon: '🌾', title: 'Vegetation mode', desc: 'NDVI from the clearest recent Sentinel-2 image of your area, with statistics.' },
-  { to: '/imagery?tab=advanced&task=urban', code: 'NDBI', icon: '🏙', title: 'Urban growth mode', desc: 'Compare built-up areas (NDBI) between two years.' },
-  { to: '/imagery', code: 'IMAGE', icon: '📷', title: 'Latest imagery mode', desc: 'Find the clearest recent image of an area and download it (GeoTIFF / PNG).' },
   { to: '/imagery?tab=advanced&task=dams', code: 'RID', icon: '💧', title: 'Dam monitoring mode', desc: 'Current storage, inflow and release from the Royal Irrigation Department.' },
   { to: '/track?tab=passes', code: 'PASS', icon: '🛰', title: 'Satellite pass mode', desc: 'Pass times for NAPA, ISS or any satellite over your location.' },
 ];
@@ -37,7 +44,24 @@ export default function Home() {
         </div>
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {MAIN.map((c) => (
+          {MAIN.map((c) => c.modes ? (
+            <div key={c.to} className="flex flex-col rounded-lg border border-cyan-400/40 bg-navy-900 p-4 sm:col-span-2">
+              <span className="flex items-start justify-between">
+                <span className="text-3xl">{c.icon}</span>
+                <span className="rounded border border-cyan-400/30 px-1.5 py-0.5 font-mono text-[9px] tracking-[0.2em] text-cyan-300">MODE · {c.code}</span>
+              </span>
+              <span className="mt-2 text-base font-semibold text-white">{t(c.title)}</span>
+              <span className="mt-1 text-xs leading-relaxed text-muted">{t(c.desc)}</span>
+              <div className="mt-3 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                {c.modes.map((m) => (
+                  <Link key={m.start} to={`${c.to}&start=${m.start}`} className="rounded border border-line px-2 py-1.5 text-xs text-slate-200 transition hover:border-cyan-400/60 hover:bg-cyan-400/5 hover:text-white">
+                    {m.icon} {t(m.label)}
+                  </Link>
+                ))}
+              </div>
+              <Link to={c.to} className="mt-3 text-xs text-cyan-300 hover:underline">{t('Open mode')} →</Link>
+            </div>
+          ) : (
             <Link
               key={c.to}
               to={c.to}

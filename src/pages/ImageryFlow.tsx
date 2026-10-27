@@ -2,6 +2,7 @@
 // ③ choose what to do with them (change analysis, swipe/blink, indices & flood, download/report/watch).
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLang } from '../i18n';
+import { useSearchParams } from 'react-router-dom';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
 import { Button, Field, Notice, Select, Spinner, cx } from '../components/ui';
@@ -31,7 +32,10 @@ const useL = () => {
 };
 const d10 = (s?: string | null) => (s ? s.slice(0, 10) : '—');
 
-type Mode = 'change' | 'view' | 'index' | 'export';
+type Mode = 'change' | 'view' | 'ndvi' | 'ndbi' | 'flood' | 'export';
+const MODE_IDS: Mode[] = ['change', 'view', 'ndvi', 'ndbi', 'flood', 'export'];
+/** modes that work with a single image */
+const ONE_IMAGE: Mode[] = ['ndvi', 'ndbi', 'flood', 'export'];
 
 function Step({ n, title, summary, open, onToggle, disabled, children }: { n: number; title: string; summary?: ReactNode; open: boolean; onToggle: () => void; disabled?: boolean; children: ReactNode }) {
   return (
@@ -60,7 +64,15 @@ export default function ImageryFlow() {
   const [step, setStep] = useState<1 | 2 | 3>(aoi ? 2 : 1);
   const [watchId, setWatchId] = useState<string | null>(null);
   const [pick, setPick] = useState<PickerCtx | null>(null);
-  const [mode, setMode] = useState<Mode | null>(null);
+  // ?start=<mode> (from the home page): that mode is opened as soon as the images allow it
+  const [params] = useSearchParams();
+  const startParam = params.get('start') as Mode | null;
+  const wanted = useRef<Mode | null>(startParam && MODE_IDS.includes(startParam) ? startParam : null);
+  const [mode, setModeS] = useState<Mode | null>(null);
+  const setMode = (m: Mode | null) => {
+    wanted.current = m;
+    setModeS(m);
+  };
   const [sideOpen, setSideOpen] = useState(true);
 
   const akey = useMemo(() => (aoi ? aoiKey(aoi.geometry) : ''), [aoi?.geometry]);
@@ -75,7 +87,7 @@ export default function ImageryFlow() {
   }, [viewer, aoi?.geometry]);
   useEffect(() => {
     setPick(null);
-    setMode(null);
+    setModeS(null); // the chosen mode (wanted) is kept and reopened for the new area
     g.layers.forEach((l) => g.removeLayer(l.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [akey]);
@@ -85,9 +97,13 @@ export default function ImageryFlow() {
     g.setSceneB(B);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [A?.id, B?.id]);
-  // move on to step 3 when both images are chosen
+  // move on to step 3 when the images are enough for the chosen mode (both, or one for single-image modes)
   useEffect(() => {
-    if (A && B && step === 2) setStep(3);
+    const w = wanted.current;
+    const enough = A && B ? true : !!(A || B) && !!w && ONE_IMAGE.includes(w);
+    if (!enough) return;
+    if (step === 2 && (A && B ? true : !!w)) setStep(3);
+    if (w && !mode) setModeS(w);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [A?.id, B?.id]);
   // place names / old borders would sit over the images while comparing
@@ -148,6 +164,7 @@ export default function ImageryFlow() {
           >
             {aoi && (
               <div className="space-y-2">
+                {wanted.current && <StartHint mode={wanted.current} />}
                 <ScenePicker key={akey} geometry={aoi.geometry} panel={false} onPair={setPick} />
                 <details className="rounded border border-line text-[11px]">
                   <summary className="cursor-pointer px-2 py-1 text-muted hover:text-white">{L('เกณฑ์คุณภาพภาพ (เมฆ, ความละเอียด)', 'Quality thresholds (cloud, resolution)')}</summary>
@@ -159,9 +176,9 @@ export default function ImageryFlow() {
 
           {/* ③ what next */}
           <Step n={3} title={L('ทำอะไรต่อ', 'What next')} summary={mode ? MODES(L).find((m) => m.id === mode)?.label : undefined} open={step === 3} onToggle={() => setStep(step === 3 ? 2 : 3)} disabled={!aoi || !(A || B)}>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-2">
               {MODES(L).map((m) => {
-                const need = m.id === 'index' || m.id === 'export' ? !!(A || B) : !!(A && B);
+                const need = ONE_IMAGE.includes(m.id) ? !!(A || B) : !!(A && B);
                 return (
                   <button
                     key={m.id}
@@ -203,11 +220,26 @@ export default function ImageryFlow() {
   );
 }
 
+function StartHint({ mode }: { mode: Mode }) {
+  const L = useL();
+  const t: Record<Mode, [string, string]> = {
+    change: ['เลือกภาพ A (ก่อน) และ B (หลัง) — จุดสีเขียวคือภาพที่ผ่านเกณฑ์เมฆ', 'Pick A (before) and B (after) — green dots pass the cloud check'],
+    view: ['เลือกภาพ A และ B ที่ต้องการดูเทียบกัน', 'Pick the A and B images to look at'],
+    flood: ['น้ำท่วมมักมีเมฆ: ติ๊ก “Sentinel-1 เรดาร์” แล้วค้นหา จากนั้นใส่วันเหตุการณ์และกด “ก่อน/หลังเหตุการณ์” (ภาพเดียวก็ได้)', 'Floods are cloudy: tick “Sentinel-1 radar”, search, then set the event date and use “Before/after event” (one image also works)'],
+    ndvi: ['เลือกภาพเดียวก็ได้ — กด “ภาพล่าสุดที่มี” หรือคลิกจุดสีเขียว', 'One image is enough — use “Latest available” or click a green dot'],
+    ndbi: ['เทียบการขยายตัวเมือง: ตั้งช่วงค้นหา 2 ปี แล้วกด “รายปี”', 'Urban growth: search over 2 years, then use “Yearly”'],
+    export: ['เลือกภาพที่ต้องการ — กด “ภาพล่าสุดที่มี” เพื่อได้ภาพใหม่ที่สุด', 'Pick the image(s) — “Latest available” gives the newest one'],
+  };
+  return <p className="rounded border border-cyan-400/30 bg-cyan-400/5 px-2 py-1 text-[10px] text-cyan-200">💡 {L(...t[mode])}</p>;
+}
+
 const MODES = (L: (a: string, b: string) => string): { id: Mode; icon: string; label: string; desc: string }[] => [
   { id: 'change', icon: '🔍', label: L('เทียบการเปลี่ยนแปลง', 'Change analysis'), desc: L('ถางป่า สิ่งปลูกสร้าง น้ำ ไฟ — ได้พื้นที่ ไร่/ตร.กม. และพิกัดจุดที่เปลี่ยน', 'Clearing, construction, water, fire — areas in rai/km² and patch locations') },
   { id: 'view', icon: '◐', label: L('เลื่อน / กะพริบดู', 'Swipe / blink'), desc: L('ดูภาพ A กับ B ด้วยตา บนแผนที่แบบไม่มีอะไรบัง', 'Look at A and B on a clear map') },
-  { id: 'index', icon: '🌿', label: L('ดัชนีพืช/น้ำ · น้ำท่วม', 'Indices · flood'), desc: L('NDVI, NDWI ฯลฯ ของภาพที่เลือก และขอบเขตน้ำก่อน/หลัง', 'NDVI, NDWI… of the chosen images and water extent') },
-  { id: 'export', icon: '⬇', label: L('ดาวน์โหลด · รายงาน · เฝ้าระวัง', 'Download · report · watch'), desc: L('โหลดภาพ ออกรายงาน หรือเพิ่มเข้ารายการตรวจอัตโนมัติ', 'Download images, make a report, or add to automatic checks') },
+  { id: 'flood', icon: '🌊', label: L('น้ำท่วม', 'Flood'), desc: L('ขอบเขตน้ำจากภาพหลัง (และก่อน) — เรดาร์มองทะลุเมฆ', 'Water extent from the after (and before) image — radar sees through cloud') },
+  { id: 'ndvi', icon: '🌾', label: L('พืชพรรณ (NDVI)', 'Vegetation (NDVI)'), desc: L('ความเขียว/สุขภาพพืช พร้อมสถิติในพื้นที่ (และดัชนีอื่น)', 'Greenness / plant health with area statistics (and other indices)') },
+  { id: 'ndbi', icon: '🏙', label: L('การขยายตัวเมือง (NDBI)', 'Urban growth (NDBI)'), desc: L('พื้นที่สิ่งปลูกสร้าง — เลือกภาพห่างกัน 1–2 ปี', 'Built-up surfaces — pick images 1–2 years apart') },
+  { id: 'export', icon: '📷', label: L('ภาพ · รายงาน · เฝ้าระวัง', 'Images · report · watch'), desc: L('ดาวน์โหลดภาพ (GeoTIFF/PNG) ออกรายงาน หรือเพิ่มเข้าการตรวจอัตโนมัติ', 'Download images (GeoTIFF/PNG), make a report, or add to automatic checks') },
 ];
 
 function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: PickerCtx; watch: MonitorAoi | null; onWatch: (a: MonitorAoi) => void; addRun: (r: MonitorRun) => void }) {
@@ -220,7 +252,6 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [run, setRun] = useState<MonitorRun | null>(null);
-  const [sub, setSub] = useState<'index' | 'flood'>('index');
   const [freq, setFreq] = useState(7);
   const [region, setRegion] = useState<Region>('TH');
   const [sat, setSat] = useState<SensorMode>('auto');
@@ -297,16 +328,11 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
       </div>
     );
 
-  if (mode === 'index')
+  if (mode === 'ndvi' || mode === 'ndbi' || mode === 'flood')
     return (
       <div className="space-y-2">
-        <div className="grid grid-cols-2 gap-1">
-          <Button variant={sub === 'index' ? 'active' : 'ghost'} onClick={() => setSub('index')}>🌿 {L('ดัชนีพืช / น้ำ', 'Indices')}</Button>
-          <Button variant={sub === 'flood' ? 'active' : 'ghost'} onClick={() => setSub('flood')}>🌊 {L('แผนที่น้ำท่วม', 'Flood map')}</Button>
-        </div>
         <p className="text-[10px] text-muted">{L(`ใช้ภาพที่เลือกไว้: A ${d10(A?.datetime)} · B ${d10(B?.datetime)}`, `Uses the picked images: A ${d10(A?.datetime)} · B ${d10(B?.datetime)}`)}</p>
-        <div className={sub === 'index' ? '' : 'hidden'}><SpectralPanel /></div>
-        <div className={sub === 'flood' ? '' : 'hidden'}><FloodPanel /></div>
+        {mode === 'flood' ? <FloodPanel /> : <SpectralPanel key={mode} initialIndex={mode} />}
       </div>
     );
 
