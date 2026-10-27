@@ -6,9 +6,10 @@ import { bounds, editAoi, isRectangle, readFavourites, writeFavourites, type Fav
 import { uid } from '../lib/repo';
 import { Cesium, drawOnGlobe, flyToPolygon, type DrawMode } from '../lib/cesium';
 import { logAudit } from '../lib/repo';
-import { Button, Input, Spinner, cx } from './ui';
+import { Button, Input, Select, Spinner, cx } from './ui';
+import type { ImportedPlace } from '../lib/coordImport';
 
-export default function AoiPicker({ viewer, compact }: { viewer?: Cesium.Viewer | null; compact?: boolean }) {
+export default function AoiPicker({ viewer, compact, onMany }: { viewer?: Cesium.Viewer | null; compact?: boolean; /** offered when a file holds several places */ onMany?: (places: ImportedPlace[]) => void }) {
   const { aoi, setAoi } = useWorkspace();
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<GeocodeHit[]>([]);
@@ -28,6 +29,7 @@ export default function AoiPicker({ viewer, compact }: { viewer?: Cesium.Viewer 
   const [nameV, setNameV] = useState('');
   const [favEdit, setFavEdit] = useState<string | null>(null);
   const [favEditV, setFavEditV] = useState('');
+  const [multi, setMulti] = useState<{ file: string; places: ImportedPlace[] } | null>(null);
   const commitName = () => {
     const nm = nameV.trim();
     if (aoi && nm && nm !== aoi.name) setAoi({ ...aoi, name: nm });
@@ -91,11 +93,23 @@ export default function AoiPicker({ viewer, compact }: { viewer?: Cesium.Viewer 
     else apply({ type: 'Polygon', coordinates: [pts] }, mode === 'rectangle' ? 'Drawn rectangle' : 'Drawn polygon', 'drawn');
   };
 
+  const usePlace = async (p: ImportedPlace) => {
+    const { placePolygon } = await import('../lib/coordImport');
+    apply(placePolygon(p, 2), p.name, 'import');
+  };
   const onFile = async (f?: File) => {
     if (!f) return;
     setErr('');
+    setMulti(null);
     try {
-      apply(await aoiFromFile(f), f.name, 'import');
+      const { importCoordFiles } = await import('../lib/coordImport');
+      const r = await importCoordFiles([{ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }]);
+      if (r.places.length > 1) {
+        // several places: let the user choose one, or hand them all over (e.g. to the watchlist)
+        setMulti({ file: f.name, places: r.places });
+        return;
+      }
+      apply(await aoiFromFile(f), r.places[0]?.name || f.name, 'import');
     } catch (e: any) {
       setErr(e.message);
     }
@@ -138,6 +152,21 @@ export default function AoiPicker({ viewer, compact }: { viewer?: Cesium.Viewer 
         <input ref={fileRef} type="file" accept=".geojson,.json,.kml,.kmz,.gpx,.zip,.csv,.txt,.xlsx,.wkt" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
       </div>
       {err && <p className="text-[11px] text-bad">{err}</p>}
+      {multi && (
+        <div className="space-y-1.5 rounded border border-cyan-400/40 bg-cyan-400/5 p-2 text-[11px]">
+          <div className="text-slate-200">{t('This file has')} <b>{multi.places.length}</b> {t('places')} ({multi.file})</div>
+          <Select defaultValue="" onChange={(e) => { const p = multi.places.find((x) => x.id === e.target.value); if (p) void usePlace(p); }} className="!py-1 text-xs">
+            <option value="">{t('— use one place as the area —')}</option>
+            {multi.places.map((p, i) => <option key={p.id} value={p.id}>{i + 1}. {p.name} ({p.lat.toFixed(4)}, {p.lon.toFixed(4)})</option>)}
+          </Select>
+          {onMany && (
+            <Button variant="primary" className="w-full" onClick={() => { onMany(multi.places); setMulti(null); }}>
+              {t('Add all from the file')} {multi.places.length} {t('places to the watchlist')}
+            </Button>
+          )}
+          <button className="text-[10px] text-muted hover:text-white" onClick={() => setMulti(null)}>{t('Close')}</button>
+        </div>
+      )}
       {aoi && (() => {
         const b = bounds(aoi.geometry);
         const km2 = areaKm2(aoi.geometry);

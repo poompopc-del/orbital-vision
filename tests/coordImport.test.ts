@@ -363,3 +363,18 @@ test('boundary lines: shapefile parts kept separately, Web Mercator converted, r
   near(r.geojson.features[0].geometry.coordinates[2][1], 14.1, 1e-6);
   assert.ok(r.warnings.some((w) => w.en.includes('.rar')));
 });
+
+test('pipe-separated degree–decimal-minute list (one place per line) keeps every place and its brackets', () => {
+  const r = importCoordText([
+    'พิกัดและชื่อสถานที่',
+    'รูปแบบ: ชื่อสถานที่ | Latitude | Longitude',
+    '',
+    "กองบัญชาการหน่วยองค์กรฯ (อุนเซน) | 11°27.041'N | 104°57.071'E",
+    "บก.ภ.กม.พิเศษ | 11°26.985'N | 104°53.168'E",
+    `คลังสรรพาวุธ K-86 | 11°19'13.77"N | 104°27'33.97"E`,
+  ].join('\n'));
+  assert.equal(r.places.length, 3);
+  assert.equal(r.places[0].name, 'กองบัญชาการหน่วยองค์กรฯ (อุนเซน)');
+  near(r.places[0].lat, 11 + 27.041 / 60, 1e-6);
+  near(r.places[2].lon, 104 + 27 / 60 + 33.97 / 3600, 1e-6);
+});

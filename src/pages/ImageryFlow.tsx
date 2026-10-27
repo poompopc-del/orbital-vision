@@ -149,7 +149,21 @@ export default function ImageryFlow() {
               </Field>
             )}
             <div className="my-2 text-center text-[10px] text-muted">{L('หรือ วาด / ค้นหาสถานที่ / พิมพ์พิกัด / นำเข้าไฟล์', 'or draw / search a place / type coordinates / import a file')}</div>
-            <AoiPicker viewer={viewer} compact />
+            <AoiPicker
+              viewer={viewer}
+              compact
+              onMany={async (places) => {
+                const { placePolygon } = await import('../lib/coordImport');
+                const now = Date.now().toString(36);
+                const added = places.map((p, i) => ({ ...aoiFromPolygon(p.name, placePolygon(p, 2), 'TH', 'clearing', 7, 'auto'), id: `aoi_${now}_f${i.toString(36)}` }));
+                setAois((l) => [...l, ...added]);
+                if (added[0]) {
+                  setWatchId(added[0].id);
+                  setAoi({ geometry: added[0].geometry, name: added[0].name, source: 'import' });
+                  setStep(2);
+                }
+              }}
+            />
             {aoi && <Button variant="primary" className="mt-2 w-full" onClick={() => setStep(2)}>{L('ถัดไป: เลือกภาพ →', 'Next: pick images →')}</Button>}
           </Step>
 

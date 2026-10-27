@@ -351,16 +351,23 @@ export function findInText(line: string): Found | null {
 }
 
 function nameAround(line: string, span: [number, number]): string {
-  return (line.slice(0, span[0]) + ' ' + line.slice(span[1]))
+  const cleaned = (line.slice(0, span[0]) + ' ' + line.slice(span[1]))
     .replace(/(?:https?:\/\/|www\.)\S+/g, ' ')
     .replace(/\b(?:lat(?:itude)?|lon(?:g(?:itude)?)?|lng|utm|zone|easting|northing|coordinates?|coords?)\b\s*[:=]?/gi, ' ')
     .replace(/(?:ละติจูด|ลองจิจูด|พิกัด)\s*[:=]?/g, ' ')
     .replace(/["']/g, ' ')
-    .replace(/[\s,;|\t:=–\-()[\]]+$/g, '')
-    .replace(/^[\s,;|\t:=–\-()[\]]+/g, '')
+    .replace(/[\s,;|\t:=–\-]+$/g, '')
+    .replace(/^[\s,;|\t:=–\-]+/g, '')
     .replace(/\s{2,}/g, ' ')
     .replace(/^[\d\s.#,;)]*$/, '') // only an index number left
     .trim();
+  // drop brackets left unbalanced by cutting the coordinate out, keep "(อุนเซน)"
+  const bal = (x: string) => (x.match(/\(/g)?.length ?? 0) - (x.match(/\)/g)?.length ?? 0);
+  let n = cleaned;
+  while (/^[\s()[\]]/.test(n) && (n[0] === ')' || n[0] === ']' || bal(n) > 0 || /^[([]\s*$/.test(n))) n = n.slice(1).trim();
+  while (/[\s()[\]]$/.test(n) && (bal(n) > 0 || n.endsWith('(') || n.endsWith('['))) n = n.slice(0, -1).trim();
+  if (bal(n) > 0) n += ')';
+  return n.trim();
 }
 
 /** Turn a found pair / UTM / geometry into a WGS84 Raw (or null). `order` is the file-wide choice for ambiguous pairs. */

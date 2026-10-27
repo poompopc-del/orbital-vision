@@ -154,6 +154,8 @@ export function MonitorWatch() {
   const line = useLineStyle((s) => s.style);
   const [sideOpen, setSideOpenS] = useState(() => readPref('ov.monitor.side', true));
   const setSideOpen = (v: boolean) => { setSideOpenS(v); writePref('ov.monitor.side', v); };
+  const [legendOpen, setLegendOpenS] = useState(() => readPref('ov.monitor.legend', true));
+  const setLegendOpen = (v: boolean) => { setLegendOpenS(v); writePref('ov.monitor.legend', v); };
   const { qc } = useQc();
 
   const sel = aois.find((a) => a.id === selId) ?? null;
@@ -546,7 +548,7 @@ export function MonitorWatch() {
           </Panel>
         )}
 
-        {panel === 'add' && <AddPanel viewer={viewer} onAdd={addFromWorkspace} />}
+        {panel === 'add' && <AddPanel viewer={viewer} onAdd={addFromWorkspace} onDone={() => setPanel('list')} />}
         {panel === 'import' && (
           <CoordImport
             viewer={viewer}
@@ -666,11 +668,20 @@ export function MonitorWatch() {
             <Button onClick={() => setEdit(null)}>{L('ยกเลิก', 'Cancel')}</Button>
           </div>
         )}
-        <div className={cx('absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 p-2 text-[11px] text-slate-200 backdrop-blur', clean && 'hidden')}>
+        <div className={cx('absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 text-[11px] text-slate-200 backdrop-blur', clean && 'hidden')}>
+          <button onClick={() => setLegendOpen(!legendOpen)} className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[10px] text-muted hover:text-white" title={legendOpen ? L('ซ่อนคำอธิบายสี', 'Hide the legend') : L('แสดงคำอธิบายสี', 'Show the legend')}>
+            <span className={cx('inline-block transition-transform', legendOpen && 'rotate-90')}>▶</span>
+            {L('คำอธิบายสี', 'Legend')}
+            {!legendOpen && <span className="ml-1 flex gap-0.5">{['significant', 'minor', 'none', 'new'].map((k) => <i key={k} className="inline-block h-2 w-2 rounded-sm" style={{ background: LEVEL_COLOR[k] }} />)}</span>}
+          </button>
+          {legendOpen && (
+            <div className="px-2 pb-2">
           {[['significant', L('เปลี่ยนแปลงมีนัยสำคัญ', 'Significant change')], ['minor', L('เล็กน้อย', 'Minor')], ['none', L('ไม่พบการเปลี่ยนแปลงเกินเกณฑ์', 'No significant change')], ['insufficient', L('ข้อมูลไม่พอ (ไม่สรุปผล)', 'Insufficient (no conclusion)')], ['new', L('ยังไม่ตรวจ', 'Not checked')]].map(([k, l]) => (
             <div key={k} className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: k === 'insufficient' ? 'repeating-linear-gradient(45deg,#94a3b8 0 2px,transparent 2px 4px)' : LEVEL_COLOR[k] }} />{l}</div>
           ))}
           <div className="mt-1 border-t border-line pt-1 text-[10px] text-muted">{L('ในผลแต่ละพื้นที่: ลายเส้นขาว = เมฆ · ม่วง = เงาเมฆ · เทา = ไม่มีข้อมูล', 'Within a result: white hatch = cloud · purple = shadow · grey = no data')}</div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -737,8 +748,9 @@ function WatchList({ selId, onSelect, onRun, busy }: { selId: string | null; onS
 
 // ---------------------------------------------------------------- add by drawing / import
 
-function AddPanel({ viewer, onAdd }: { viewer: Cesium.Viewer | null; onAdd: (r: Region, p: Purpose, f: number, name: string, sat: SensorMode) => void }) {
+function AddPanel({ viewer, onAdd, onDone }: { viewer: Cesium.Viewer | null; onAdd: (r: Region, p: Purpose, f: number, name: string, sat: SensorMode) => void; onDone?: () => void }) {
   const L = useL();
+  const { setAois } = useMonitor();
   const { aoi } = useWorkspace();
   const [region, setRegion] = useState<Region>('TH-KH');
   const [purpose, setPurpose] = useState<Purpose>('clearing');
@@ -747,7 +759,16 @@ function AddPanel({ viewer, onAdd }: { viewer: Cesium.Viewer | null; onAdd: (r: 
   const [name, setName] = useState('');
   return (
     <Panel title={L('เพิ่มพื้นที่จากการวาด / ค้นหา / นำเข้าไฟล์', 'Add an area: draw / search / import')}>
-      <AoiPicker viewer={viewer} compact />
+      <AoiPicker
+        viewer={viewer}
+        compact
+        onMany={async (places) => {
+          const { placePolygon } = await import('../lib/coordImport');
+          const now = Date.now().toString(36);
+          setAois((l) => [...l, ...places.map((p, i) => ({ ...aoiFromPolygon(p.name, placePolygon(p, 2), region, purpose, freq, sat), id: `aoi_${now}_m${i.toString(36)}` }))]);
+          onDone?.();
+        }}
+      />
       <div className="mt-2 grid grid-cols-2 gap-1.5">
         <Field label={L('ชื่อ', 'Name')}><Input value={name} placeholder={aoi?.name ?? ''} onChange={(e) => setName(e.target.value)} /></Field>
         <Field label={L('รอบตรวจ', 'Cycle')}>
