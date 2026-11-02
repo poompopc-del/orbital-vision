@@ -14,26 +14,27 @@ body,
 
 body {
   margin: 0;
-  background: #0b0e12;
-  color: #e6edf5;
-  font-family: Inter, system-ui, sans-serif;
+  background: #141719;
+  color: #e6e9e7;
+  font-family: 'IBM Plex Sans', 'IBM Plex Sans Thai', Inter, system-ui, sans-serif;
+  font-size: 13px;
   -webkit-font-smoothing: antialiased;
 }
 
 @layer components {
   .label {
-    @apply font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-muted;
+    @apply font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted;
   }
   .scroll-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgba(148, 178, 214, 0.25) transparent;
+    scrollbar-color: #3d4549 transparent;
   }
 }
 
 /* --- Cesium widget restyle (keep attribution visible, just quieter) --- */
 .cesium-viewer,
 .cesium-widget {
-  font-family: Inter, system-ui, sans-serif;
+  font-family: 'IBM Plex Sans', 'IBM Plex Sans Thai', system-ui, sans-serif;
 }
 .cesium-widget-credits {
   font-size: 10px !important;
@@ -43,22 +44,22 @@ body {
   bottom: 2px !important;
 }
 .cesium-viewer-timelineContainer {
-  background: rgba(11, 21, 36, 0.92) !important;
-  border-top: 1px solid rgba(148, 178, 214, 0.12);
+  background: rgba(27, 32, 35, 0.96) !important;
+  border-top: 1px solid #343b3f;
 }
 .cesium-timeline-main {
   border: none !important;
 }
 .cesium-timeline-bar {
-  background: linear-gradient(#122136, #0b1524) !important;
+  background: linear-gradient(#23292d, #1b2023) !important;
 }
 .cesium-timeline-ticLabel {
-  color: #8b98ab !important;
-  font-family: 'JetBrains Mono', monospace;
+  color: #939d9a !important;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
 }
 .cesium-timeline-needle {
-  background: #22d3ee !important;
+  background: #d5aa69 !important;
 }
 .cesium-viewer-animationContainer {
   transform: scale(0.8);
@@ -67,15 +68,21 @@ body {
 .cesium-animation-theme {
   visibility: hidden;
 }
-.cesium-animation-themeNormal { color: #122136; }
-.cesium-animation-themeHover { color: #1a2d48; }
-.cesium-animation-themeSelect { color: #22d3ee; }
+.cesium-animation-themeNormal { color: #23292d; }
+.cesium-animation-themeHover { color: #2c3337; }
+.cesium-animation-themeSelect { color: #d5aa69; }
 .cesium-animation-themeDisabled { color: #333; }
-.cesium-animation-themeKnob { color: #0e1a2c; }
-.cesium-animation-themePointer { color: #22d3ee; }
-.cesium-animation-themeSwoosh { color: #7ce7f7; }
-.cesium-animation-themeSwooshHover { color: #7ce7f7; }
+.cesium-animation-themeKnob { color: #1b2023; }
+.cesium-animation-themePointer { color: #d5aa69; }
+.cesium-animation-themeSwoosh { color: #e4c38f; }
+.cesium-animation-themeSwooshHover { color: #e4c38f; }
 
 input[type='range'] {
-  accent-color: #22d3ee;
+  accent-color: #91a58d;
 }
+
+/* thin, quiet scrollbars everywhere (WebKit) */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #3a4246; border-radius: 4px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+::selection { background: rgba(213, 170, 105, 0.35); }

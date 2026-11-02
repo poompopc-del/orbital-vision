@@ -122,7 +122,7 @@ export function LegendBox() {
   const shown = g.layers.filter((l) => l.show && l.legend);
   if (!shown.length) return null;
   return (
-    <div className="max-h-[45vh] w-[260px] overflow-y-auto rounded-md border border-line bg-ink-950/90 p-2.5 text-[11px] shadow-xl backdrop-blur scroll-thin">
+    <div className="max-h-[45vh] w-[260px] overflow-y-auto rounded-md border border-line bg-ink-950/90 p-2.5 text-[11px] shadow-xl scroll-thin">
       <div className="label mb-1">{t('Legend')}</div>
       {shown.map((l) => (
         <div key={l.id} className="mb-2 last:mb-0">

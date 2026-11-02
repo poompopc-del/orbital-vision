@@ -301,12 +301,12 @@ function SeriesChart({ series, label }: { series: { date: string; value: number;
       <div className="label mb-1">{label} — {t('AOI mean over time')}</div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
         <line x1={P} x2={W - 6} y1={H - 14} y2={H - 14} stroke="rgba(148,178,214,0.2)" />
-        <text x={2} y={y(hi) + 3} fontSize="8" fill="#8b98ab">{hi.toFixed(2)}</text>
-        <text x={2} y={y(lo) + 3} fontSize="8" fill="#8b98ab">{lo.toFixed(2)}</text>
-        <path d={path} fill="none" stroke="#22d3ee" strokeWidth={1.8} />
-        {series.map((s, i) => <circle key={s.id} cx={x(ts[i])} cy={y(s.value)} r={2.6} fill={s.clear ? '#22d3ee' : '#f5b84b'}><title>{`${s.date}: ${s.value.toFixed(3)}`}</title></circle>)}
-        <text x={P} y={H - 2} fontSize="8" fill="#8b98ab">{series[0].date}</text>
-        <text x={W - 6} y={H - 2} fontSize="8" fill="#8b98ab" textAnchor="end">{series[series.length - 1].date}</text>
+        <text x={2} y={y(hi) + 3} fontSize="8" fill="#939d9a">{hi.toFixed(2)}</text>
+        <text x={2} y={y(lo) + 3} fontSize="8" fill="#939d9a">{lo.toFixed(2)}</text>
+        <path d={path} fill="none" stroke="#91a58d" strokeWidth={1.8} />
+        {series.map((s, i) => <circle key={s.id} cx={x(ts[i])} cy={y(s.value)} r={2.6} fill={s.clear ? '#91a58d' : '#d5aa69'}><title>{`${s.date}: ${s.value.toFixed(3)}`}</title></circle>)}
+        <text x={P} y={H - 2} fontSize="8" fill="#939d9a">{series[0].date}</text>
+        <text x={W - 6} y={H - 2} fontSize="8" fill="#939d9a" textAnchor="end">{series[series.length - 1].date}</text>
       </svg>
       <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`} download="aoi-time-series.csv"><Button>{t('Download CSV')}</Button></a>
       <p className="mt-1 text-[10px] text-muted">{t('Cyan = cloud-free mean (Sentinel-2 SCL); orange = mean of all valid pixels. Scenes with > 80 % cloud in the AOI are skipped.')}</p>

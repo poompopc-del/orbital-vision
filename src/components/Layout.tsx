@@ -93,8 +93,8 @@ export default function Layout() {
       <nav className="order-2 flex shrink-0 overflow-x-auto border-t border-line bg-ink-950 md:order-1 md:w-[76px] md:flex-col md:overflow-visible md:border-r md:border-t-0">
         <div className="hidden h-14 items-center justify-center border-b border-line md:flex">
           <svg viewBox="0 0 32 32" className="h-7 w-7">
-            <circle cx="16" cy="16" r="6.5" fill="#22d3ee" />
-            <ellipse cx="16" cy="16" rx="14" ry="5" fill="none" stroke="#7ce7f7" strokeWidth="1.4" transform="rotate(-25 16 16)" />
+            <circle cx="16" cy="16" r="6.5" fill="#91a58d" />
+            <ellipse cx="16" cy="16" rx="14" ry="5" fill="none" stroke="#d5aa69" strokeWidth="1.4" transform="rotate(-25 16 16)" />
           </svg>
         </div>
         {NAV.map((n) => (

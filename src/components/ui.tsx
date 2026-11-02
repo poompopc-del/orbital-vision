@@ -37,7 +37,7 @@ export function Panel({
   };
   const shown = !collapsible || open;
   return (
-    <section className={cx('rounded-md border border-line bg-navy-900/90 backdrop-blur-sm', className)}>
+    <section className={cx('rounded-md border border-line bg-navy-900 shadow-panel', className)}>
       {title != null && (
         <header className={cx('flex items-center justify-between gap-2 px-3 py-2', shown && 'border-b border-line')}>
           {collapsible ? (

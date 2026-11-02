@@ -58,7 +58,7 @@ function loadColors(): Record<string, string> {
 const arrowCache = new Map<string, string>();
 function arrowIcon(color: string) {
   if (!arrowCache.has(color)) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M10 1 L18 18 L10 13 L2 18 Z" fill="${color}" stroke="#0b1524" stroke-width="1.2"/></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M10 1 L18 18 L10 13 L2 18 Z" fill="${color}" stroke="#1b2023" stroke-width="1.2"/></svg>`;
     arrowCache.set(color, `data:image/svg+xml;base64,${btoa(svg)}`);
   }
   return arrowCache.get(color)!;
@@ -107,11 +107,11 @@ function SkyPlot({ pass }: { pass: VisiblePass }) {
       <line x1={20} y1={100} x2={180} y2={100} stroke="rgba(148,178,214,0.12)" />
       <line x1={100} y1={20} x2={100} y2={180} stroke="rgba(148,178,214,0.12)" />
       {[['N', 100, 12], ['E', 190, 103], ['S', 100, 196], ['W', 8, 103]].map(([l, x, y]) => (
-        <text key={l as string} x={x as number} y={y as number} textAnchor="middle" fontSize="9" fill="#8b98ab" fontFamily="JetBrains Mono, monospace">{l}</text>
+        <text key={l as string} x={x as number} y={y as number} textAnchor="middle" fontSize="9" fill="#939d9a" fontFamily="JetBrains Mono, monospace">{l}</text>
       ))}
       <text x={104} y={100 - R * (2 / 3) - 2} fontSize="7" fill="#5c6878">30°</text>
       <text x={104} y={100 - R * (1 / 3) - 2} fontSize="7" fill="#5c6878">60°</text>
-      <path d={path} fill="none" stroke="#22d3ee" strokeWidth={2} />
+      <path d={path} fill="none" stroke="#91a58d" strokeWidth={2} />
       <circle cx={ax} cy={ay} r={3.5} fill="#4fd18b" />
       <circle cx={tx} cy={ty} r={3.5} fill="#fff" />
     </svg>
@@ -240,10 +240,10 @@ export default function PassTracker() {
       point: { pixelSize: 9, color: CYAN, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
       label: {
         text: observer.name,
-        font: '11px "JetBrains Mono", monospace',
+        font: '11px "IBM Plex Mono", monospace',
         fillColor: Cesium.Color.WHITE,
         showBackground: true,
-        backgroundColor: Cesium.Color.fromCssColorString('#0b1524').withAlpha(0.85),
+        backgroundColor: Cesium.Color.fromCssColorString('#1b2023').withAlpha(0.85),
         pixelOffset: new Cesium.Cartesian2(0, -16),
       },
     });
@@ -348,7 +348,7 @@ export default function PassTracker() {
           font: `${isSel ? 12 : 10}px Inter, sans-serif`,
           fillColor: Cesium.Color.WHITE,
           showBackground: true,
-          backgroundColor: Cesium.Color.fromCssColorString('#0b1524').withAlpha(0.8),
+          backgroundColor: Cesium.Color.fromCssColorString('#1b2023').withAlpha(0.8),
           pixelOffset: new Cesium.Cartesian2(0, -12),
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, isSel ? 3e7 : 9e6),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -672,7 +672,7 @@ export default function PassTracker() {
         <div className="pointer-events-none absolute left-3 right-3 top-3 z-20 flex flex-col gap-1.5">
           <div className="flex flex-wrap items-start justify-between gap-1.5">
             {!clean ? (
-              <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-md border border-line bg-ink-950/85 p-1.5 backdrop-blur">
+              <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-md border border-line bg-ink-950/85 p-1.5">
           {(['3d', '2d', 'columbus'] as const).map((m) => (
             <Button key={m} variant={scene === m ? 'active' : 'ghost'} onClick={() => setScene(m)}>
               {m === '3d' ? '3D' : m === '2d' ? '2D' : t('2.5D')}
@@ -686,7 +686,7 @@ export default function PassTracker() {
               </div>
             ) : <span />}
             <div className="pointer-events-auto ml-auto flex flex-wrap justify-end gap-1.5">
-          <div className="flex items-center gap-1.5 rounded-md border border-line bg-ink-950/85 px-1.5 py-1 backdrop-blur">
+          <div className="flex items-center gap-1.5 rounded-md border border-line bg-ink-950/85 px-1.5 py-1">
             <span className="text-sm" title={t('Basemap')}>🗺</span>
             <Select value={mapCfg.base} onChange={(e) => setMapCfg({ ...mapCfg, base: e.target.value as BasemapId })} className="!w-auto !py-0.5 text-xs">
               {BASEMAPS.map((b) => <option key={b.id} value={b.id} title={b.note}>{t(b.label)}</option>)}
@@ -705,7 +705,7 @@ export default function PassTracker() {
             </div>
           </div>
           {!clean && (
-            <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 self-start rounded-md border border-line bg-ink-950/85 p-1.5 backdrop-blur">
+            <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 self-start rounded-md border border-line bg-ink-950/85 p-1.5">
           <span className="label px-1">{t('Sides')}</span>
           {([['both', 'Both'], ['desc', '↓ Descending'], ['asc', '↑ Ascending']] as const).map(([k, l]) => (
             <Button key={k} variant={side === k ? 'active' : 'ghost'} onClick={() => setSide(k)}>{t(l)}</Button>
@@ -729,7 +729,7 @@ export default function PassTracker() {
           </div>
         </div>
         {chosen.length > 0 && (
-          <div className="absolute bottom-8 left-3 z-10 max-h-[40%] overflow-y-auto scroll-thin rounded-md border border-line bg-ink-950/85 p-2 backdrop-blur">
+          <div className="absolute bottom-8 left-3 z-10 max-h-[40%] overflow-y-auto scroll-thin rounded-md border border-line bg-ink-950/85 p-2">
             <div className="label mb-1">{t('Line colour')}</div>
             {chosen.map((x) => (
               <label key={x.noradId} className="flex cursor-pointer items-center gap-2 py-0.5 text-xs text-white">

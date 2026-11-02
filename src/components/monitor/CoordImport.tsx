@@ -85,7 +85,7 @@ export default function CoordImport({
   useEffect(() => {
     if (!viewer || viewer.isDestroyed() || !places.length) return;
     const ds = new Cesium.CustomDataSource('coord-import');
-    const on = Cesium.Color.fromCssColorString('#22d3ee'), off = Cesium.Color.fromCssColorString('#94a3b8');
+    const on = Cesium.Color.fromCssColorString('#d5aa69'), off = Cesium.Color.fromCssColorString('#94a3b8');
     places.slice(0, 3000).forEach((p) => {
       const g = polys.get(p.id)!;
       const c = sel.has(p.id) ? on : off;

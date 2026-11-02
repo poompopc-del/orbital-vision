@@ -261,7 +261,7 @@ export function DisasterMap() {
 
       <div className="relative min-h-[360px] flex-1">
         <GlobeHost onReady={setViewer} />
-        <div className="absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 p-2 text-[10px] text-slate-200 backdrop-blur">
+        <div className="absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 p-2 text-[10px] text-slate-200">
           {HAZARDS.filter((h) => h.id !== 'other').map((h) => <div key={h.id} className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: h.color }} />{L(h.th, h.en)}</div>)}
           <div className="mt-1 text-muted">{L('จุดใหญ่ = ระดับสูงกว่า (ดูเกณฑ์ในรายละเอียด)', 'Bigger = higher level (criteria in detail)')}</div>
         </div>

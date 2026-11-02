@@ -636,7 +636,7 @@ function SceneTimeline({
               >
                 <title>{tip(it)}</title>
                 <circle cx={x} cy={y} r={r + 3} fill="transparent" />
-                <circle cx={x} cy={y} r={sel ? r + 1.6 : r} fill={colour(it)} stroke={sel ? '#fff' : '#0b1524'} strokeWidth={sel ? 1.2 : 0.5} />
+                <circle cx={x} cy={y} r={sel ? r + 1.6 : r} fill={colour(it)} stroke={sel ? '#fff' : '#1b2023'} strokeWidth={sel ? 1.2 : 0.5} />
                 {sel && <text x={x} y={y - r - 3} fontSize="7" fill="#fff" textAnchor="middle" fontWeight="700">{sel}</text>}
                 {days < 20 && !sel && <text x={x} y={y + r + 6} fontSize="4.5" fill="#94a3b8" textAnchor="middle">{new Date(it.datetime).getUTCDate()}</text>}
               </g>

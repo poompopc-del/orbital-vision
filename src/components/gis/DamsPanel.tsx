@@ -133,13 +133,13 @@ export default function DamsPanel() {
       const p = storagePct(d);
       ds.entities.add({
         position: Cesium.Cartesian3.fromDegrees(d.lon, d.lat),
-        point: { pixelSize: sel?.id === d.id ? 18 : 11, color: Cesium.Color.fromCssColorString(pctColor(p)), outlineColor: sel?.id === d.id ? Cesium.Color.fromCssColorString('#22d3ee') : Cesium.Color.WHITE, outlineWidth: sel?.id === d.id ? 4 : 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+        point: { pixelSize: sel?.id === d.id ? 18 : 11, color: Cesium.Color.fromCssColorString(pctColor(p)), outlineColor: sel?.id === d.id ? Cesium.Color.fromCssColorString('#d5aa69') : Cesium.Color.WHITE, outlineWidth: sel?.id === d.id ? 4 : 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
         label: {
           text: `${d.name}${p != null ? ` ${p.toFixed(0)}%` : ''}`,
           font: '11px Inter, sans-serif',
           fillColor: Cesium.Color.WHITE,
           showBackground: true,
-          backgroundColor: Cesium.Color.fromCssColorString('#0b1524').withAlpha(0.8),
+          backgroundColor: Cesium.Color.fromCssColorString('#1b2023').withAlpha(0.8),
           pixelOffset: new Cesium.Cartesian2(0, -16),
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1.5e6),
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,

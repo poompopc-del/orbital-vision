@@ -187,7 +187,7 @@ export default function MissionControl() {
           font: '11px "JetBrains Mono", monospace',
           fillColor: Cesium.Color.WHITE,
           showBackground: true,
-          backgroundColor: Cesium.Color.fromCssColorString('#0b1524').withAlpha(0.85),
+          backgroundColor: Cesium.Color.fromCssColorString('#1b2023').withAlpha(0.85),
           pixelOffset: new Cesium.Cartesian2(0, -18),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
@@ -408,7 +408,7 @@ export default function MissionControl() {
           {showPanel ? 'HIDE' : 'PANEL'}
         </button>
 
-        <div className={cx('pointer-events-none absolute left-3 top-3 z-10 hidden flex-col gap-1.5 rounded-md border border-line bg-ink-950/80 px-2.5 py-2 backdrop-blur', !focus && 'md:flex')}>
+        <div className={cx('pointer-events-none absolute left-3 top-3 z-10 hidden flex-col gap-1.5 rounded-md border border-line bg-ink-950/80 px-2.5 py-2', !focus && 'md:flex')}>
           <div className="flex items-center gap-1.5">
             {mode === 'historical' ? <Badge tone="warn">{t('Historical replay')}</Badge> : isLive ? <Badge tone="ok">{t('● Live clock')}</Badge> : <Badge tone="info">{t('Simulation time')}</Badge>}
             <Badge tone="cyan">{t('Propagated orbit · SGP4')}</Badge>
@@ -435,7 +435,7 @@ export default function MissionControl() {
         )}
 
         {selected && !focus && (
-          <div className="absolute right-3 top-3 z-20 max-h-[calc(100%-150px)] w-[300px] max-w-[calc(100%-24px)] overflow-y-auto rounded-md border border-line bg-navy-900/95 p-3 shadow-2xl backdrop-blur scroll-thin">
+          <div className="absolute right-3 top-3 z-20 max-h-[calc(100%-150px)] w-[300px] max-w-[calc(100%-24px)] overflow-y-auto rounded-md border border-line bg-navy-900/95 p-3 shadow-2xl scroll-thin">
             <div className="mb-2 flex items-center justify-between">
               <span className="label">{t('Selected satellite')}</span>
               <button onClick={() => { setSelectedSat(null); setFollow(false); }} className="text-muted hover:text-white">✕</button>

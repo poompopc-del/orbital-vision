@@ -467,7 +467,7 @@ function OnMap({ g }: { g: GisApi }) {
   const newest = ls[ls.length - 1]?.id;
   const shownLegend = legendOf ?? newest;
   return (
-    <div className="absolute bottom-8 left-3 z-10 w-[min(300px,calc(100%-24px))] rounded-md border border-line bg-ink-950/90 text-[11px] text-slate-200 shadow-xl backdrop-blur">
+    <div className="absolute bottom-8 left-3 z-10 w-[min(300px,calc(100%-24px))] rounded-md border border-line bg-ink-950/90 text-[11px] text-slate-200 shadow-xl">
       <div className="flex items-center gap-1.5 px-2 py-1.5">
         <button onClick={() => setOpen(!open)} className="flex flex-1 items-center gap-1.5 text-left">
           <span className={cx('inline-block text-[10px] text-muted transition-transform', open && 'rotate-90')}>▶</span>

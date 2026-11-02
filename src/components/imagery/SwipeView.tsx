@@ -83,7 +83,7 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose }: { vie
           {show === 'A' ? `A · ${L('ก่อน', 'before')} · ${A.datetime.slice(0, 10)}` : `B · ${L('หลัง', 'after')} · ${B.datetime.slice(0, 10)}`}
         </div>
       )}
-      <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px] text-slate-200 backdrop-blur">
+      <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px] text-slate-200">
         <Button variant={show === 'split' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('split'); }}>{L('เลื่อนเทียบ', 'Swipe')}</Button>
         <Button variant={show === 'A' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('A'); }}>A {L('ก่อน', 'before')}</Button>
         <Button variant={show === 'B' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('B'); }}>B {L('หลัง', 'after')}</Button>

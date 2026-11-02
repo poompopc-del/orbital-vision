@@ -220,7 +220,7 @@ export function MonitorWatch() {
       const on = picked.has(tl.id);
       ds.entities.add({
         id: `tile:${tl.id}`,
-        polygon: { hierarchy: Cesium.Cartesian3.fromDegreesArray(tl.geometry.coordinates[0].flat()), material: Cesium.Color.fromCssColorString(on ? '#22d3ee' : '#ffffff').withAlpha(on ? 0.35 : 0.08), outline: true, outlineColor: Cesium.Color.fromCssColorString(on ? '#22d3ee' : '#ffffff'), height: 0 },
+        polygon: { hierarchy: Cesium.Cartesian3.fromDegreesArray(tl.geometry.coordinates[0].flat()), material: Cesium.Color.fromCssColorString(on ? '#d5aa69' : '#ffffff').withAlpha(on ? 0.35 : 0.08), outline: true, outlineColor: Cesium.Color.fromCssColorString(on ? '#d5aa69' : '#ffffff'), height: 0 },
       });
     });
     aois.forEach((a, i) => {
@@ -237,7 +237,7 @@ export function MonitorWatch() {
       ds.entities.add({
         id: `aoil:${a.id}`,
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
-        label: { text: `${i + 1}`, font: '12px Inter, sans-serif', fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#0b1524').withAlpha(0.85), disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3e6) },
+        label: { text: `${i + 1}`, font: '12px "IBM Plex Sans", "IBM Plex Sans Thai", sans-serif', fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#1b2023').withAlpha(0.85), disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3e6) },
       });
     });
     void viewer.dataSources.add(ds);
@@ -330,7 +330,7 @@ export function MonitorWatch() {
     ds.entities.add({ polyline: { positions: new Cesium.CallbackProperty(() => {
       const [w, s0, e, n] = cur();
       return Cesium.Cartesian3.fromDegreesArray([w, s0, e, s0, e, n, w, n, w, s0]);
-    }, false) as any, width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.CYAN, dashLength: 12 }) } });
+    }, false) as any, width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#d5aa69'), dashLength: 12 }) } });
     const at: Record<Exclude<Handle, 'c'>, (b: BB) => [number, number]> = {
       nw: (b) => [b[0], b[3]], ne: (b) => [b[2], b[3]], se: (b) => [b[2], b[1]], sw: (b) => [b[0], b[1]],
       n: (b) => [(b[0] + b[2]) / 2, b[3]], s: (b) => [(b[0] + b[2]) / 2, b[1]], e: (b) => [b[2], (b[1] + b[3]) / 2], w: (b) => [b[0], (b[1] + b[3]) / 2],
@@ -339,7 +339,7 @@ export function MonitorWatch() {
       ds.entities.add({
         id: `edit:${k}`,
         position: new Cesium.CallbackProperty(() => Cesium.Cartesian3.fromDegrees(...at[k](cur())), false) as any,
-        point: { pixelSize: k.length === 2 ? 13 : 10, color: Cesium.Color.WHITE, outlineColor: Cesium.Color.CYAN, outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+        point: { pixelSize: k.length === 2 ? 13 : 10, color: Cesium.Color.WHITE, outlineColor: Cesium.Color.fromCssColorString('#d5aa69'), outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY },
       }),
     );
     ds.entities.add({
@@ -348,7 +348,7 @@ export function MonitorWatch() {
         const b = cur();
         return Cesium.Cartesian3.fromDegrees((b[0] + b[2]) / 2, (b[1] + b[3]) / 2);
       }, false) as any,
-      point: { pixelSize: 16, color: Cesium.Color.CYAN, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      point: { pixelSize: 16, color: Cesium.Color.fromCssColorString('#d5aa69'), outlineColor: Cesium.Color.WHITE, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
       label: { text: '✥', font: '14px sans-serif', fillColor: Cesium.Color.BLACK, disableDepthTestDistance: Number.POSITIVE_INFINITY, verticalOrigin: Cesium.VerticalOrigin.CENTER },
     });
     void viewer.dataSources.add(ds);
@@ -613,7 +613,7 @@ export function MonitorWatch() {
         <div className={clean ? 'hidden' : ''}>
           <ExtentBar viewer={viewer} customRect={customRect} onLines={setExtentLines} nb={borderNb} onNb={(n) => void showBorderTiles(n).catch(() => {})} shift={tileShift} onShift={setTileShift} tileCount={tiles.length} />
         </div>
-        <div className="absolute left-3 top-3 z-20 flex items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px] backdrop-blur">
+        <div className="absolute left-3 top-3 z-20 flex items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px]">
           {!sideOpen && (
             <button onClick={() => setSideOpen(true)} className="rounded px-2 py-1 text-cyan-300 hover:text-white" title={L('แสดงแผงควบคุม', 'Show the control panel')}>
               » {L('แผงควบคุม', 'Panel')}{sel ? ` · ${sel.name.slice(0, 24)}` : ''}
@@ -651,7 +651,7 @@ export function MonitorWatch() {
                 {show === 'A' ? `A · ${L('ก่อน', 'before')} · ${swipe.A.datetime.slice(0, 10)}` : `B · ${L('หลัง', 'after')} · ${swipe.B.datetime.slice(0, 10)}`}
               </div>
             )}
-            <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px] text-slate-200 backdrop-blur">
+            <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px] text-slate-200">
               <Button variant={show === 'split' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('split'); }}>{L('เลื่อนเทียบ', 'Swipe')}</Button>
               <Button variant={show === 'A' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('A'); }}>A {L('ก่อน', 'before')}</Button>
               <Button variant={show === 'B' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('B'); }}>B {L('หลัง', 'after')}</Button>
@@ -668,7 +668,7 @@ export function MonitorWatch() {
             <Button onClick={() => setEdit(null)}>{L('ยกเลิก', 'Cancel')}</Button>
           </div>
         )}
-        <div className={cx('absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 text-[11px] text-slate-200 backdrop-blur', clean && 'hidden')}>
+        <div className={cx('absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 text-[11px] text-slate-200', clean && 'hidden')}>
           <button onClick={() => setLegendOpen(!legendOpen)} className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[10px] text-muted hover:text-white" title={legendOpen ? L('ซ่อนคำอธิบายสี', 'Hide the legend') : L('แสดงคำอธิบายสี', 'Show the legend')}>
             <span className={cx('inline-block transition-transform', legendOpen && 'rotate-90')}>▶</span>
             {L('คำอธิบายสี', 'Legend')}
@@ -1125,12 +1125,12 @@ function Trend({ series, unit }: { series: MonitorRun[]; unit: AreaUnit }) {
       <div className="label mb-1">{L(`แนวโน้มพื้นที่ที่ตรวจพบ (${uTh}) — เรียงตามวันที่ภาพ “หลัง”`, `Detected area trend (${uEn}) — by after-image date`)}</div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
         <line x1={P} x2={W - 8} y1={H - 16} y2={H - 16} stroke="rgba(148,178,214,0.25)" />
-        <text x={2} y={y(hi) + 3} fontSize="9" fill="#8b98ab">{hi.toFixed(unit === 'rai' ? 0 : 2)}</text>
-        <path d={series.map((_, i) => `${i ? 'L' : 'M'}${x(i)},${y(vs[i])}`).join(' ')} fill="none" stroke="#22d3ee" strokeWidth={1.8} />
+        <text x={2} y={y(hi) + 3} fontSize="9" fill="#939d9a">{hi.toFixed(unit === 'rai' ? 0 : 2)}</text>
+        <path d={series.map((_, i) => `${i ? 'L' : 'M'}${x(i)},${y(vs[i])}`).join(' ')} fill="none" stroke="#91a58d" strokeWidth={1.8} />
         {series.map((r, i) => (
           <g key={r.id}>
             <circle cx={x(i)} cy={y(vs[i])} r={3} fill={LEVEL_COLOR[r.level ?? 'none']}><title>{`${r.B?.datetime.slice(0, 10)}: ${vs[i].toFixed(unit === 'rai' ? 1 : 3)} ${uTh}`}</title></circle>
-            <text x={x(i)} y={H - 3} fontSize="8" fill="#8b98ab" textAnchor="middle">{r.B?.datetime.slice(5, 10)}</text>
+            <text x={x(i)} y={H - 3} fontSize="8" fill="#939d9a" textAnchor="middle">{r.B?.datetime.slice(5, 10)}</text>
           </g>
         ))}
       </svg>

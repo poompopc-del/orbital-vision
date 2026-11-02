@@ -50,14 +50,14 @@ const PANELS: Panel[] = [
     desc: 'Floods, hotspots, earthquakes, heavy rain, drought and PM2.5 across Thailand from open agency data — with a situation report.',
     // whole of Thailand and neighbours, latest daily VIIRS true colour (clouds and storms included)
     img: () => gibs('VIIRS_SNPP_CorrectedReflectance_TrueColor', [93.5, 6.5, 109.5, 15.5], recentDay()),
-    imgNote: 'VIIRS true colour', fallback: 'linear-gradient(160deg,#3a1f1a,#0b1524 70%)',
+    imgNote: 'VIIRS true colour', fallback: 'linear-gradient(160deg,#3a2a22,#1b2023 70%)',
   },
   {
     to: '/imagery?tab=flow', code: 'IMAGERY', title: 'Satellite imagery',
     desc: 'Choose an area, pick images on the timeline, then choose what to do with them.',
     // Bangkok, the Chao Phraya delta and the head of the Gulf of Thailand
     img: () => gibs('BlueMarble_NextGeneration', [98.6, 12.2, 103.4, 14.9]),
-    imgNote: 'Blue Marble', fallback: 'linear-gradient(160deg,#103a4a,#0b1524 70%)',
+    imgNote: 'Blue Marble', fallback: 'linear-gradient(160deg,#223a3a,#1b2023 70%)',
     modes: [
       { start: 'change', icon: '🔍', label: 'Change analysis' },
       { start: 'view', icon: '◐', label: 'Swipe / blink' },
@@ -72,21 +72,21 @@ const PANELS: Panel[] = [
     desc: 'Weekly change checks along the Cambodia, Malaysia and Myanmar borders, forests and disaster areas — with an OPP-style report.',
     // Thai–Cambodian border, Tonlé Sap
     img: () => gibs('BlueMarble_ShadedRelief_Bathymetry', [101.4, 11.6, 106.2, 14.3]),
-    imgNote: 'Blue Marble shaded relief', fallback: 'linear-gradient(160deg,#1f3a24,#0b1524 70%)',
+    imgNote: 'Blue Marble shaded relief', fallback: 'linear-gradient(160deg,#2a3a26,#1b2023 70%)',
   },
   {
     to: '/imagery?tab=advanced&task=dams', code: 'RID', title: 'Dam monitoring mode',
     desc: 'Current storage, inflow and release from the Royal Irrigation Department.',
     // northern Thailand: Bhumibol and Sirikit reservoirs
     img: () => gibs('BlueMarble_NextGeneration', [97.6, 15.6, 102.4, 18.3]),
-    imgNote: 'Blue Marble', fallback: 'linear-gradient(160deg,#14304a,#0b1524 70%)',
+    imgNote: 'Blue Marble', fallback: 'linear-gradient(160deg,#22323e,#1b2023 70%)',
   },
   {
     to: '/track?tab=passes', code: 'PASS', title: 'Satellite pass mode',
     desc: 'Pass times for NAPA, ISS or any satellite over your location.',
     // South-East Asia at night
     img: () => gibs('VIIRS_Black_Marble', [88, 1, 120, 19]),
-    imgNote: 'VIIRS Black Marble', fallback: 'linear-gradient(160deg,#151b3a,#05070c 70%)',
+    imgNote: 'VIIRS Black Marble', fallback: 'linear-gradient(160deg,#1e2226,#0f1213 70%)',
   },
 ];
 
@@ -100,14 +100,7 @@ const MORE = [
 export default function Home() {
   const { sats, status } = useOrbit();
   const { aoi } = useWorkspace();
-  const [ready, setReady] = useState(false);
   const [active, setActive] = useState<number | null>(null);
-
-  // panels slide up one after another a moment after the page appears
-  useEffect(() => {
-    const id = setTimeout(() => setReady(true), 200);
-    return () => clearTimeout(id);
-  }, []);
 
   useEffect(() => {
     if (active === null) return;
@@ -116,7 +109,7 @@ export default function Home() {
     return () => window.removeEventListener('keydown', onKey);
   }, [active]);
 
-  const cls = ['ovp', !ready && 's--inactive', active !== null && 's--el-active'].filter(Boolean).join(' ');
+  const cls = ['ovp', active !== null && 's--el-active'].filter(Boolean).join(' ');
 
   return (
     <div className={cls}>

@@ -392,7 +392,7 @@ export function NewsFloodMap() {
       <div className="relative min-h-[360px] flex-1">
         <GlobeHost onReady={setViewer} />
         {pinFor && <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-md border border-pink-400 bg-ink-950/90 px-3 py-1.5 text-xs text-pink-200">{L('คลิกบนแผนที่ตรงตำแหน่งที่เห็นในภาพ/ข่าว', 'Click the map where the photo/story shows')} · <button className="underline" onClick={() => setPinFor(null)}>{L('ยกเลิก', 'cancel')}</button></div>}
-        <div className="absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 p-2 text-[10px] text-slate-200 backdrop-blur">
+        <div className="absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 p-2 text-[10px] text-slate-200">
           {(['pin', 'tambon', 'amphoe', 'province'] as const).map((k) => <div key={k} className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PRECISION_COLOR[k] }} />{PRECISION_TH[k]}</div>)}
           <div className="mt-1 text-muted">{L('ขนาดจุด = จำนวนข่าว · ขอบสี = ผลภาพดาวเทียม', 'Size = stories · ring = imagery result')}</div>
           <div className="text-muted"><span style={{ color: '#ef4444' }}>●</span> {L('พบน้ำใหม่', 'new water')} <span style={{ color: '#4fd18b' }}>●</span> {L('ไม่พบ', 'none')} <span style={{ color: '#94a3b8' }}>●</span> {L('ภาพไม่พอ', 'no image')}</div>

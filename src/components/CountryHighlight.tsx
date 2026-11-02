@@ -100,7 +100,7 @@ export default function CountryHighlight({ viewer, open, onClose }: { viewer: Ce
 
   if (!open) return null;
   return (
-    <div className="w-72 rounded-md border border-line bg-ink-950/90 p-2.5 text-xs backdrop-blur">
+    <div className="w-72 rounded-md border border-line bg-ink-950/90 p-2.5 text-xs">
       <div className="mb-1.5 flex items-center justify-between">
         <span className="label">🏳 {t('Highlight countries')}</span>
         <button onClick={onClose} className="text-muted hover:text-white">✕</button>

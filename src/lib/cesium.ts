@@ -7,8 +7,8 @@ export const hasIon = !!ionToken;
 
 export { Cesium };
 
-export const CYAN = Cesium.Color.fromCssColorString('#22d3ee');
-export const CYAN_SOFT = Cesium.Color.fromCssColorString('#7ce7f7');
+export const CYAN = Cesium.Color.fromCssColorString('#d5aa69');
+export const CYAN_SOFT = Cesium.Color.fromCssColorString('#e4c38f');
 
 export interface ViewerOptions {
   timeline?: boolean;
@@ -35,8 +35,8 @@ export function createViewer(el: HTMLElement, opts: ViewerOptions = {}): Cesium.
     contextOptions: { webgl: { preserveDrawingBuffer: false } },
   });
   const scene = viewer.scene;
-  scene.backgroundColor = Cesium.Color.fromCssColorString('#07090c');
-  scene.globe.baseColor = Cesium.Color.fromCssColorString('#0b1524');
+  scene.backgroundColor = Cesium.Color.fromCssColorString('#0f1213');
+  scene.globe.baseColor = Cesium.Color.fromCssColorString('#1b2023');
   scene.globe.showGroundAtmosphere = true;
   if (scene.skyAtmosphere) scene.skyAtmosphere.show = true;
   scene.fog.enabled = true;

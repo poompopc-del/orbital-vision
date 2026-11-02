@@ -1,25 +1,43 @@
 /** @type {import('tailwindcss').Config} */
+// Design tokens — "geospatial workstation" palette.
+// The token NAMES are kept from the first theme (ink / navy / cyan …) so every page picks up
+// the new look without touching its class names:
+//   ink   = app background layers      navy = panels / elevated panels
+//   cyan  = accent (muted green)       sel  = selection (amber)
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        ink: { 950: '#07090c', 900: '#0b0e12', 850: '#0e1218', 800: '#121821' },
-        navy: { 900: '#0b1524', 850: '#0e1a2c', 800: '#122136', 700: '#1a2d48' },
-        line: 'rgba(148, 178, 214, 0.12)',
-        cyan: { 300: '#7ce7f7', 400: '#22d3ee', 500: '#06b6d4' },
-        volt: { 400: '#4f8dff', 500: '#2f6bff' },
-        muted: '#8b98ab',
-        warn: '#f5b84b',
-        bad: '#f2665a',
-        ok: '#4fd18b',
+        ink: { 950: '#0f1213', 900: '#141719', 850: '#171b1d', 800: '#1b2023' },
+        navy: { 900: '#1b2023', 850: '#1f2427', 800: '#23292d', 700: '#2c3337' },
+        line: '#343b3f',
+        cyan: { 300: '#b7c6b3', 400: '#91a58d', 500: '#7a8e76' },
+        sel: { 300: '#e4c38f', 400: '#d5aa69', 500: '#bf9353' },
+        volt: { 400: '#8fa9bd', 500: '#6f8ba1' },
+        muted: '#939d9a',
+        warn: '#d5aa69',
+        bad: '#d0705f',
+        ok: '#8fb98a',
+        slate: {
+          100: '#eef0ef', 200: '#e6e9e7', 300: '#c8cecb', 400: '#a9b1ae', 500: '#939d9a',
+          600: '#6f7875', 700: '#4d5553', 800: '#30373a', 900: '#1f2427',
+        },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        sans: ['"IBM Plex Sans"', '"IBM Plex Sans Thai"', 'Inter', 'system-ui', 'sans-serif'],
+        mono: ['"IBM Plex Mono"', '"IBM Plex Sans Thai"', 'ui-monospace', 'monospace'],
+      },
+      borderRadius: {
+        sm: '1px',
+        DEFAULT: '2px',
+        md: '3px',
+        lg: '4px',
+        xl: '5px',
       },
       boxShadow: {
-        glow: '0 0 0 1px rgba(34,211,238,0.35), 0 0 18px rgba(34,211,238,0.12)',
+        glow: '0 0 0 1px rgba(145,165,141,0.45)',
+        panel: '0 1px 0 rgba(0,0,0,0.25), 0 6px 18px rgba(0,0,0,0.25)',
       },
     },
   },
