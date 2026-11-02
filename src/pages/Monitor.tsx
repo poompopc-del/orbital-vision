@@ -488,12 +488,12 @@ export function MonitorWatch() {
     <div className="flex h-full flex-col lg:flex-row">
       <aside className={cx('w-full shrink-0 flex-col gap-3 overflow-y-auto border-line p-3 scroll-thin lg:w-[440px] lg:border-r', sideOpen ? 'flex' : 'hidden')}>
         <div className="relative">
-          <button onClick={() => setSideOpen(false)} className="absolute right-0 top-0 rounded border border-line px-2 py-0.5 text-[11px] text-slate-300 hover:border-cyan-400/50 hover:text-white" title={L('ซ่อนแผงด้านซ้ายเพื่อดูแผนที่เต็มจอ', 'Hide this panel to see the map full width')}>
+          <button onClick={() => setSideOpen(false)} className="absolute right-0 top-0 rounded border border-line px-2 py-0.5 text-[11px] text-slate-300 hover:border-cyan-400/50 hover:text-white" title={L('ซ่อนแผงด้านซ้ายเพื่อดูแผนที่เต็มจอ', 'Hide this panel to see the full map')}>
             « {L('ซ่อนแผง', 'Hide panel')}
           </button>
           <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-cyan-400">MODE · WATCH</div>
           <h2 className="text-lg font-semibold text-white">{L('เฝ้าระวังการเปลี่ยนแปลงพื้นที่', 'Area change monitoring')}</h2>
-          <p className="text-[11px] text-muted">{L('ชายแดน ป่าไม้ และสาธารณภัย · เทียบภาพดาวเทียมล่าสุดกับภาพก่อนหน้าโดยอัตโนมัติ', 'Borders, forest and disasters · compares the latest imagery with an earlier reference automatically')}</p>
+          <p className="text-[11px] text-muted">{L('ชายแดน ป่าไม้ และสาธารณภัย · เทียบภาพดาวเทียมล่าสุดกับภาพก่อนหน้าโดยอัตโนมัติ', 'Borders, forests and disasters · the latest imagery is compared with an earlier reference automatically')}</p>
         </div>
 
         {due.length > 0 && !busy && (
@@ -509,10 +509,10 @@ export function MonitorWatch() {
           <Button variant={panel === 'list' ? 'active' : 'ghost'} onClick={() => setPanel('list')}>{L(`รายการ (${aois.length})`, `Watchlist (${aois.length})`)}</Button>
           <Button variant={panel === 'border' ? 'active' : 'ghost'} onClick={() => setPanel('border')}>{L('+ ตามแนวชายแดน', '+ Along border')}</Button>
           <Button variant={panel === 'add' ? 'active' : 'ghost'} onClick={() => setPanel('add')}>{L('+ วาด / ค้นหา', '+ Draw / search')}</Button>
-          <Button variant={panel === 'import' ? 'active' : 'ghost'} onClick={() => setPanel('import')}>{L('+ นำเข้าพิกัดหลายจุด', '+ Import many')}</Button>
+          <Button variant={panel === 'import' ? 'active' : 'ghost'} onClick={() => setPanel('import')}>{L('+ นำเข้าพิกัดหลายจุด', '+ Import coordinates')}</Button>
         </div>
 
-        <Panel collapsible storeKey="checkwin" title={L('การตรวจอัตโนมัติ: เทียบกับช่วงไหน', 'Automatic check: compare against')} right={<span className="text-[10px] text-cyan-300">{baselineLabel(baseline, lang === 'th')}</span>}>
+        <Panel collapsible storeKey="checkwin" title={L('การตรวจอัตโนมัติ: เทียบกับช่วงเวลาใด', 'Automatic check: compare against')} right={<span className="text-[10px] text-cyan-300">{baselineLabel(baseline, lang === 'th')}</span>}>
           <div className="grid grid-cols-3 gap-1">
             {BASELINES.map((b) => <Button key={b.id} variant={baseline === b.id ? 'active' : 'ghost'} onClick={() => setBaseline(b.id)}>{L(b.th, b.en)}</Button>)}
           </div>
@@ -534,7 +534,7 @@ export function MonitorWatch() {
                 `“After” = clearest image in the last ${period} days · “Before” = best reference in the 60 days before that. 30 days is recommended in the rainy season.`,
               );
             })()}{' '}
-            {L('ใช้กับปุ่ม “ตรวจทั้งหมด” และ “ตรวจตอนนี้” เท่านั้น — ดูภาพช่วงอื่นได้เสมอใน “เปรียบเทียบภาพย้อนหลัง” · ถ้าไม่มีภาพใช้ได้ ระบบจะรายงานว่า “ข้อมูลไม่พอ” ไม่สร้างผลขึ้นเอง', 'Used only by “Run all” and “Check now” — any other date can still be compared in “Compare imagery over time” · with no usable image the result is “insufficient data”, never made up.')}
+            {L('ใช้กับปุ่ม “ตรวจทั้งหมด” และ “ตรวจตอนนี้” เท่านั้น · ดูภาพช่วงอื่นได้เสมอใน “เปรียบเทียบภาพย้อนหลัง” · ถ้าไม่มีภาพที่ใช้ได้ ระบบจะรายงานว่า “ข้อมูลไม่พอ” แทนการคาดเดาผล', 'Used only by “Run all” and “Check now” — any other date can still be compared in “Compare imagery over time” · with no usable image the result is “insufficient data”, never made up.')}
           </p>
         </Panel>
 
@@ -619,7 +619,7 @@ export function MonitorWatch() {
               » {L('แผงควบคุม', 'Panel')}{sel ? ` · ${sel.name.slice(0, 24)}` : ''}
             </button>
           )}
-          <button onClick={() => setClean(!clean)} className={cx('rounded px-2 py-1', clean ? 'bg-cyan-400/15 text-cyan-300' : 'text-slate-200 hover:text-white')} title={L('ซ่อนกรอบสี ตัวเลข เส้น ชั้นผลการเปลี่ยนแปลง และคำอธิบาย เพื่อดูภาพดาวเทียมล้วน ๆ', 'Hide fills, numbers, lines, the change layer and the legend to see the imagery alone')}>
+          <button onClick={() => setClean(!clean)} className={cx('rounded px-2 py-1', clean ? 'bg-cyan-400/15 text-cyan-300' : 'text-slate-200 hover:text-white')} title={L('ซ่อนพื้นสี ตัวเลข เส้น ชั้นผลการเปลี่ยนแปลง และคำอธิบายสัญลักษณ์ เพื่อดูภาพดาวเทียมอย่างเดียว', 'Hide fills, numbers, lines, the change layer and the legend to see the imagery alone')}>
             {clean ? L('◉ ภาพล้วน', '◉ Imagery only') : L('◎ ซ่อนสิ่งที่บังภาพ', '◎ Hide overlays')}
           </button>
           {clean && (
@@ -697,7 +697,7 @@ function WatchList({ selId, onSelect, onRun, busy }: { selId: string | null; onS
   const [filter, setFilter] = useState<Region | 'all'>('all');
   const shown = aois.filter((a) => filter === 'all' || a.region === filter);
   if (!aois.length)
-    return <p className="text-xs text-muted">{L('ยังไม่มีพื้นที่ในรายการ — เพิ่มจาก “ตามแนวชายแดน” หรือ “วาด / นำเข้า”', 'No areas yet — add them “Along border” or “Draw / import”.')}</p>;
+    return <p className="text-xs text-muted">{L('ยังไม่มีพื้นที่ในรายการ · เพิ่มได้จาก “+ ตามแนวชายแดน” หรือ “+ วาด / ค้นหา”', 'No areas yet — add them with “+ Along border” or “+ Draw / search”.')}</p>;
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
@@ -708,7 +708,7 @@ function WatchList({ selId, onSelect, onRun, busy }: { selId: string | null; onS
         <Button disabled={busy || !shown.length} onClick={() => onRun(shown.filter((a) => a.active))}>{L('ตรวจทั้งหมด', 'Run all')}</Button>
       </div>
       <div className="flex items-center gap-1.5 text-[11px] text-slate-200">
-        <span className="shrink-0 text-muted">🛰 {L('ตั้งดาวเทียมทุกพื้นที่ที่แสดง', 'Satellite for all listed')}</span>
+        <span className="shrink-0 text-muted">🛰 {L('ตั้งดาวเทียมให้ทุกพื้นที่ในรายการ', 'Set satellite for all listed')}</span>
         <Select value="" onChange={(e) => { const v = e.target.value as SensorMode; if (v) setAois((l) => l.map((a) => (shown.includes(a) ? { ...a, sensor: v } : a))); }} className="!py-1 text-xs">
           <option value="">{L('— เลือก —', '— choose —')}</option>
           {SATELLITES.map((x) => <option key={x.id} value={x.id}>{L(x.th, x.en)}</option>)}
@@ -786,7 +786,7 @@ function AddPanel({ viewer, onAdd, onDone }: { viewer: Cesium.Viewer | null; onA
         </Field>
         </div>
       </div>
-      <p className="mt-1 text-[10px] text-muted">{PURPOSES.find((p) => p.id === purpose)?.hint}</p>
+      <p className="mt-1 text-[10px] text-muted">{(() => { const pp = PURPOSES.find((p) => p.id === purpose); return pp ? L(pp.hintTh, pp.hint) : null; })()}</p>
       <Button variant="primary" className="mt-2 w-full" disabled={!aoi} onClick={() => onAdd(region, purpose, freq, name, sat)}>{L('เพิ่มเข้ารายการเฝ้าระวัง', 'Add to watchlist')}</Button>
     </Panel>
   );
@@ -871,7 +871,7 @@ function BorderPanel({
               {L(`เพิ่ม ${picked.size} ช่อง`, `Add ${picked.size} tile(s)`)}
             </Button>
           </div>
-          {picked.size > 12 && <p className="mt-1 text-[10px] text-warn">{L('ตรวจทีละหลายช่องใช้เวลานาน (ราว 20–60 วินาทีต่อช่อง) แนะนำเริ่มจากจุดที่สนใจก่อน', 'Many tiles take a while (≈20–60 s each); start with the stretches that matter most.')}</p>}
+          {picked.size > 12 && <p className="mt-1 text-[10px] text-warn">{L('ตรวจหลายช่องพร้อมกันใช้เวลานาน (ราว 20–60 วินาทีต่อช่อง) · แนะนำให้เริ่มจากช่วงที่สนใจก่อน', 'Many tiles take a while (≈20–60 s each); start with the stretches that matter most.')}</p>}
         </>
       )}
       <BoundaryNote />
@@ -888,9 +888,9 @@ function BoundaryNote() {
     return onBoundaryChange(f);
   }, []);
   return src.custom ? (
-    <p className="mt-2 text-[10px] leading-relaxed text-ok">{L(`แนวชายแดนจากไฟล์ที่นำเข้า (${src.name}) — ใช้เป็นหลัก · เก็บในเบราว์เซอร์นี้เท่านั้น`, `Border from the imported file (${src.name}) — used as primary · kept in this browser only`)}</p>
+    <p className="mt-2 text-[10px] leading-relaxed text-ok">{L(`แนวชายแดนจากไฟล์ที่นำเข้า (${src.name}) ใช้เป็นหลัก · เก็บไว้ในเบราว์เซอร์นี้เท่านั้น`, `Border from the imported file (${src.name}) — used as primary · kept in this browser only`)}</p>
   ) : (
-    <p className="mt-2 text-[10px] leading-relaxed text-muted">{L('แนวชายแดนจาก Natural Earth 1:50m เป็นเส้นโดยประมาณ (คลาดได้ระดับร้อยเมตรถึงกิโลเมตร) ไม่ใช่เส้นเขตแดนตามกฎหมายหรือ MOU · นำเข้าไฟล์เส้นเขตแดนที่ต้องการใช้ได้ที่แผงมุมขวาบนของแผนที่', 'Border from Natural Earth 1:50m is approximate — not the legal or MOU line · import your own boundary file from the map panel (top right)')}</p>
+    <p className="mt-2 text-[10px] leading-relaxed text-muted">{L('แนวชายแดนจาก Natural Earth 1:50m เป็นเส้นโดยประมาณ (คลาดได้ระดับร้อยเมตรถึงกิโลเมตร) ไม่ใช่เส้นเขตแดนตามกฎหมายหรือ MOU · นำเข้าไฟล์เส้นเขตแดนของคุณได้ที่แผงมุมขวาบนของแผนที่', 'Border from Natural Earth 1:50m is approximate — not the legal or MOU line · import your own boundary file from the map panel (top right)')}</p>
   );
 }
 
@@ -903,9 +903,9 @@ export function TileShift({ shift, setShift, nbTh, nbEn }: { shift: number; setS
       <div className="flex justify-between text-[10px] text-muted"><span>◀ {L('เข้าไปฝั่งไทย', 'into Thailand')}</span><span>{L(`เข้าไปฝั่ง${nbTh}`, `into ${nbEn}`)} ▶</span></div>
       <input type="range" min={-1} max={1} step={0.1} value={shift} onChange={(e) => setShift(+e.target.value)} className="w-full" />
       <div className="flex justify-between text-[10px] text-muted">
-        <button className="hover:text-white" onClick={() => setShift(-1)}>{L('ฝั่งไทยทั้งกรอบ', 'all Thai side')}</button>
-        <button className="hover:text-white" onClick={() => setShift(0)}>{L('คร่อมแนว', 'straddle')}</button>
-        <button className="hover:text-white" onClick={() => setShift(1)}>{L('ฝั่งเพื่อนบ้านทั้งกรอบ', 'all neighbour side')}</button>
+        <button className="hover:text-white" onClick={() => setShift(-1)}>{L('ฝั่งไทยทั้งกรอบ', 'all on the Thai side')}</button>
+        <button className="hover:text-white" onClick={() => setShift(0)}>{L('คร่อมแนวชายแดน', 'straddle the line')}</button>
+        <button className="hover:text-white" onClick={() => setShift(1)}>{L('ฝั่งเพื่อนบ้านทั้งกรอบ', 'all on the neighbour side')}</button>
       </div>
       <p className="mt-0.5 text-[10px] text-muted">{L(`กรอบอยู่ฝั่งไทยราว ${pctTh}% และฝั่ง${nbTh}ราว ${100 - pctTh}% ของความกว้าง · กรอบครอบเส้นแบ่งเขตครบทุกช่วง (เส้นจะอยู่ในกรอบเสมอ แม้เลื่อนสุด)`, `About ${pctTh}% of each box on the Thai side, ${100 - pctTh}% on the ${nbEn} side · boxes always cover the whole boundary line`)}</p>
     </div>
@@ -955,8 +955,8 @@ function EditPanel({ b, orig, onSave, onCancel, onSet }: { b: BB; orig: BB; onSa
         <Button onClick={() => onSet(orig)}>{L('กลับเป็นกรอบเดิม', 'Reset')}</Button>
       </div>
       <div className="mt-1.5 font-mono text-[10px] text-muted">{km.w.toFixed(2)} × {km.h.toFixed(2)} km · {(km.w * km.h).toFixed(1)} km² ({(km.w * km.h * 625).toFixed(0)} {L('ไร่', 'rai')})</div>
-      {km.w * km.h > 400 && <p className="text-[10px] text-warn">{L('กรอบใหญ่กว่า 400 km² จะวิเคราะห์ช้าและรายละเอียดลดลง', 'Boxes over 400 km² are slower and coarser')}</p>}
-      <p className="mt-1 text-[10px] text-muted">{L('ผลตรวจครั้งก่อนจะยังเก็บไว้ แต่ระบุว่าใช้กรอบเดิม ควรกด “ตรวจตอนนี้” ใหม่หลังบันทึก', 'Earlier results are kept but marked as using the old box; run a new check after saving')}</p>
+      {km.w * km.h > 400 && <p className="text-[10px] text-warn">{L('กรอบใหญ่กว่า 400 ตร.กม. จะวิเคราะห์ช้าลงและรายละเอียดลดลง', 'Boxes over 400 km² are slower and coarser')}</p>}
+      <p className="mt-1 text-[10px] text-muted">{L('ผลตรวจครั้งก่อนยังเก็บไว้ แต่จะระบุว่าใช้กรอบเดิม · หลังบันทึกควรกด “ตรวจตอนนี้” ใหม่', 'Earlier results are kept but marked as using the old box; run a new check after saving')}</p>
       <div className="mt-2 flex gap-1.5">
         <Button variant="primary" onClick={onSave}>{L('บันทึกกรอบ', 'Save box')}</Button>
         <Button onClick={onCancel}>{L('ยกเลิก', 'Cancel')}</Button>
@@ -1001,7 +1001,7 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn 
         <div className="font-mono text-[10px] text-muted">{info.lat.toFixed(4)}, {info.lon.toFixed(4)} · {fmtArea(info.km2, unit, lang === 'th')}</div>
         <div className="grid grid-cols-3 gap-1">
           <Select value={aoi.purpose} onChange={(e) => upd({ purpose: e.target.value as Purpose })} className="!py-1 text-xs">{PURPOSES.map((p) => <option key={p.id} value={p.id}>{L(p.labelTh, p.label)}</option>)}</Select>
-          <Select value={aoi.sensor ?? 'auto'} onChange={(e) => upd({ sensor: e.target.value as SensorMode })} className="!py-1 text-xs" title={L('ดาวเทียมที่ใช้ภาพ', 'Satellite')}>
+          <Select value={aoi.sensor ?? 'auto'} onChange={(e) => upd({ sensor: e.target.value as SensorMode })} className="!py-1 text-xs" title={L('ดาวเทียม', 'Satellite')}>
             {SATELLITES.map((x) => <option key={x.id} value={x.id}>{L(x.th, x.en)}</option>)}
           </Select>
           <Select value={aoi.freqDays} onChange={(e) => upd({ freqDays: +e.target.value })} className="!py-1 text-xs">{[7, 14, 30].map((d) => <option key={d} value={d}>{L(`ทุก ${d} วัน`, `every ${d} d`)}</option>)}</Select>
@@ -1013,7 +1013,7 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn 
           <Button variant="danger" onClick={() => setAois((l) => l.filter((a) => a.id !== aoi.id))}>{L('ลบพื้นที่', 'Remove')}</Button>
         </div>
         <div className="rounded border border-cyan-400/30 bg-cyan-400/5 p-1.5">
-          <div className="mb-1 text-[10px] text-cyan-200">{L('เทียบภาพที่ชัดที่สุดทันที', 'Compare the clearest images now')}</div>
+          <div className="mb-1 text-[10px] text-cyan-200">{L('เทียบภาพที่ชัดที่สุดตอนนี้', 'Compare the clearest images now')}</div>
           <div className="grid grid-cols-2 gap-1">
             {(['month', 'year'] as const).map((b) => {
               const w = windowsFor(30, Date.now(), b);
@@ -1026,8 +1026,8 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn 
             })}
           </div>
         </div>
-        <p className="text-[10px] text-cyan-200">🛰 {satelliteOf(aoi.sensor).note}</p>
-        {aoi.sensor === 'sar' && !methodText(aoi.purpose, 'sar') && <p className="text-[10px] text-warn">{L('หัวข้อนี้วิเคราะห์ด้วยเรดาร์ไม่ได้ — เลือก Sentinel-2 หรือ Landsat', 'This purpose cannot use radar — pick Sentinel-2 or Landsat')}</p>}
+        <p className="text-[10px] text-cyan-200">🛰 {L(satelliteOf(aoi.sensor).note, satelliteOf(aoi.sensor).noteEn)}</p>
+        {aoi.sensor === 'sar' && !methodText(aoi.purpose, 'sar') && <p className="text-[10px] text-warn">{L('หัวข้อนี้ใช้เรดาร์วิเคราะห์ไม่ได้ · เลือก Sentinel-2 หรือ Landsat', 'This purpose cannot use radar — pick Sentinel-2 or Landsat')}</p>}
         <p className="text-[10px] text-muted">{methodText(aoi.purpose, aoi.sensor === 'sar' ? 'sar' : 'optical')}</p>
 
         {mine.length > 1 && (
@@ -1036,16 +1036,16 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn 
           </Select>
         )}
 
-        {!run && <p className="text-[11px] text-muted">{L('ยังไม่เคยตรวจพื้นที่นี้', 'Not checked yet.')}</p>}
+        {!run && <p className="text-[11px] text-muted">{L('ยังไม่เคยตรวจพื้นที่นี้', 'Not checked yet')}</p>}
         {run && run.status !== 'ok' && (
           <Notice tone="warn">
             <b>{run.status === 'error' ? L('เกิดข้อผิดพลาด', 'Error') : L('ข้อมูลไม่เพียงพอ — ไม่สรุปผลการเปลี่ยนแปลง', 'Insufficient data — no change conclusion')}</b> — {run.reason}
-            <div className="mt-1 text-[10px]">{L('ไม่ได้แปลว่า “ไม่มีการเปลี่ยนแปลง” · ลองเลือกภาพวันอื่นในส่วน “เปรียบเทียบภาพย้อนหลัง” ด้านล่าง เพิ่มช่วงเวลาเป็น 30–60 วัน หรือใช้เรดาร์', 'This does not mean “no change” · pick another date below, use a 30–60 day window, or radar.')}</div>
+            <div className="mt-1 text-[10px]">{L('ไม่ได้แปลว่า “ไม่มีการเปลี่ยนแปลง” · ลองเลือกภาพวันอื่นใน “เปรียบเทียบภาพย้อนหลัง” ด้านล่าง ขยายช่วงเวลาเป็น 30–60 วัน หรือใช้เรดาร์', 'This does not mean “no change” — pick another date below, use a 30–60 day window, or use radar.')}</div>
             {!!run.suggestions?.length && <div className="mt-1 text-[10px]">{L('ภาพที่ผ่านเกณฑ์ในช่วงนี้', 'Passing scenes in the window')}: {run.suggestions.map((x) => x.datetime.slice(0, 10)).join(', ')}</div>}
           </Notice>
         )}
         {run && run.status !== 'ok' && run.stats && <ResultQuality run={run} unit={unit} />}
-        {run && aoi.editedAt && run.at < aoi.editedAt && <Notice tone="warn">{L('ผลนี้ตรวจด้วยกรอบก่อนแก้ไข กด “ตรวจตอนนี้” เพื่อตรวจกรอบใหม่', 'This result used the box before it was edited — run a new check')}</Notice>}
+        {run && aoi.editedAt && run.at < aoi.editedAt && <Notice tone="warn">{L('ผลนี้ตรวจด้วยกรอบก่อนแก้ไข · กด “ตรวจตอนนี้” เพื่อตรวจกรอบใหม่', 'This result used the box before it was edited — press “Check now” to re-check')}</Notice>}
         {run && run.status === 'ok' && run.stats && (
           <div className="space-y-1.5">
             <div className="flex flex-wrap gap-1">
@@ -1057,7 +1057,7 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn 
             {run.note && <p className="text-[10px] text-warn">{run.note}</p>}
             <p className="text-[10px] text-muted">{run.method}</p>
             <ResultQuality run={run} unit={unit} />
-            {run.A && run.B && <Button onClick={() => void swipeRun(run)}>{swipeOn ? L('ปิด/สลับเลื่อนเทียบภาพ', 'Toggle swipe') : L('เลื่อนเทียบภาพก่อน/หลังบนแผนที่', 'Swipe before/after on the map')}</Button>}
+            {run.A && run.B && <Button onClick={() => void swipeRun(run)}>{swipeOn ? L('เปิด/ปิดการเลื่อนเทียบภาพ', 'Toggle swipe') : L('เลื่อนเทียบภาพก่อน/หลังบนแผนที่', 'Swipe before/after on the map')}</Button>}
             {swErr && <p className="text-[10px] text-bad">{swErr}</p>}
             <div className="grid grid-cols-2 gap-1.5">
               <figure>
@@ -1203,7 +1203,7 @@ export function MonitorReport() {
           <label className="mt-2 flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={onlyChanged} onChange={(e) => setOnlyChanged(e.target.checked)} />{L('ใส่เฉพาะพื้นที่ที่พบการเปลี่ยนแปลง', 'Only areas with detected change')}</label>
         </Panel>
         <Panel title={L(`พื้นที่ในรายงาน (${items.length})`, `Areas in the report (${items.length})`)} right={<button className="text-[11px] text-cyan-300" onClick={() => setSel(new Set(aois.map((a) => a.id)))}>{L('เลือกทั้งหมด', 'Select all')}</button>}>
-          {!aois.length && <p className="text-xs text-muted">{L('ยังไม่มีพื้นที่ — เพิ่มที่แท็บ “เฝ้าระวัง” ก่อน', 'No areas yet — add them in the “Watch” tab first.')}</p>}
+          {!aois.length && <p className="text-xs text-muted">{L('ยังไม่มีพื้นที่ · เพิ่มได้ที่แท็บ “รายการเฝ้าระวัง”', 'No areas yet — add them in the “Area watchlist” tab first.')}</p>}
           <ul className="max-h-[40vh] space-y-1 overflow-y-auto scroll-thin">
             {aois.map((a) => {
               const r = lastRunOf(a.id, runs);
@@ -1221,7 +1221,7 @@ export function MonitorReport() {
           </ul>
         </Panel>
         <div className="flex flex-wrap gap-1.5">
-          <Button variant="primary" disabled={!items.length || busy} onClick={open}>{busy ? <Spinner /> : `📄 ${L('เปิดรายงาน (บันทึกเป็น PDF ได้)', 'Open report (save as PDF)')}`}</Button>
+          <Button variant="primary" disabled={!items.length || busy} onClick={open}>{busy ? <Spinner /> : `📄 ${L('เปิดรายงาน (พิมพ์ / บันทึกเป็น PDF)', 'Open report (print / save as PDF)')}`}</Button>
           <Button disabled={!items.length} onClick={() => saveText('monitoring-hotspots.csv', hotspotsCsv(items), 'text/csv;charset=utf-8')}>{L('ตาราง CSV', 'CSV table')}</Button>
           <Button disabled={!items.length} onClick={() => downloadJson('monitoring-results.geojson', resultsGeoJson(items))}>GeoJSON</Button>
         </div>

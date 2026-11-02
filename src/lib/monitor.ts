@@ -24,12 +24,12 @@ export type Purpose = 'clearing' | 'construction' | 'water' | 'fire' | 'general'
 export type Region = 'TH-KH' | 'TH-MY' | 'TH-MM' | 'TH-LA' | 'TH' | 'OTHER';
 /** Which satellite a watch area uses: 'optical' = Sentinel-2 (kept for older saved areas). */
 export type SensorMode = 'auto' | 'optical' | 'landsat' | 'optical-any' | 'sar';
-export const SATELLITES: { id: SensorMode; th: string; en: string; note: string }[] = [
-  { id: 'auto', th: 'อัตโนมัติ (Sentinel-2 → เรดาร์)', en: 'Auto (Sentinel-2 → radar)', note: 'ใช้ Sentinel-2 ก่อน ถ้าเมฆมากเกินเกณฑ์จะใช้เรดาร์ Sentinel-1 แทน (หัวข้อน้ำใช้เรดาร์ก่อน)' },
-  { id: 'optical', th: 'Sentinel-2 (10 ม.)', en: 'Sentinel-2 (10 m)', note: 'ภาพปกติ 10 ม. ถ่ายซ้ำราว 5 วัน · ใช้ไม่ได้เมื่อเมฆมาก' },
-  { id: 'landsat', th: 'Landsat 8/9 (30 ม.)', en: 'Landsat 8/9 (30 m)', note: 'ภาพปกติ 30 ม. ถ่ายซ้ำราว 8 วัน · หยาบกว่า เห็นการเปลี่ยนแปลงขนาดเล็กได้น้อยกว่า' },
-  { id: 'optical-any', th: 'Sentinel-2 หรือ Landsat', en: 'Sentinel-2 or Landsat', note: 'เลือกภาพที่เมฆน้อยที่สุดจากทั้งสองดวง · ภาพก่อน–หลังจะเป็นดาวเทียมเดียวกันเมื่อหาได้' },
-  { id: 'sar', th: 'Sentinel-1 เรดาร์ (10 ม.)', en: 'Sentinel-1 radar (10 m)', note: 'ถ่ายทะลุเมฆได้ · ใช้ได้กับหัวข้อถางป่า สิ่งปลูกสร้าง และน้ำ' },
+export const SATELLITES: { id: SensorMode; th: string; en: string; note: string; noteEn: string }[] = [
+  { id: 'auto', th: 'อัตโนมัติ (Sentinel-2 → เรดาร์)', en: 'Auto (Sentinel-2 → radar)', note: 'ใช้ Sentinel-2 ก่อน ถ้าเมฆมากเกินเกณฑ์จะใช้เรดาร์ Sentinel-1 แทน (หัวข้อน้ำใช้เรดาร์ก่อน)', noteEn: 'Sentinel-2 first; falls back to Sentinel-1 radar when too cloudy (water uses radar first)' },
+  { id: 'optical', th: 'Sentinel-2 (10 ม.)', en: 'Sentinel-2 (10 m)', note: 'ภาพปกติ 10 ม. ถ่ายซ้ำราว 5 วัน · ใช้ไม่ได้เมื่อเมฆมาก', noteEn: 'Optical 10 m, revisit ≈ 5 days · unusable under heavy cloud' },
+  { id: 'landsat', th: 'Landsat 8/9 (30 ม.)', en: 'Landsat 8/9 (30 m)', note: 'ภาพปกติ 30 ม. ถ่ายซ้ำราว 8 วัน · หยาบกว่า เห็นการเปลี่ยนแปลงขนาดเล็กได้น้อยกว่า', noteEn: 'Optical 30 m, revisit ≈ 8 days · coarser, misses small changes' },
+  { id: 'optical-any', th: 'Sentinel-2 หรือ Landsat', en: 'Sentinel-2 or Landsat', note: 'เลือกภาพที่เมฆน้อยที่สุดจากทั้งสองดวง · ภาพก่อน–หลังจะเป็นดาวเทียมเดียวกันเมื่อหาได้', noteEn: 'Least cloudy image from either · before/after from the same satellite when possible' },
+  { id: 'sar', th: 'Sentinel-1 เรดาร์ (10 ม.)', en: 'Sentinel-1 radar (10 m)', note: 'ถ่ายทะลุเมฆได้ · ใช้ได้กับหัวข้อถางป่า สิ่งปลูกสร้าง และน้ำ', noteEn: 'Sees through cloud · for clearing, construction and water' },
 ];
 export const satelliteOf = (m: SensorMode | undefined) => SATELLITES.find((x) => x.id === m) ?? SATELLITES[0];
 
@@ -139,12 +139,12 @@ export interface MonitorRun {
   suggestions?: { id: string; datetime: string; cloud: number | null; collection: string }[];
 }
 
-export const PURPOSES: { id: Purpose; label: string; labelTh: string; hint: string }[] = [
-  { id: 'clearing', label: 'Forest clearing / encroachment', labelTh: 'บุกรุก ถางป่า', hint: 'NDVI drop on previously vegetated land (optical) or VH backscatter drop (radar)' },
-  { id: 'construction', label: 'New roads / structures / bare ground', labelTh: 'ทำทาง สิ่งปลูกสร้าง ดินเปิดใหม่', hint: 'NDVI down + NDBI up (optical) or strong VV increase (radar)' },
-  { id: 'water', label: 'Flood / water extent', labelTh: 'น้ำท่วม / แหล่งน้ำ', hint: 'MNDWI (optical) or low VV backscatter (radar)' },
-  { id: 'fire', label: 'Burned area / wildfire', labelTh: 'ไฟป่า / พื้นที่เผาไหม้', hint: 'dNBR (optical only)' },
-  { id: 'general', label: 'General vegetation change', labelTh: 'การเปลี่ยนแปลงพืชพรรณทั่วไป', hint: 'NDVI ± 0.2' },
+export const PURPOSES: { id: Purpose; label: string; labelTh: string; hint: string; hintTh: string }[] = [
+  { id: 'clearing', label: 'Forest clearing / encroachment', labelTh: 'บุกรุก / ถางป่า', hint: 'NDVI drop on previously vegetated land (optical) or VH backscatter drop (radar)', hintTh: 'NDVI ลดลงในพื้นที่ที่เคยมีพืชปกคลุม (ออปติคัล) หรือค่าสะท้อนกลับ VH ลดลง (เรดาร์)' },
+  { id: 'construction', label: 'New roads / structures / bare ground', labelTh: 'ถนน สิ่งปลูกสร้าง ดินเปิดใหม่', hint: 'NDVI down + NDBI up (optical) or strong VV increase (radar)', hintTh: 'NDVI ลดลงและ NDBI เพิ่มขึ้น (ออปติคัล) หรือค่า VV เพิ่มขึ้นมาก (เรดาร์)' },
+  { id: 'water', label: 'Flood / water extent', labelTh: 'น้ำท่วม / แหล่งน้ำ', hint: 'MNDWI (optical) or low VV backscatter (radar)', hintTh: 'MNDWI (ออปติคัล) หรือค่าสะท้อนกลับ VV ต่ำ (เรดาร์)' },
+  { id: 'fire', label: 'Burned area / wildfire', labelTh: 'ไฟป่า / พื้นที่เผาไหม้', hint: 'dNBR (optical only)', hintTh: 'dNBR (ออปติคัลเท่านั้น)' },
+  { id: 'general', label: 'General vegetation change', labelTh: 'การเปลี่ยนแปลงพืชพรรณทั่วไป', hint: 'NDVI ± 0.2', hintTh: 'NDVI ± 0.2' },
 ];
 
 export const REGIONS: { id: Region; label: string; labelTh: string }[] = [

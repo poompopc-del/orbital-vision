@@ -56,7 +56,7 @@ export default function ResultQuality({ run, unit }: { run: MonitorRun; unit: Ar
               <td className="text-right font-mono">{pct(x.v, s.aoiKm2).toFixed(1)}%</td>
             </tr>
           ) : null)}
-          {cloud == null && <tr><td className="text-muted">{L('เมฆ/เงาเมฆ/ไม่มีข้อมูล (รวม — ผลรุ่นเก่า)', 'Cloud/shadow/no data (combined, older run)')}</td><td className="text-right font-mono">{A(s.noDataKm2)}</td><td className="text-right font-mono">{pct(s.noDataKm2, s.aoiKm2).toFixed(1)}%</td></tr>}
+          {cloud == null && <tr><td className="text-muted">{L('เมฆ/เงาเมฆ/ไม่มีข้อมูล (รวม · ผลรุ่นเก่า)', 'Cloud/shadow/no data (combined, older run)')}</td><td className="text-right font-mono">{A(s.noDataKm2)}</td><td className="text-right font-mono">{pct(s.noDataKm2, s.aoiKm2).toFixed(1)}%</td></tr>}
         </tbody>
       </table>
       <p className="text-muted">{L('พื้นที่ที่มีเมฆหรือไม่มีข้อมูลไม่ถูกนับเป็นการเปลี่ยนแปลง และไม่ถูกสรุปว่า “ไม่เปลี่ยนแปลง” · แต่ละพิกเซลอยู่ได้สถานะเดียว จึงไม่นับซ้ำ', 'Cloud / no-data areas are neither counted as change nor as “no change” · each pixel has one state, so nothing is double-counted')}</p>
@@ -79,7 +79,7 @@ export default function ResultQuality({ run, unit }: { run: MonitorRun; unit: Ar
           })}
         </tbody>
       </table>
-      <p className="text-muted">{run.A?.label} · {run.A?.gsd}{run.B && run.B.collection !== run.A?.collection ? ` / ${run.B.label} · ${run.B.gsd}` : ''} · {L('วันที่คือวันถ่ายภาพจริง (ชี้ที่วันที่เพื่อดูวันประมวลผล/เข้าคลัง)', 'dates are acquisition times (hover for processing/catalogue dates)')}</p>
+      <p className="text-muted">{run.A?.label} · {run.A?.gsd}{run.B && run.B.collection !== run.A?.collection ? ` / ${run.B.label} · ${run.B.gsd}` : ''} · {L('วันที่คือวันถ่ายภาพจริง (ชี้ที่วันที่เพื่อดูวันประมวลผล/เข้าคลัง)', 'Dates are acquisition times (hover for processing/catalogue dates)')}</p>
 
       {q && (
         <>
@@ -101,7 +101,7 @@ export default function ResultQuality({ run, unit }: { run: MonitorRun; unit: Ar
         <span>{th ? confTh(run.confidence) : run.confidence ?? '—'}</span>
       </div>
       {!!run.confidenceNotes?.length && <ul className="list-disc pl-4 text-muted">{run.confidenceNotes.map((x) => <li key={x}>{x}</li>)}</ul>}
-      {run.qc && <p className="text-muted">{L('เกณฑ์ที่ใช้', 'Thresholds')}: {L('เมฆใน AOI', 'AOI')} ≤ {run.qc.maxAoiCloud}% · {L('วิเคราะห์ได้', 'analysable')} ≥ {run.qc.minValidPct}% · ≤ {run.qc.maxGsdM} ม.{run.mode === 'manual' ? ` · ${L('เลือกภาพเอง', 'manual pick')}` : ''}</p>}
+      {run.qc && <p className="text-muted">{L('เกณฑ์ที่ใช้', 'Thresholds')}: {L('เมฆใน AOI', 'AOI cloud')} ≤ {run.qc.maxAoiCloud}% · {L('วิเคราะห์ได้', 'analysable')} ≥ {run.qc.minValidPct}% · ≤ {run.qc.maxGsdM} ม.{run.mode === 'manual' ? ` · ${L('เลือกภาพเอง', 'manual pick')}` : ''}</p>}
     </div>
   );
 }

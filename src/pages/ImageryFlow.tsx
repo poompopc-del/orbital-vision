@@ -133,9 +133,9 @@ export default function ImageryFlow() {
           <div className="flex items-start justify-between gap-2">
             <div>
               <h2 className="text-lg font-semibold text-white">{L('ภาพดาวเทียม', 'Satellite imagery')}</h2>
-              <p className="text-[11px] text-muted">{L('เลือกพื้นที่ → เลือกภาพ → เลือกว่าจะทำอะไรต่อ', 'Choose an area → pick images → choose what to do')}</p>
+              <p className="text-[11px] text-muted">{L('เลือกพื้นที่ → เลือกภาพ → เลือกการวิเคราะห์', 'Choose an area → pick images → choose an analysis')}</p>
             </div>
-            <button onClick={() => setSideOpen(false)} className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-slate-300 hover:text-white">« {L('ซ่อนแผง', 'Hide')}</button>
+            <button onClick={() => setSideOpen(false)} className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-slate-300 hover:text-white">« {L('ซ่อนแผง', 'Hide panel')}</button>
           </div>
 
           {/* ① area */}
@@ -189,7 +189,7 @@ export default function ImageryFlow() {
           </Step>
 
           {/* ③ what next */}
-          <Step n={3} title={L('ทำอะไรต่อ', 'What next')} summary={mode ? MODES(L).find((m) => m.id === mode)?.label : undefined} open={step === 3} onToggle={() => setStep(step === 3 ? 2 : 3)} disabled={!aoi || !(A || B)}>
+          <Step n={3} title={L('เลือกการวิเคราะห์', 'Analysis')} summary={mode ? MODES(L).find((m) => m.id === mode)?.label : undefined} open={step === 3} onToggle={() => setStep(step === 3 ? 2 : 3)} disabled={!aoi || !(A || B)}>
             <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-2">
               {MODES(L).map((m) => {
                 const need = ONE_IMAGE.includes(m.id) ? !!(A || B) : !!(A && B);
@@ -235,7 +235,7 @@ export default function ImageryFlow() {
           {!viewing && <OnMap g={g} />}
           {!aoi && (
             <div className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-md border border-line bg-ink-950/85 px-3 py-1.5 text-xs text-slate-200">
-              {L('เริ่มที่ ① เลือกพื้นที่ทางซ้าย', 'Start with ① choose an area on the left')}
+              {L('เริ่มจาก ① เลือกพื้นที่ทางซ้าย', 'Start with ① choose an area on the left')}
             </div>
           )}
         </div>
@@ -258,11 +258,11 @@ function StartHint({ mode }: { mode: Mode }) {
 }
 
 const MODES = (L: (a: string, b: string) => string): { id: Mode; icon: string; label: string; desc: string }[] => [
-  { id: 'change', icon: '🔍', label: L('เทียบการเปลี่ยนแปลง', 'Change analysis'), desc: L('ถางป่า สิ่งปลูกสร้าง น้ำ ไฟ — ได้พื้นที่ ไร่/ตร.กม. และพิกัดจุดที่เปลี่ยน', 'Clearing, construction, water, fire — areas in rai/km² and patch locations') },
-  { id: 'view', icon: '◐', label: L('เลื่อน / กะพริบดู', 'Swipe / blink'), desc: L('ดูภาพ A กับ B ด้วยตา บนแผนที่แบบไม่มีอะไรบัง', 'Look at A and B on a clear map') },
-  { id: 'flood', icon: '🌊', label: L('น้ำท่วม', 'Flood'), desc: L('ขอบเขตน้ำจากภาพหลัง (และก่อน) — เรดาร์มองทะลุเมฆ', 'Water extent from the after (and before) image — radar sees through cloud') },
-  { id: 'ndvi', icon: '🌾', label: L('พืชพรรณ (NDVI)', 'Vegetation (NDVI)'), desc: L('ความเขียว/สุขภาพพืช พร้อมสถิติในพื้นที่ (และดัชนีอื่น)', 'Greenness / plant health with area statistics (and other indices)') },
-  { id: 'ndbi', icon: '🏙', label: L('การขยายตัวเมือง (NDBI)', 'Urban growth (NDBI)'), desc: L('พื้นที่สิ่งปลูกสร้าง — เลือกภาพห่างกัน 1–2 ปี', 'Built-up surfaces — pick images 1–2 years apart') },
+  { id: 'change', icon: '🔍', label: L('ตรวจจับการเปลี่ยนแปลง', 'Change detection'), desc: L('ถางป่า สิ่งปลูกสร้าง น้ำ ไฟ · ได้พื้นที่ (ไร่/ตร.กม.) และพิกัดจุดที่เปลี่ยน', 'Clearing, construction, water, fire — areas in rai/km² and patch locations') },
+  { id: 'view', icon: '◐', label: L('เลื่อนเทียบ / สลับภาพ', 'Swipe / blink'), desc: L('ดูภาพ A กับ B ด้วยตาบนแผนที่ที่ไม่มีอะไรบัง', 'Inspect A and B visually on a clean map') },
+  { id: 'flood', icon: '🌊', label: L('น้ำท่วม', 'Flood'), desc: L('ขอบเขตน้ำจากภาพหลัง (และภาพก่อน) · เรดาร์มองทะลุเมฆ', 'Water extent from the after (and before) image — radar sees through cloud') },
+  { id: 'ndvi', icon: '🌾', label: L('พืชพรรณ (NDVI)', 'Vegetation (NDVI)'), desc: L('ความเขียวและสุขภาพพืช พร้อมสถิติของพื้นที่ (และดัชนีอื่น)', 'Greenness / plant health with area statistics (and other indices)') },
+  { id: 'ndbi', icon: '🏙', label: L('การขยายตัวของเมือง (NDBI)', 'Urban growth (NDBI)'), desc: L('พื้นที่สิ่งปลูกสร้าง · เลือกภาพที่ห่างกัน 1–2 ปี', 'Built-up surfaces — pick images 1–2 years apart') },
   { id: 'export', icon: '📷', label: L('ภาพ · รายงาน · เฝ้าระวัง', 'Images · report · watch'), desc: L('ดาวน์โหลดภาพ (GeoTIFF/PNG) ออกรายงาน หรือเพิ่มเข้าการตรวจอัตโนมัติ', 'Download images (GeoTIFF/PNG), make a report, or add to automatic checks') },
 ];
 
@@ -348,12 +348,12 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
   if (mode === 'view')
     return (
       <div className="space-y-1 text-[11px] text-slate-300">
-        <p>{L('กำลังแสดงภาพ A กับ B บนแผนที่ — ซ่อนชื่อสถานที่และกรอบไว้ให้ดูภาพได้ชัด', 'A and B are on the map — place names and fills are hidden')}</p>
+        <p>{L('แสดงภาพ A กับ B บนแผนที่แล้ว · ซ่อนชื่อสถานที่และพื้นสีไว้ให้ดูภาพได้ชัด', 'A and B are on the map — place names and fills are hidden')}</p>
         <ul className="list-disc pl-4 text-[10px] text-muted">
           <li>{L('ลากปุ่ม ◀▶ บนเส้นแบ่งเพื่อเลื่อนเทียบ', 'Drag ◀▶ on the split line')}</li>
           <li>{L('“กะพริบ” สลับภาพให้เอง จุดที่เปลี่ยนจะเห็นชัด', '“Blink” alternates the images so changes stand out')}</li>
         </ul>
-        {pick.pair && !pick.pair.ok && <p className="text-[10px] text-warn">{pick.pair.reasons.join(' · ')} — {L('ดูด้วยตาได้ แต่ไม่ใช่การวิเคราะห์', 'fine to look at, not an analysis')}</p>}
+        {pick.pair && !pick.pair.ok && <p className="text-[10px] text-warn">{pick.pair.reasons.join(' · ')} — {L('ใช้ดูด้วยตาได้ แต่ไม่ใช่การวิเคราะห์', 'fine for visual inspection, not an analysis')}</p>}
       </div>
     );
 
@@ -379,7 +379,7 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
         </div>
         <div>
           <div className="label mb-1">{L('รายงาน', 'Report')}</div>
-          {run ? <Button onClick={report}>{L('เปิดรายงาน (พิมพ์/บันทึกเป็น PDF ได้)', 'Open report (print / save as PDF)')}</Button> : <p className="text-[10px] text-muted">{L('ทำ “เทียบการเปลี่ยนแปลง” ก่อน แล้วกลับมาออกรายงาน', 'Run “Change analysis” first, then make the report')}</p>}
+          {run ? <Button onClick={report}>{L('เปิดรายงาน (พิมพ์ / บันทึกเป็น PDF)', 'Open report (print / save as PDF)')}</Button> : <p className="text-[10px] text-muted">{L('ทำ “ตรวจจับการเปลี่ยนแปลง” ก่อน แล้วค่อยออกรายงาน', 'Run “Change detection” first, then make the report')}</p>}
         </div>
         <div>
           <div className="label mb-1">{L('เฝ้าระวังอัตโนมัติ', 'Automatic watch')}</div>
@@ -417,10 +417,10 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
       <Field label={L('สิ่งที่ต้องการหา', 'Look for')}>
         <Select value={purpose} onChange={(e) => setPurpose(e.target.value as Purpose)}>{PURPOSES.map((p) => <option key={p.id} value={p.id}>{L(p.labelTh, p.label)}</option>)}</Select>
       </Field>
-      <p className="text-[10px] text-muted">{PURPOSES.find((p) => p.id === purpose)?.hint}</p>
+      <p className="text-[10px] text-muted">{(() => { const pp = PURPOSES.find((p) => p.id === purpose); return pp ? L(pp.hintTh, pp.hint) : null; })()}</p>
       {!pick.pairOk && (
         <Notice tone="warn">
-          {pick.pair && !pick.pair.ok ? pick.pair.reasons.join(' · ') : L('ภาพที่เลือกยังไม่ผ่านเกณฑ์คุณภาพ (เมฆ/ยังไม่ได้วัดเมฆ) — เลือกจุดสีเขียวในขั้นที่ 2 เพื่อให้ผลเชื่อถือได้', 'A picked image does not pass the quality thresholds yet (cloud / not measured) — pick green dots in step 2')}
+          {pick.pair && !pick.pair.ok ? pick.pair.reasons.join(' · ') : L('ภาพที่เลือกยังไม่ผ่านเกณฑ์คุณภาพ (เมฆ/ยังไม่ได้วัดเมฆ) · เลือกจุดสีเขียวในขั้นที่ 2 เพื่อให้ผลเชื่อถือได้', 'A selected image does not pass the quality thresholds yet (cloud / not measured) — pick green dots in step 2')}
         </Notice>
       )}
       <div className="flex gap-1.5">
@@ -434,10 +434,10 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
       {run && <RunResult run={run} />}
       {run && (
         <Button variant="primary" className="w-full" onClick={report}>
-          📄 {L('ทำรายงานผลนี้ (พิมพ์ / บันทึกเป็น PDF)', 'Make a report of this result (print / save as PDF)')}
+          📄 {L('ออกรายงานผลนี้ (พิมพ์ / บันทึกเป็น PDF)', 'Create report (print / save as PDF)')}
         </Button>
       )}
-      {run && !watch && <p className="text-[10px] text-muted">{L('ผลนี้ยังไม่ได้บันทึกในรายการเฝ้าระวัง — ไปที่ “ดาวน์โหลด · รายงาน · เฝ้าระวัง” เพื่อเพิ่มพื้นที่นี้เข้ารายการเฝ้าระวัง', 'Not saved to the watchlist — use “Download · report · watch” to add this area to the watchlist')}</p>}
+      {run && !watch && <p className="text-[10px] text-muted">{L('ผลนี้ยังไม่อยู่ในรายการเฝ้าระวัง · เพิ่มพื้นที่นี้ได้ที่ “ภาพ · รายงาน · เฝ้าระวัง”', 'Not in the watchlist — add this area under “Images · report · watch”')}</p>}
     </div>
   );
 }

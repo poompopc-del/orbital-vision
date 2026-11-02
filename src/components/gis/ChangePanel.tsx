@@ -309,7 +309,7 @@ function SeriesChart({ series, label }: { series: { date: string; value: number;
         <text x={W - 6} y={H - 2} fontSize="8" fill="#939d9a" textAnchor="end">{series[series.length - 1].date}</text>
       </svg>
       <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`} download="aoi-time-series.csv"><Button>{t('Download CSV')}</Button></a>
-      <p className="mt-1 text-[10px] text-muted">{t('Cyan = cloud-free mean (Sentinel-2 SCL); orange = mean of all valid pixels. Scenes with > 80 % cloud in the AOI are skipped.')}</p>
+      <p className="mt-1 text-[10px] text-muted">{t('Green = cloud-free mean (Sentinel-2 SCL); amber = mean of all valid pixels. Scenes with > 80 % cloud in the AOI are skipped.')}</p>
     </div>
   );
 }

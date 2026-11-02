@@ -160,7 +160,7 @@ export default function CoordImport({
             onClick={() => fileRef.current?.click()}
             className={cx('cursor-pointer rounded border border-dashed px-3 py-4 text-center transition', drag ? 'border-cyan-400 bg-cyan-400/10' : 'border-line hover:border-cyan-400/50')}
           >
-            <div className="text-xs text-slate-200">{busy ? <Spinner /> : L('ลากไฟล์มาวาง หรือคลิกเพื่อเลือก (เลือกได้หลายไฟล์)', 'Drop files here or click to choose (several at once is fine)')}</div>
+            <div className="text-xs text-slate-200">{busy ? <Spinner /> : L('ลากไฟล์มาวาง หรือคลิกเพื่อเลือก (เลือกได้หลายไฟล์)', 'Drop files here or click to choose (multiple files allowed)')}</div>
             <div className="mt-1 text-[10px] leading-relaxed text-muted">
               CSV · Excel (.xlsx) · KML / KMZ · GeoJSON · GPX · Shapefile (.zip {L('หรือ', 'or')} .shp+.dbf+.prj) · WKT · TXT
             </div>
@@ -223,7 +223,7 @@ export default function CoordImport({
             <Button onClick={() => setSel(new Set(places.map((p) => p.id)))}>{L('เลือกทั้งหมด', 'Select all')}</Button>
             <Button onClick={() => setSel(new Set())}>{L('ไม่เลือก', 'None')}</Button>
             {swappable && (
-              <Button onClick={() => setPlaces((l) => l.map((p) => swapLatLon(p) ?? p))} title={L('ใช้เมื่อจุดไปตกผิดที่เพราะไฟล์ใส่ lon,lat กลับกัน', 'Use when points land in the wrong place because the file has lon,lat reversed')}>
+              <Button onClick={() => setPlaces((l) => l.map((p) => swapLatLon(p) ?? p))} title={L('ใช้เมื่อจุดตกผิดที่เพราะไฟล์สลับลำดับ lon,lat', 'Use when points land in the wrong place because the file has lon,lat reversed')}>
                 ⇄ {L('สลับ lat/lon', 'Swap lat/lon')}
               </Button>
             )}
@@ -275,8 +275,8 @@ export default function CoordImport({
               `${chosen.length} selected (${counts.point} points · ${counts.polygon} polygons${counts.line ? ` · ${counts.line} lines — their extent is used` : ''}) · about ${totalKm2.toLocaleString(undefined, { maximumFractionDigits: 1 })} km² in total`,
             )}
           </p>
-          {chosen.length > 100 && <Notice tone="warn">{L('พื้นที่จำนวนมาก การตรวจแต่ละรอบจะใช้เวลานานและเรียกข้อมูลภาพหลายครั้ง', 'Many areas — each check round will take a while and fetch a lot of imagery')}</Notice>}
-          {chosen.some((p) => approxKm2(polys.get(p.id)!) > 100) && <Notice tone="warn">{L('บางแปลงใหญ่กว่า ~100 km² ภาพจะถูกย่อก่อนเปรียบเทียบ (ละเอียดน้อยกว่า 10 m) — ถ้าต้องการรายละเอียด แบ่งเป็นแปลงย่อย', 'Some areas are larger than ~100 km² — imagery is downsampled before comparison (coarser than 10 m); split them if you need detail')}</Notice>}
+          {chosen.length > 100 && <Notice tone="warn">{L('พื้นที่จำนวนมาก · การตรวจแต่ละรอบจะใช้เวลานานและดึงภาพหลายครั้ง', 'Many areas — each check round will take a while and fetch a lot of imagery')}</Notice>}
+          {chosen.some((p) => approxKm2(polys.get(p.id)!) > 100) && <Notice tone="warn">{L('บางแปลงใหญ่กว่า ~100 ตร.กม. ภาพจะถูกย่อก่อนเปรียบเทียบ (หยาบกว่า 10 ม.) · ถ้าต้องการรายละเอียด ให้แบ่งเป็นแปลงย่อย', 'Some areas are larger than ~100 km² — imagery is downsampled before comparison (coarser than 10 m); split them if you need detail')}</Notice>}
           <Button variant="primary" className="w-full" disabled={!chosen.length || busy} onClick={add}>
             {L(`เพิ่ม ${chosen.length} พื้นที่เข้ารายการเฝ้าระวัง`, `Add ${chosen.length} area(s) to the watchlist`)}
           </Button>

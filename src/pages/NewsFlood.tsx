@@ -342,7 +342,7 @@ export function NewsFloodMap() {
               {batch && <Button variant="danger" onClick={() => abort.current?.abort()}>{L('หยุด', 'Stop')}</Button>}
             </div>
             {batch && <p className="mt-1 text-[10px] text-cyan-300">{batch}</p>}
-            <p className="mt-1 text-[10px] text-muted">{L('วิเคราะห์เฉพาะตำแหน่งระดับตำบล/อำเภอ/หมุด (สูงสุด 12 จุดต่อครั้ง) ระดับจังหวัดกว้างเกินไป ให้ปักหมุดก่อน', 'Tambon/amphoe/pin places only (max 12 per run); province-level places need a pin first')}</p>
+            <p className="mt-1 text-[10px] text-muted">{L('วิเคราะห์เฉพาะตำแหน่งระดับตำบล/อำเภอ/หมุด (สูงสุด 12 จุดต่อครั้ง) · ระดับจังหวัดกว้างเกินไป ให้ปักหมุดก่อน', 'Tambon/amphoe/pin places only (max 12 per run); province-level places need a pin first')}</p>
           </Panel>
         )}
 
@@ -363,7 +363,7 @@ export function NewsFloodMap() {
                 </button>
               );
             })}
-            {!places.length && <p className="p-2 text-[11px] text-muted">{loading ? L('กำลังดึงข่าว…', 'Loading…') : L('ยังไม่มีตำแหน่ง', 'No places yet')}</p>}
+            {!places.length && <p className="p-2 text-[11px] text-muted">{loading ? L('กำลังดึงข่าว…', 'Loading news…') : L('ยังไม่มีตำแหน่ง', 'No places yet')}</p>}
           </div>
         </div>
 
@@ -379,7 +379,7 @@ export function NewsFloodMap() {
                     <a href={a!.realUrl ?? a!.link} target="_blank" rel="noreferrer" className="text-slate-200 hover:underline">{a!.title}</a>
                     <div className="flex items-center justify-between gap-2 text-[10px] text-muted">
                       <span>{a!.outlet} · {ago(a!.published)}</span>
-                      <button className={cx('shrink-0 hover:text-white', pinFor?.[0] === a!.id ? 'text-pink-400' : 'text-cyan-300')} onClick={() => setPinFor(pinFor?.[0] === a!.id ? null : [a!.id])}>{pinFor?.[0] === a!.id ? L('คลิกบนแผนที่…', 'Click map…') : L('📍 ปักหมุดเอง', '📍 Pin')}</button>
+                      <button className={cx('shrink-0 hover:text-white', pinFor?.[0] === a!.id ? 'text-pink-400' : 'text-cyan-300')} onClick={() => setPinFor(pinFor?.[0] === a!.id ? null : [a!.id])}>{pinFor?.[0] === a!.id ? L('คลิกบนแผนที่…', 'Click the map…') : L('📍 ปักหมุดเอง', '📍 Place pin')}</button>
                     </div>
                   </div>
                 ))}
@@ -394,8 +394,8 @@ export function NewsFloodMap() {
         {pinFor && <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-md border border-pink-400 bg-ink-950/90 px-3 py-1.5 text-xs text-pink-200">{L('คลิกบนแผนที่ตรงตำแหน่งที่เห็นในภาพ/ข่าว', 'Click the map where the photo/story shows')} · <button className="underline" onClick={() => setPinFor(null)}>{L('ยกเลิก', 'cancel')}</button></div>}
         <div className="absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 p-2 text-[10px] text-slate-200">
           {(['pin', 'tambon', 'amphoe', 'province'] as const).map((k) => <div key={k} className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PRECISION_COLOR[k] }} />{PRECISION_TH[k]}</div>)}
-          <div className="mt-1 text-muted">{L('ขนาดจุด = จำนวนข่าว · ขอบสี = ผลภาพดาวเทียม', 'Size = stories · ring = imagery result')}</div>
-          <div className="text-muted"><span style={{ color: '#ef4444' }}>●</span> {L('พบน้ำใหม่', 'new water')} <span style={{ color: '#4fd18b' }}>●</span> {L('ไม่พบ', 'none')} <span style={{ color: '#94a3b8' }}>●</span> {L('ภาพไม่พอ', 'no image')}</div>
+          <div className="mt-1 text-muted">{L('ขนาดจุด = จำนวนข่าว · ขอบสี = ผลภาพดาวเทียม', 'Dot size = number of stories · ring colour = imagery result')}</div>
+          <div className="text-muted"><span style={{ color: '#ef4444' }}>●</span> {L('พบน้ำใหม่', 'new water')} <span style={{ color: '#4fd18b' }}>●</span> {L('ไม่พบ', 'none')} <span style={{ color: '#94a3b8' }}>●</span> {L('ภาพไม่เพียงพอ', 'no usable image')}</div>
         </div>
         {sel && <PlacePanel p={sel} articles={sel.articleIds.map((id) => artById.get(id)!).filter(Boolean)} onClose={() => setSelKey('')} onPin={(ids) => setPinFor(ids)} pinning={!!pinFor} />}
       </div>
@@ -426,7 +426,7 @@ function AddLink() {
     const a = await readArticle(a0);
     if (a.readState !== 'ok') {
       setBusy(false);
-      return setMsg(L('อ่านหน้าข่าวนี้ไม่ได้ (เว็บอาจบล็อกการอ่านอัตโนมัติ)', 'Could not read this page'));
+      return setMsg(L('อ่านหน้าข่าวนี้ไม่ได้ (เว็บอาจบล็อกการอ่านอัตโนมัติ)', 'Could not read this page (the site may block automated reading)'));
     }
     // title from the page
     const r = await fetch(`/api/news?src=article&url=${encodeURIComponent(url.trim())}`).then((x) => x.json()).catch(() => ({}));
@@ -434,7 +434,7 @@ function AddLink() {
     await useNews.getState().addArticle(art);
     setBusy(false);
     setUrl('');
-    setMsg(art.places.length ? L(`พบชื่อสถานที่ ${art.places.length} แห่งในข่าว`, `${art.places.length} place(s) found`) : L('ไม่พบชื่อตำบล/อำเภอ/จังหวัดในข่าว — ปักหมุดเองได้ในรายการ “ข่าวที่ยังหาตำแหน่งไม่ได้”', 'No place names found — pin it manually'));
+    setMsg(art.places.length ? L(`พบชื่อสถานที่ ${art.places.length} แห่งในข่าว`, `${art.places.length} place(s) found`) : L('ไม่พบชื่อตำบล/อำเภอ/จังหวัดในข่าว · ปักหมุดเองได้ในรายการ “ข่าวที่ยังหาตำแหน่งไม่ได้”', 'No place names found — pin it manually'));
   };
   return (
     <Panel title={L('เพิ่มข่าวจากลิงก์', 'Add a story by link')}>
@@ -513,7 +513,7 @@ function PlacePanel({ p, articles, onClose, onPin, pinning }: { p: NewsPlace; ar
 
       <div className="mt-2 flex flex-wrap gap-1.5">
         <Button variant="primary" disabled={!!busy || p.precision === 'province'} onClick={go}>{busy ? <Spinner /> : run ? L('วิเคราะห์ใหม่ด้วยภาพล่าสุด', 'Re-analyse with latest') : L('วิเคราะห์น้ำท่วมจากภาพดาวเทียม', 'Analyse flooding from imagery')}</Button>
-        <Button onClick={() => onPin(articles.map((a) => a.id))}>{pinning ? L('คลิกบนแผนที่…', 'Click map…') : L('📍 ปักหมุดเอง', '📍 Pin location')}</Button>
+        <Button onClick={() => onPin(articles.map((a) => a.id))}>{pinning ? L('คลิกบนแผนที่…', 'Click the map…') : L('📍 ปักหมุดเอง', '📍 Pin location')}</Button>
         {p.precision === 'pin' && <Button variant="danger" onClick={() => { void removePin(p.key); onClose(); }}>{L('ลบหมุด', 'Remove pin')}</Button>}
         {busy && <Button variant="danger" onClick={() => abort.current?.abort()}>{L('หยุด', 'Stop')}</Button>}
       </div>
@@ -544,14 +544,14 @@ function PlacePanel({ p, articles, onClose, onPin, pinning }: { p: NewsPlace; ar
             {run.note && <p className="text-[10px] text-warn">{run.note}</p>}
             <p className="text-[10px] text-muted">{L('วิเคราะห์เมื่อ', 'Analysed')} {tTime(run.at)} · {run.method}</p>
           </Sec>
-          <Sec n="3" t={L('พื้นที่ในกรอบวิเคราะห์ (ESA WorldCover)', 'Inside the box (ESA WorldCover)')}>
-            {lc ? <ul>{lc.map((x) => <li key={x.label}>{L(x.labelTh, x.label)}: <b>{x.km2.toFixed(2)}</b> km² ({(x.km2 * 625).toFixed(0)} ไร่)</li>)}</ul> : <p className="text-muted">{L('อ่านข้อมูลสิ่งปกคลุมดินไม่ได้', 'Unavailable')}</p>}
+          <Sec n="3" t={L('พื้นที่ในกรอบวิเคราะห์ (ESA WorldCover)', 'Land cover in the analysis box (ESA WorldCover)')}>
+            {lc ? <ul>{lc.map((x) => <li key={x.label}>{L(x.labelTh, x.label)}: <b>{x.km2.toFixed(2)}</b> km² ({(x.km2 * 625).toFixed(0)} ไร่)</li>)}</ul> : <p className="text-muted">{L('อ่านข้อมูลสิ่งปกคลุมดินไม่ได้', 'Land cover unavailable')}</p>}
           </Sec>
         </div>
       )}
 
       <div className="mt-3 border-t border-line pt-2">
-        <div className="mb-1 font-semibold text-cyan-300">{L('สถานีวัดระดับน้ำใกล้เคียง (สสน.)', 'Nearby water-level stations')}</div>
+        <div className="mb-1 font-semibold text-cyan-300">{L('สถานีวัดระดับน้ำใกล้เคียง (สสน.)', 'Nearby water-level stations (HII)')}</div>
         {near === null ? (
           <button className="text-[11px] text-cyan-300 hover:underline" onClick={() => void useDisaster.getState().load(1)}>{L('โหลดข้อมูลสถานี ThaiWater', 'Load ThaiWater stations')}</button>
         ) : near.length ? (
@@ -656,11 +656,11 @@ export function NewsFloodReport() {
           <label className="ml-2 flex items-center gap-1 text-[11px] text-slate-200"><input type="checkbox" checked={onlyAnalysed} onChange={(e) => setOnlyAnalysed(e.target.checked)} />{L('เฉพาะตำแหน่งที่วิเคราะห์ภาพแล้ว', 'Only analysed places')}</label>
         </div>
         {!snap && progress && <p className="text-[10px] text-cyan-300">{progress}</p>}
-        <p className="text-[11px] text-muted">{snap ? L(`ข่าว ${snap.articles.length} ชิ้น · ตำแหน่งในรายงาน ${places.length} แห่ง · ดึงข่าวเมื่อ ${tTime(snap.fetchedAt)}`, `${snap.articles.length} stories · ${places.length} places · fetched ${tTime(snap.fetchedAt)}`) : L('กำลังดึงข่าว…', 'Loading…')}</p>
+        <p className="text-[11px] text-muted">{snap ? L(`ข่าว ${snap.articles.length} ชิ้น · ตำแหน่งในรายงาน ${places.length} แห่ง · ดึงข่าวเมื่อ ${tTime(snap.fetchedAt)}`, `${snap.articles.length} stories · ${places.length} places · fetched ${tTime(snap.fetchedAt)}`) : L('กำลังดึงข่าว…', 'Loading news…')}</p>
       </div>
       <div className="mt-3 flex gap-2">
-        <Button variant="primary" disabled={!snap || busy || !places.length} onClick={open}>{busy ? <Spinner /> : `📄 ${L('เปิดรายงาน (บันทึกเป็น PDF ได้)', 'Open report (save as PDF)')}`}</Button>
-        <Button disabled={!snap || !places.length} onClick={csv}>{L('ตาราง CSV', 'CSV')}</Button>
+        <Button variant="primary" disabled={!snap || busy || !places.length} onClick={open}>{busy ? <Spinner /> : `📄 ${L('เปิดรายงาน (พิมพ์ / บันทึกเป็น PDF)', 'Open report (print / save as PDF)')}`}</Button>
+        <Button disabled={!snap || !places.length} onClick={csv}>{L('ตาราง CSV', 'CSV table')}</Button>
       </div>
       {snap && !places.length && <Notice tone="warn">{L('ยังไม่มีตำแหน่งที่วิเคราะห์ภาพ — ไปที่แท็บ “ข่าวน้ำท่วม” แล้วกด “วิเคราะห์ภาพดาวเทียมทุกตำแหน่ง” ก่อน หรือเอาเครื่องหมายช่องด้านบนออก', 'No analysed places yet — analyse them on the news tab first, or untick the box')}</Notice>}
     </div>
@@ -703,7 +703,7 @@ async function buildNewsReport(inp: { title: string; lang: 'th' | 'en'; snap: Ne
   const ov = fit(allB, 120 / 128, 0.25);
   const rowOf = ({ p, n, run }: (typeof items)[number]) => {
     const latest = p.articleIds.map((id) => arts.get(id)?.published ?? '').sort().pop();
-    return `<tr><td class="c">${n}</td><td>${esc(p.labelTh)} <span style="color:#666;font-size:6.5pt">· ${esc(precTh(p.precision))}</span></td><td class="c">${p.articleIds.length}</td><td class="mono c">${dmy(latest || undefined)}</td><td class="c lv-${run?.status === 'ok' ? run.level : 'x'}">${esc(res(run))}${run?.status === 'ok' && run.level !== 'none' ? `<br>${fmtArea(run.stats?.interestKm2 ?? 0, 'km2', th)}` : ''}${timing(run, p.articleIds.map((id) => arts.get(id)))?.before ? ` <span style="color:#b45309;font-size:6.5pt">(${L('ภาพ', 'img')} ${dmy(run?.B?.datetime)})</span>` : ''}</td></tr>`;
+    return `<tr><td class="c">${n}</td><td>${esc(p.labelTh)} <span style="color:#666;font-size:6.5pt">· ${esc(precTh(p.precision))}</span></td><td class="c">${p.articleIds.length}</td><td class="mono c">${dmy(latest || undefined)}</td><td class="c lv-${run?.status === 'ok' ? run.level : 'x'}">${esc(res(run))}${run?.status === 'ok' && run.level !== 'none' ? `<br>${fmtArea(run.stats?.interestKm2 ?? 0, 'km2', th)}` : ''}${timing(run, p.articleIds.map((id) => arts.get(id)))?.before ? ` <span style="color:#b45309;font-size:6.5pt">(${L('ภาพ', 'image')} ${dmy(run?.B?.datetime)})</span>` : ''}</td></tr>`;
   };
   const PER = 9;
   const marks = items.map(({ p, n }) => {

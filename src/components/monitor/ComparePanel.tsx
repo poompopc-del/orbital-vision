@@ -294,7 +294,7 @@ export function ScenePicker({
 
       {list && (
         <div className="mt-2 space-y-2">
-          {!list.length && <Notice tone="warn">{L('ไม่พบภาพในช่วงนี้ ลองขยายช่วงวันที่หรือเลือกดาวเทียมเพิ่ม', 'No scenes in this range — widen it or add sensors')}</Notice>}
+          {!list.length && <Notice tone="warn">{L('ไม่พบภาพในช่วงนี้ · ขยายช่วงวันที่หรือเพิ่มดาวเทียม', 'No scenes in this range — widen the dates or add sensors')}</Notice>}
           {list.length > 0 && (
             <>
               <div className="rounded border border-line bg-ink-950/60 p-1">
@@ -316,7 +316,7 @@ export function ScenePicker({
                   <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#f5b84b]" />{L('ต้องวัดเมฆใน AOI', 'AOI cloud not measured')}</span>
                   <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#ef4444]" />{L('ไม่ผ่าน', 'fails')}</span>
                   <span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#60a5fa]" />{L('เรดาร์', 'radar')}</span>
-                  <label className="ml-auto flex items-center gap-1"><input type="checkbox" checked={onlyPass} onChange={(e) => setOnlyPass(e.target.checked)} />{L('ซ่อนภาพที่ไม่ผ่าน', 'hide failing')}</label>
+                  <label className="ml-auto flex items-center gap-1"><input type="checkbox" checked={onlyPass} onChange={(e) => setOnlyPass(e.target.checked)} />{L('ซ่อนภาพที่ไม่ผ่าน', 'Hide failing scenes')}</label>
                 </div>
               </div>
               {auto && (
@@ -373,9 +373,9 @@ export function ScenePicker({
                   );
                 })}
               </div>
-              <button className="text-[10px] text-muted hover:text-white" onClick={() => setDetails(!details)}>{details ? L('▴ ซ่อนรายละเอียดภาพ', '▴ Hide scene details') : L('▾ รายละเอียดภาพ (วันประมวลผล, เมฆรวม, รหัสภาพ)', '▾ Scene details')}</button>
+              <button className="text-[10px] text-muted hover:text-white" onClick={() => setDetails(!details)}>{details ? L('▴ ซ่อนรายละเอียดภาพ', '▴ Hide scene details') : L('▾ รายละเอียดภาพ (วันประมวลผล เมฆรวม รหัสภาพ)', '▾ Scene details')}</button>
               {pair && !pair.ok && <Notice tone="bad">{pair.reasons.join(' · ')}</Notice>}
-              {!!pair?.notes.length && (details ? pair.notes.map((x) => <p key={x} className="text-[10px] text-warn">• {x}</p>) : <p className="text-[10px] text-warn">⚠ {L(`ข้อควรระวังในการเทียบ ${pair.notes.length} ข้อ`, `${pair.notes.length} comparison caveat(s)`)} — <button className="underline" onClick={() => setDetails(true)}>{L('ดู', 'show')}</button></p>)}
+              {!!pair?.notes.length && (details ? pair.notes.map((x) => <p key={x} className="text-[10px] text-warn">• {x}</p>) : <p className="text-[10px] text-warn">⚠ {L(`ข้อควรระวังในการเทียบ ${pair.notes.length} ข้อ`, `${pair.notes.length} comparison caveat(s)`)} — <button className="underline" onClick={() => setDetails(true)}>{L('ดู', 'Show')}</button></p>)}
               {A && B && (checkScene(A, cl[A.id] === 'err' ? null : (cl[A.id] as AoiCloud | null | undefined), qc).reasons.length > 0 || checkScene(B, cl[B.id] === 'err' ? null : (cl[B.id] as AoiCloud | null | undefined), qc).reasons.length > 0) && (
                 <Notice tone="warn">{L('ภาพที่เลือกไม่ผ่านเกณฑ์คุณภาพ ระบบจะไม่สรุปผลการเปลี่ยนแปลงจากคู่นี้ ให้เลือกวันอื่น (จุดสีเขียวบนไทม์ไลน์)', 'A selected scene fails the quality thresholds; no change conclusion will be made from this pair — pick another date (green dots)')}</Notice>
               )}
@@ -425,7 +425,7 @@ export default function ComparePanel({ aoi, onRun, onSwipe, swipeOn }: { aoi: Mo
             const later = list.filter((x) => x.collection === A.collection && x.datetime > A.datetime).slice(-12);
             const m = await c.measure(later, ac.signal);
             const use = later.filter((x) => c.passes(x, m)).slice(-6);
-            if (!use.length) return c.setErr(L('ไม่มีภาพหลังจากภาพอ้างอิงที่ผ่านเกณฑ์', 'No later scene passes the thresholds'));
+            if (!use.length) return c.setErr(L('ไม่มีภาพที่ผ่านเกณฑ์หลังภาพอ้างอิง', 'No later scene passes the thresholds'));
             for (let i = 0; i < use.length; i++) {
               c.setBusy(L(`แนวโน้ม ${i + 1}/${use.length} · ${d10(use[i].datetime)}`, `Trend ${i + 1}/${use.length}`));
               const cv = (x: ImageryItem) => (m[x.id] && m[x.id] !== 'err' ? (m[x.id] as AoiCloud) : null);
@@ -658,7 +658,7 @@ export function QcPanel() {
         <div>
           <div className="flex justify-between"><span>{L('ข้ามภาพที่เมฆรวมทั้งภาพเกิน', 'Skip scenes with whole-scene cloud over')}</span><b className="font-mono">{qc.maxSceneCloud}%</b></div>
           <input type="range" min={0} max={100} value={qc.maxSceneCloud} onChange={(e) => setQc({ maxSceneCloud: +e.target.value })} className="w-full" />
-          <p className="text-[10px] text-muted">{L('ภาพหนึ่งภาพกว้าง ~110 กม. เมฆรวมสูงแต่พื้นที่ของเราอาจโปร่ง — ระบบตัดสินจากเมฆในพื้นที่ (AOI) เป็นหลัก ค่านี้ใช้แค่ข้ามภาพที่เมฆเกือบเต็มเพื่อประหยัดเวลา', 'A scene is ~110 km wide; it can be cloudy overall yet clear over your area — the AOI cloud decides, this only skips nearly fully clouded scenes to save time')}</p>
+          <p className="text-[10px] text-muted">{L('ภาพหนึ่งฉากกว้างราว 110 กม. เมฆรวมอาจสูงแต่พื้นที่สนใจยังโปร่งได้ · ระบบตัดสินจากเมฆใน AOI เป็นหลัก ค่านี้ใช้ข้ามภาพที่เมฆเกือบเต็มฉากเพื่อประหยัดเวลา', 'A scene is ~110 km wide and can be cloudy overall yet clear over your area. The AOI cloud decides; this limit only skips nearly fully clouded scenes to save time.')}</p>
         </div>
         <div className="grid grid-cols-2 gap-1.5">
           <Field label={L('เมฆ+เงาใน AOI ไม่เกิน', 'AOI cloud+shadow ≤')}>

@@ -263,7 +263,7 @@ export function DisasterMap() {
         <GlobeHost onReady={setViewer} />
         <div className="absolute bottom-8 left-3 z-10 rounded-md border border-line bg-ink-950/85 p-2 text-[10px] text-slate-200">
           {HAZARDS.filter((h) => h.id !== 'other').map((h) => <div key={h.id} className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: h.color }} />{L(h.th, h.en)}</div>)}
-          <div className="mt-1 text-muted">{L('จุดใหญ่ = ระดับสูงกว่า (ดูเกณฑ์ในรายละเอียด)', 'Bigger = higher level (criteria in detail)')}</div>
+          <div className="mt-1 text-muted">{L('จุดใหญ่ = ระดับสูงกว่า (ดูเกณฑ์ในรายละเอียด)', 'Larger dot = higher level (criteria in details)')}</div>
         </div>
         {sel && <DetailPanel e={sel} onClose={() => setSel(null)} />}
       </div>
@@ -339,7 +339,7 @@ function DetailPanel({ e, onClose }: { e: DEvent; onClose: () => void }) {
       <dl className="mt-2 grid grid-cols-[110px_1fr] gap-x-2 gap-y-0.5 text-[11px]">
         <dt className="text-muted">{L('ตำแหน่ง', 'Location')}</dt><dd className="font-mono text-slate-200">{e.lat.toFixed(4)}, {e.lon.toFixed(4)}</dd>
         <dt className="text-muted">{L('จังหวัด', 'Province')}</dt><dd className="text-slate-200">{provinceLabel(e.province)}</dd>
-        <dt className="text-muted">{L('เวลาเกิด / ตรวจวัด', 'Event / measured')}</dt><dd className="text-slate-200">{tTime(e.time)} <span className="text-muted">({ago(e.time)})</span></dd>
+        <dt className="text-muted">{L('เวลาเกิด / ตรวจวัด', 'Event / measured at')}</dt><dd className="text-slate-200">{tTime(e.time)} <span className="text-muted">({ago(e.time)})</span></dd>
         {e.reported && <><dt className="text-muted">{L('เวลารายงาน', 'Reported')}</dt><dd className="text-slate-200">{tTime(e.reported)}</dd></>}
         <dt className="text-muted">{L('ดึงเข้าระบบ', 'Fetched')}</dt><dd className="text-slate-200">{tTime(e.fetchedAt)}</dd>
         <dt className="text-muted">{L('แหล่งข้อมูล', 'Source')}</dt><dd className="text-slate-200">{REGISTRY.find((r) => r.id === e.source)?.org} · <span className="font-mono text-[10px]">{e.sourceId}</span></dd>
@@ -377,7 +377,7 @@ function DetailPanel({ e, onClose }: { e: DEvent; onClose: () => void }) {
               <li>{L('ไม่มีการประเมินจำนวนผู้ประสบภัยหรือความเสียหายทางเศรษฐกิจ', 'No estimate of people affected or economic loss is made')}</li>
             </ul>
           </Section>
-          {run && <Link to="/imagery?tab=watch" className="text-[11px] text-cyan-300 hover:underline">{L('ดูภาพก่อน–หลังและรายละเอียดในหน้าเฝ้าระวัง →', 'See before/after images in the watchlist →')}</Link>}
+          {run && <Link to="/imagery?tab=watch" className="text-[11px] text-cyan-300 hover:underline">{L('ดูภาพก่อน–หลังและรายละเอียดในรายการเฝ้าระวัง →', 'See before/after images in the watchlist →')}</Link>}
         </div>
       )}
     </div>
@@ -509,7 +509,7 @@ export function DisasterReport() {
           </div>
         </Panel>
         <div className="flex flex-wrap gap-1.5">
-          <Button variant="primary" disabled={!snap} onClick={open}>📄 {L('เปิดรายงาน (บันทึกเป็น PDF ได้)', 'Open report (save as PDF)')}</Button>
+          <Button variant="primary" disabled={!snap} onClick={open}>📄 {L('เปิดรายงาน (พิมพ์ / บันทึกเป็น PDF)', 'Open report (print / save as PDF)')}</Button>
           <Button disabled={!snap} onClick={csv}>{L('ตารางเหตุการณ์ CSV', 'Events CSV')}</Button>
         </div>
         {err && <Notice tone="bad">{err}</Notice>}

@@ -87,7 +87,7 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose }: { vie
         <Button variant={show === 'split' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('split'); }}>{L('เลื่อนเทียบ', 'Swipe')}</Button>
         <Button variant={show === 'A' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('A'); }}>A {L('ก่อน', 'before')}</Button>
         <Button variant={show === 'B' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('B'); }}>B {L('หลัง', 'after')}</Button>
-        <Button variant={blink ? 'active' : 'ghost'} onClick={() => { const on = !blink; setBlink(on); setShow(on ? 'A' : 'split'); }} title={L('สลับภาพ A/B อัตโนมัติ — สิ่งที่เปลี่ยนจะ “กะพริบ”', 'Alternate A/B automatically — changes flicker')}>⟳ {L('กะพริบ', 'Blink')}</Button>
+        <Button variant={blink ? 'active' : 'ghost'} onClick={() => { const on = !blink; setBlink(on); setShow(on ? 'A' : 'split'); }} title={L('สลับภาพ A/B อัตโนมัติ ให้จุดที่เปลี่ยน “กะพริบ” เห็นชัด', 'Alternate A/B automatically so changes flicker')}>⟳ {L('กะพริบ', 'Blink')}</Button>
         {onClose && <button className="px-2 text-cyan-300 hover:underline" onClick={onClose}>{L('ปิด', 'Close')}</button>}
       </div>
     </>

@@ -37,7 +37,7 @@ export default function RunResult({ run }: { run: MonitorRun }) {
     return (
       <Notice tone="warn">
         <b>{run.status === 'error' ? L('เกิดข้อผิดพลาด', 'Error') : L('ข้อมูลไม่เพียงพอ — ไม่สรุปผลการเปลี่ยนแปลง', 'Insufficient data — no change conclusion')}</b> — {run.reason}
-        <div className="mt-1 text-[10px]">{L('ไม่ได้แปลว่า “ไม่มีการเปลี่ยนแปลง” · เลือกภาพวันอื่น (จุดสีเขียว) หรือใช้เรดาร์', 'This does not mean “no change” · pick another date (green dots) or radar.')}</div>
+        <div className="mt-1 text-[10px]">{L('ไม่ได้แปลว่า “ไม่มีการเปลี่ยนแปลง” · เลือกภาพวันอื่น (จุดสีเขียว) หรือใช้เรดาร์', 'This does not mean “no change” — pick another date (green dots) or use radar.')}</div>
       </Notice>
     );
 

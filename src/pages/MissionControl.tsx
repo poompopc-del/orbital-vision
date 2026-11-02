@@ -374,7 +374,7 @@ export default function MissionControl() {
 
         {status === 'error' && (
           <div className="space-y-2">
-            <Notice tone="bad">{t('Orbital data unavailable:')} {error}. {t('No positions are shown rather than simulated ones.')}</Notice>
+            <Notice tone="bad">{t('Orbital data unavailable:')} {error}. {t('Positions are not simulated.')}</Notice>
             <Button onClick={() => refreshOrbits(true)}>{t('Retry')}</Button>
           </div>
         )}

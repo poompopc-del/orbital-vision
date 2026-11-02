@@ -55,7 +55,7 @@ export default function ExtentBar({
       if (single) await importBoundary(list[0].name, await list[0].text());
       else {
         const r = await boundaryGeoJsonFromFiles(await filesFromInput(list));
-        if (!r.geojson.features.length) throw new Error(r.warnings.map((w) => L(w.th, w.en)).join(' · ') || L('ไม่พบเส้นในไฟล์', 'No lines found in the files'));
+        if (!r.geojson.features.length) throw new Error(r.warnings.map((w) => L(w.th, w.en)).join(' · ') || L('ไม่พบเส้นในไฟล์', 'No lines found in the file(s)'));
         await importBoundary(list.map((f) => f.name.replace(/\.[^.]+$/, '')).filter((v, i, a) => a.indexOf(v) === i).join(', '), JSON.stringify(r.geojson));
       }
       void apply(mode);
@@ -129,12 +129,12 @@ export default function ExtentBar({
   return (
     <div className="pointer-events-auto absolute right-3 top-3 z-10 w-[268px] rounded-md border border-line bg-ink-950/90 p-2 text-[11px] text-slate-200">
       <div className="flex items-center gap-1">
-        {([['overview', L('ภาพรวมประเทศไทย', 'Thailand overview')], ['border', L('เน้นชายแดน', 'Border focus')], ['custom', L('พื้นที่เฝ้าระวัง', 'Custom AOI')]] as const).map(([k, t]) => (
+        {([['overview', L('ภาพรวมประเทศไทย', 'Thailand overview')], ['border', L('เน้นชายแดน', 'Border focus')], ['custom', L('พื้นที่เฝ้าระวัง', 'Watch area')]] as const).map(([k, t]) => (
           <button key={k} disabled={k === 'custom' && !customRect} onClick={() => { setMode(k); void apply(k); }} className={cx('flex-1 rounded border px-1 py-1 disabled:opacity-40', mode === k ? 'border-cyan-400 bg-cyan-400/15 text-white' : 'border-line hover:border-cyan-400/40')}>{t}</button>
         ))}
       </div>
       <div className="mt-1 flex items-center gap-1">
-        <button onClick={() => void apply()} className="flex-1 rounded border border-line px-1 py-1 hover:border-cyan-400/40">↺ {L('กลับมุมมองเฝ้าระวัง', 'Reset to surveillance extent')}</button>
+        <button onClick={() => void apply()} className="flex-1 rounded border border-line px-1 py-1 hover:border-cyan-400/40">↺ {L('กลับมุมมองเฝ้าระวัง', 'Reset to watch extent')}</button>
         <button onClick={() => setOpen(!open)} className="rounded border border-line px-2 py-1 hover:border-cyan-400/40" title={L('ตั้งค่า', 'Settings')}>{open ? '▴' : '▾'}</button>
       </div>
       {(open || mode === 'border') && (
@@ -151,8 +151,8 @@ export default function ExtentBar({
                 <div className="font-semibold">{L('ย้ายกรอบเฝ้าระวังเข้าหา', 'Move the watch boxes toward')}</div>
                 <div className="flex justify-between text-muted"><span>◀ {L('ฝั่งไทย', 'Thailand')}</span><span>{L(`ฝั่ง${NEIGHBOURS.find((x) => x.id === nb)?.th ?? ''}`, NEIGHBOURS.find((x) => x.id === nb)?.en ?? '')} ▶</span></div>
                 <input type="range" min={-1} max={1} step={0.1} value={shift} onChange={(e) => onShift(+e.target.value)} className="w-full" />
-                <div className="flex justify-between text-[10px] text-muted"><button className="hover:text-white" onClick={() => onShift(-1)}>{L('ฝั่งไทยทั้งกรอบ', 'all Thai side')}</button><button className="hover:text-white" onClick={() => onShift(0)}>{L('คร่อมแนว', 'straddle')}</button><button className="hover:text-white" onClick={() => onShift(1)}>{L('ฝั่งเพื่อนบ้านทั้งกรอบ', 'all neighbour side')}</button></div>
-                <p className="text-[10px] text-muted">{tileCount ? L(`${tileCount} กรอบตามแนว (ยังไม่บันทึก) — ครอบเส้นแบ่งเขตครบทุกช่วง · เลือกและเพิ่มเข้ารายการในแผง “+ ตามแนวชายแดน”`, `${tileCount} boxes along the line (not saved) — pick and add them in “+ Along border”`) : L('กำลังสร้างกรอบตามแนว…', 'Building boxes…')}</p>
+                <div className="flex justify-between text-[10px] text-muted"><button className="hover:text-white" onClick={() => onShift(-1)}>{L('ฝั่งไทยทั้งกรอบ', 'all on the Thai side')}</button><button className="hover:text-white" onClick={() => onShift(0)}>{L('คร่อมแนวชายแดน', 'straddle the line')}</button><button className="hover:text-white" onClick={() => onShift(1)}>{L('ฝั่งเพื่อนบ้านทั้งกรอบ', 'all on the neighbour side')}</button></div>
+                <p className="text-[10px] text-muted">{tileCount ? L(`${tileCount} กรอบตามแนวชายแดน (ยังไม่บันทึก) · ครอบคลุมเส้นเขตแดนทุกช่วง · เลือกและเพิ่มเข้ารายการได้ในแผง “+ ตามแนวชายแดน”`, `${tileCount} boxes along the line (not saved) — pick and add them in “+ Along border”`) : L('กำลังสร้างกรอบตามแนว…', 'Building boxes…')}</p>
               </div>
             </>
           )}
@@ -177,7 +177,7 @@ export default function ExtentBar({
             ) : (
               <div className="text-muted">{L('เส้นเขตแดน: Natural Earth 1:50m (สาธารณสมบัติ) เป็นเส้นโดยประมาณ ไม่ใช่เส้นตามกฎหมาย/MOU และบางช่วงยังเป็นพื้นที่พิพาท', 'Boundary: Natural Earth 1:50m (public domain), approximate — not the legal/MOU line; some stretches are disputed')}</div>
             )}
-            {srcOk === false && <div className="text-warn">{L('โหลดเส้นขอบประเทศไม่ได้ ใช้กรอบประเทศไทยสำรอง', 'outlines unavailable — fallback extent used')}</div>}
+            {srcOk === false && <div className="text-warn">{L('โหลดเส้นขอบประเทศไม่ได้ ใช้กรอบประเทศไทยสำรอง', 'Country outlines unavailable — fallback extent used')}</div>}
             <label className={cx('mt-1 inline-block cursor-pointer rounded border border-line px-2 py-0.5 hover:border-cyan-400/50', impBusy && 'opacity-50')}>
               {impBusy ? L('กำลังนำเข้า…', 'Importing…') : custom ? L('นำเข้าไฟล์ใหม่แทน', 'Replace file') : L('นำเข้าเส้นเขตแดน', 'Import boundary')}
               <input type="file" multiple accept=".zip,.shp,.dbf,.prj,.cpg,.shx,.kml,.kmz,.gpx,.geojson,.json,application/geo+json,application/json" className="hidden" disabled={impBusy} onChange={(e) => { const f = e.target.files ? [...e.target.files] : []; e.target.value = ''; if (f.length) void doImport(f); }} />
@@ -216,7 +216,7 @@ export default function ExtentBar({
             <div className="mt-1.5 space-y-0.5 border-t border-line pt-1.5">
               <label className="flex items-center gap-1"><input type="checkbox" checked={line.show} onChange={(e) => setLine({ show: e.target.checked })} />{custom ? L('แสดงเส้นเขตแดนที่นำเข้า', 'Show the imported boundary') : L('แสดงเส้นเขตแดน (Natural Earth)', 'Show the boundary (Natural Earth)')}</label>
               <label className="flex items-center gap-1"><input type="checkbox" checked={line.baseBorders} onChange={(e) => setLine({ baseBorders: e.target.checked })} />{L('เส้นเขตแดนเดิมของแผนที่ฐาน (Esri)', 'Base map’s own borders (Esri)')}</label>
-              <div className="pl-4 text-[9px] text-muted">{L('เป็นชั้นภาพเดียวกับชื่อประเทศ/จังหวัด/สถานที่ — ปิดแล้วชื่อเหล่านั้นจะหายไปด้วย', 'Same image layer as country/province/place names — turning it off hides those names too')}</div>
+              <div className="pl-4 text-[9px] text-muted">{L('อยู่ในชั้นภาพเดียวกับชื่อประเทศ/จังหวัด/สถานที่ · ปิดแล้วชื่อเหล่านั้นจะหายด้วย', 'Same image layer as country/province/place names — turning it off hides those names too')}</div>
               {custom && line.baseBorders && (
                 <button className="pl-4 text-[10px] text-cyan-300 hover:underline" onClick={() => setLine({ baseBorders: false, show: true })}>
                   {L('→ ใช้เฉพาะเส้นที่นำเข้า (ปิดเส้นเดิม)', '→ Use only the imported line (hide the old one)')}
