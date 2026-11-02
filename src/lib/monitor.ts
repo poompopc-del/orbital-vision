@@ -135,6 +135,12 @@ export interface MonitorRun {
   mode?: 'auto' | 'manual';
   /** what the automatic check compared against */
   baseline?: Baseline;
+  /** results of the automatic server checker (stored in Supabase) */
+  server?: boolean;
+  /** server results: which comparison this is (latest = vs the previous usable scene) */
+  horizon?: 'latest' | 'week' | 'month' | 'year';
+  /** server results: the same new scene compared with the scene ~1 week / 1 month / 1 year earlier */
+  horizons?: Partial<Record<'week' | 'month' | 'year', MonitorRun>>;
   /** other scenes that pass the thresholds (offered when this run could not conclude) */
   suggestions?: { id: string; datetime: string; cloud: number | null; collection: string }[];
 }
@@ -204,7 +210,14 @@ export async function putImage(key: string, dataUrl: string) {
     /* images are optional — the run record still stands */
   }
 }
+// images of server results live in Supabase storage: register their URLs so getImage finds them
+const remoteImages = new Map<string, string>();
+export function registerRemoteImages(runId: string, images: Record<string, string> | null | undefined) {
+  for (const [k, v] of Object.entries(images ?? {})) if (v) remoteImages.set(`${runId}:${k}`, v);
+}
 export async function getImage(key: string): Promise<string | null> {
+  const remote = remoteImages.get(key);
+  if (remote) return remote;
   try {
     const db = await idb();
     return await new Promise((res) => {

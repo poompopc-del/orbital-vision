@@ -55,6 +55,7 @@ interface Area {
   notify_email: string | null;
   last_checked_at: string | null;
   last_scene_at: string | null;
+  edited_at?: string | null;
 }
 interface SeenRow {
   area_id: string;
@@ -328,11 +329,14 @@ class AreaJob {
 
   async run() {
     const a = this.a;
-    this.seen = await this.store.seen(a.id);
-    const firstRun = !a.last_checked_at;
+    // the user moved/resized the box after the last check: cloud figures of earlier scenes were for the old
+    // shape, so look at them again and start a new reference instead of alerting on the reshaped area
+    const reshaped = !!(a.edited_at && a.last_checked_at && a.edited_at > a.last_checked_at);
+    this.seen = reshaped ? new Map() : await this.store.seen(a.id);
+    const firstRun = !a.last_checked_at || reshaped;
     const now = Date.now();
-    const since = Math.max(now - LOOKBACK_DAYS * day, a.last_scene_at ? new Date(a.last_scene_at).getTime() - day : 0);
-    log(`▶ ${a.name} (${a.id.slice(0, 8)}) since ${iso(since)}${firstRun ? ' · first check' : ''}`);
+    const since = Math.max(now - LOOKBACK_DAYS * day, a.last_scene_at && !reshaped ? new Date(a.last_scene_at).getTime() - day : 0);
+    log(`▶ ${a.name} (${a.id.slice(0, 8)}) since ${iso(since)}${reshaped ? ' · box edited, new reference' : firstRun ? ' · first check' : ''}`);
     const fresh = (await this.search(since, now + day)).filter((x) => !this.seen.has(x.id));
     const usable: ImageryItem[] = [];
     for (const it of fresh) if ((await this.examine(it)).usable) usable.push(it);

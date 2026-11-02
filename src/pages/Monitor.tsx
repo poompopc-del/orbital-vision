@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { create } from 'zustand';
 import { useLang } from '../i18n';
@@ -28,39 +29,91 @@ import { hotspotKm2 } from '../lib/monitor';
 import { fetchItem, type ImageryItem } from '../lib/stac';
 import { pcProvider } from '../components/gis/sceneLayer';
 import { displayTemplate } from '../lib/export';
+import { cloudStatus, deleteCloudRun, ensureUuid, loadCloud, markAlertsRead, syncAreas, type CloudState, type WatchAlert } from '../lib/watchCloud';
+import { supabase } from '../lib/supabase';
 
-// ---------------------------------------------------------------- shared state (persisted in this browser)
+// ---------------------------------------------------------------- shared state
+// Signed in with the watch tables set up ("cloud on"): areas live in Supabase so the automatic
+// checker can watch them; its results arrive as server runs. Otherwise: this browser only.
+// Results of checks run in the browser are always kept in this browser.
 
 interface MonState {
   aois: MonitorAoi[];
   runs: MonitorRun[];
+  cloud: CloudState;
+  cloudErr: string;
+  alerts: WatchAlert[];
+  /** server results (merged into runs) */
+  serverRuns: MonitorRun[];
   setAois: (f: (a: MonitorAoi[]) => MonitorAoi[]) => void;
   addRun: (r: MonitorRun) => void;
   removeRun: (id: string) => void;
+  syncCloud: () => Promise<void>;
+  readAlerts: (ids: string[]) => void;
 }
-export const useMonitor = create<MonState>((set) => ({
+const byTime = (a: MonitorRun, b: MonitorRun) => b.at.localeCompare(a.at);
+export const useMonitor = create<MonState>((set, get) => ({
   aois: loadAois(),
   runs: loadRuns(),
+  cloud: 'off',
+  cloudErr: '',
+  alerts: [],
+  serverRuns: [],
   setAois: (f) =>
     set((s) => {
-      const aois = f(s.aois);
-      saveAois(aois);
+      if (s.cloud !== 'on') {
+        const aois = f(s.aois);
+        saveAois(aois);
+        return { aois };
+      }
+      const aois = f(s.aois).map(ensureUuid);
+      void syncAreas(s.aois, aois).catch((e) => set({ cloudErr: e.message }));
       return { aois };
     }),
   addRun: (r) =>
     set((s) => {
-      const runs = [r, ...s.runs];
-      saveRuns(runs);
-      return { runs };
+      const local = [r, ...s.runs.filter((x) => !x.server)];
+      saveRuns(local);
+      return { runs: [...s.serverRuns, ...local].sort(byTime) };
     }),
   removeRun: (id) =>
     set((s) => {
-      const runs = s.runs.filter((x) => x.id !== id);
-      saveRuns(runs);
+      const r = s.runs.find((x) => x.id === id);
+      if (r?.server) {
+        void deleteCloudRun(id);
+        const serverRuns = s.serverRuns.filter((x) => x.id !== id);
+        return { serverRuns, runs: s.runs.filter((x) => x.id !== id) };
+      }
+      const local = s.runs.filter((x) => !x.server && x.id !== id);
+      saveRuns(local);
       void deleteImages(id);
-      return { runs };
+      return { runs: [...s.serverRuns, ...local].sort(byTime) };
     }),
+  syncCloud: async () => {
+    const cloud = await cloudStatus().catch(() => 'error' as CloudState);
+    if (cloud !== 'on') {
+      // back to this browser's own list
+      if (get().cloud === 'on') set({ aois: loadAois(), runs: loadRuns(), serverRuns: [], alerts: [] });
+      set({ cloud });
+      return;
+    }
+    try {
+      const c = await loadCloud();
+      const local = loadRuns();
+      set({ cloud, cloudErr: '', aois: c.aois, serverRuns: c.runs, alerts: c.alerts, runs: [...c.runs, ...local].sort(byTime) });
+    } catch (e: any) {
+      set({ cloud: 'error', cloudErr: e?.message ?? String(e) });
+    }
+  },
+  readAlerts: (ids) => {
+    void markAlertsRead(ids);
+    const now = new Date().toISOString();
+    set((s) => ({ alerts: s.alerts.map((a) => (ids.includes(a.id) ? { ...a, readAt: now } : a)) }));
+  },
 }));
+// connect to the server list as soon as the app knows who is signed in
+void useMonitor.getState().syncCloud();
+supabase?.auth.onAuthStateChange(() => void useMonitor.getState().syncCloud());
 
 const useL = () => {
   const lang = useLang((s) => s.lang);
@@ -110,8 +163,12 @@ type Handle = 'c' | 'nw' | 'ne' | 'se' | 'sw' | 'n' | 'e' | 's' | 'w';
 export function MonitorWatch() {
   const L = useL();
   const lang = useLang((s) => s.lang);
-  const { aois, runs, setAois, addRun } = useMonitor();
+  const { aois, runs, setAois, addRun, cloud } = useMonitor();
   const { aoi: wsAoi } = useWorkspace();
+  // boxes still to be checked by the user after "add along border" (one at a time)
+  const [adjustQ, setAdjustQ] = useState<string[]>([]);
+  const [params] = useSearchParams();
+  const deepArea = params.get('area');
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
   const [selId, setSelId] = useState<string | null>(null);
   const [panel, setPanel] = useState<'list' | 'add' | 'border' | 'import'>('list');
@@ -181,12 +238,48 @@ export function MonitorWatch() {
     setSelId(a.id);
     if (viewer) flyToPolygon(viewer, a.geometry);
   };
+  const nextAdjust = (q: string[]) => {
+    setAdjustQ(q);
+    const a = q.length ? useMonitor.getState().aois.find((x) => x.id === q[0]) : null;
+    if (a) startEdit(a);
+    else setEdit(null);
+  };
   const saveEdit = () => {
     if (!edit || !live.current) return;
     const g = remap(edit.orig, live.current);
-    setAois((l) => l.map((a) => (a.id === edit.id ? { ...a, geometry: g, editedAt: new Date().toISOString() } : a)));
-    setEdit(null);
+    const moved = JSON.stringify(g) !== JSON.stringify(edit.orig);
+    if (moved) setAois((l) => l.map((a) => (a.id === edit.id ? { ...a, geometry: g, editedAt: new Date().toISOString() } : a)));
+    if (adjustQ[0] === edit.id) nextAdjust(adjustQ.slice(1));
+    else setEdit(null);
   };
+  const cancelEdit = () => {
+    if (edit && adjustQ[0] === edit.id) nextAdjust(adjustQ.slice(1));
+    else setEdit(null);
+  };
+  useEffect(() => {
+    const h = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      const a = useMonitor.getState().aois.find((x) => x.id === id);
+      if (!a) return;
+      setEdit(null);
+      setPanel('list');
+      setSelId(a.id);
+      if (viewer) flyToPolygon(viewer, a.geometry);
+    };
+    window.addEventListener('ov-watch-open', h);
+    return () => window.removeEventListener('ov-watch-open', h);
+  }, [viewer]);
+  // link from an alert email: open that area
+  const deepDone = useRef(false);
+  useEffect(() => {
+    if (deepDone.current || !deepArea || !viewer) return;
+    const a = aois.find((x) => x.id === deepArea);
+    if (!a) return;
+    deepDone.current = true;
+    setPanel('list');
+    setSelId(a.id);
+    flyToPolygon(viewer, a.geometry);
+  }, [deepArea, aois, viewer]);
   const nudge = (b: BB) => {
     live.current = b;
     setEdit((e) => (e ? { ...e, b } : e));
@@ -496,7 +589,8 @@ export function MonitorWatch() {
           <p className="text-[11px] text-muted">{L('ชายแดน ป่าไม้ และสาธารณภัย · เทียบภาพดาวเทียมล่าสุดกับภาพก่อนหน้าโดยอัตโนมัติ', 'Borders, forests and disasters · the latest imagery is compared with an earlier reference automatically')}</p>
         </div>
 
-        {due.length > 0 && !busy && (
+        <CloudBar />
+        {due.length > 0 && !busy && cloud !== 'on' && (
           <Notice tone="warn">
             <div className="flex items-center justify-between gap-2">
               <span>{L(`ถึงรอบตรวจ ${due.length} พื้นที่`, `${due.length} area(s) due for a check`)}</span>
@@ -574,10 +668,15 @@ export function MonitorWatch() {
             onGenerate={showBorderTiles}
             onAdd={(list, region, purpose, freq, prefix, sat) => {
               const now = Date.now();
-              setAois((l) => [...l, ...list.map((t, i) => ({ ...aoiFromPolygon(`${prefix} ${t.id}`, t.geometry, region, purpose, freq, sat), id: `aoi_${now.toString(36)}_${i}` }))]);
+              const added = list.map((t, i) => ({ ...aoiFromPolygon(`${prefix} ${t.id}`, t.geometry, region, purpose, freq, sat), id: `aoi_${now.toString(36)}_${i}` }));
+              setAois((l) => [...l, ...added]);
               setTileSrc(null);
               setPicked(new Set());
               setPanel('list');
+              // ids may have been replaced by uuids for the server: take them from the store, same order
+              const all = useMonitor.getState().aois;
+              const ids = all.slice(all.length - added.length).map((a) => a.id);
+              nextAdjust(ids);
             }}
           />
         )}
@@ -596,12 +695,23 @@ export function MonitorWatch() {
           />
         )}
 
+        {edit && sel && sel.id === edit.id && adjustQ[0] === edit.id && (
+          <Notice tone="info">
+            <div className="flex items-center justify-between gap-2">
+              <span>
+                {L(`ตรวจกรอบใหม่ทีละกรอบ: ${sel.name} (เหลือ ${adjustQ.length})`, `Check each new box: ${sel.name} (${adjustQ.length} left)`)}
+                <span className="block text-[10px] text-muted">{L('ลากกรอบหรือมุมบนแผนที่ให้ครอบพื้นที่ที่ต้องการ แล้วกด “บันทึก” · “ยกเลิก” = ใช้กรอบเดิม', 'Drag the box or its corners on the map, then Save · Cancel keeps the box as it is')}</span>
+              </span>
+              <Button variant="ghost" onClick={() => nextAdjust([])}>{L('ข้ามทั้งหมด', 'Skip all')}</Button>
+            </div>
+          </Notice>
+        )}
         {edit && sel && sel.id === edit.id && (
           <EditPanel
             b={edit.b}
             orig={bboxOf(edit.orig)}
             onSave={saveEdit}
-            onCancel={() => setEdit(null)}
+            onCancel={cancelEdit}
             onSet={nudge}
           />
         )}
@@ -689,6 +799,102 @@ export function MonitorWatch() {
 }
 
 // ---------------------------------------------------------------- watchlist
+
+const IMPORTED_KEY = 'ov.watch.imported.v1';
+const geomKey = (g: GeoJSON.Polygon) => g.coordinates[0].map((p) => `${p[0].toFixed(4)},${p[1].toFixed(4)}`).join(';');
+
+/** Server watch status: where the areas live, what the 3-hourly checker found, and importing this browser's old list. */
+function CloudBar() {
+  const L = useL();
+  const { cloud, cloudErr, alerts, aois, setAois, readAlerts, syncCloud } = useMonitor();
+  const [open, setOpen] = useState(false);
+  const [imported, setImported] = useState(() => readPref(IMPORTED_KEY, false));
+  const [busy, setBusy] = useState(false);
+  const unread = alerts.filter((a) => !a.readAt);
+  const local = cloud === 'on' && !imported ? loadAois() : [];
+  const have = new Set(aois.map((a) => geomKey(a.geometry)));
+  const toImport = local.filter((a) => !have.has(geomKey(a.geometry)));
+  const name = (id: string) => aois.find((a) => a.id === id)?.name ?? L('(พื้นที่ถูกลบ)', '(deleted area)');
+  const lvl = (l: string | null) => (l === 'significant' ? L('มีนัยสำคัญ', 'significant') : l === 'minor' ? L('เล็กน้อย', 'minor') : l === 'none' ? L('ไม่พบ', 'none') : l ?? '–');
+
+  if (cloud === 'off')
+    return (
+      <Notice tone="warn">
+        {L('ยังไม่ได้เชื่อมเซิร์ฟเวอร์ (Supabase) — รายการเก็บในเบราว์เซอร์นี้เท่านั้น และต้องกดตรวจเอง การแจ้งเตือนอัตโนมัติทางอีเมลจะใช้ได้เมื่อตั้งค่าตาม WATCH_SETUP.md', 'No server (Supabase) configured — the list lives in this browser only and checks are manual. Automatic email alerts work once WATCH_SETUP.md is followed.')}
+      </Notice>
+    );
+  if (cloud === 'signed-out')
+    return <Notice tone="warn">{L('เข้าสู่ระบบ (ปุ่มมุมขวาบน) เพื่อให้ระบบเฝ้าพื้นที่ให้ตลอดเวลาและส่งอีเมลเมื่อมีภาพใหม่ที่เปลี่ยนแปลง', 'Sign in (top right) so the server watches your areas around the clock and emails you when a new image shows change.')}</Notice>;
+  if (cloud === 'no-tables')
+    return <Notice tone="bad">{L('เซิร์ฟเวอร์ยังไม่มีตารางเฝ้าระวัง — รัน supabase/watch.sql ใน SQL Editor ของ Supabase', 'The server has no watch tables yet — run supabase/watch.sql in the Supabase SQL editor.')}</Notice>;
+  if (cloud === 'error')
+    return (
+      <Notice tone="bad">
+        <div className="flex items-center justify-between gap-2">
+          <span>{L('เชื่อมเซิร์ฟเวอร์ไม่ได้', 'Could not reach the server')}: {cloudErr}</span>
+          <Button variant="ghost" onClick={() => void syncCloud()}>{L('ลองใหม่', 'Retry')}</Button>
+        </div>
+      </Notice>
+    );
+
+  return (
+    <div className="space-y-2 rounded border border-cyan-400/30 bg-cyan-400/5 p-2 text-[11px] text-slate-200">
+      <div className="flex items-center justify-between gap-2">
+        <span>
+          <span className="mr-1 inline-block h-2 w-2 rounded-full bg-cyan-400 align-middle" />
+          {L('เฝ้าอัตโนมัติ: ตรวจภาพใหม่ทุก ~3 ชม. แล้วแจ้งทางอีเมล', 'Auto watch: new imagery checked every ~3 h, alerts by email')}
+        </span>
+        <div className="flex gap-1">
+          <Button variant="ghost" onClick={() => void syncCloud()} title={L('โหลดผลล่าสุดจากเซิร์ฟเวอร์', 'Reload the latest results')} className="!px-2 !py-0.5">↻</Button>
+          <Button variant={open ? 'active' : 'ghost'} onClick={() => setOpen(!open)} className="!px-2 !py-0.5">
+            🔔 {unread.length ? <Badge tone="warn">{unread.length}</Badge> : L('การแจ้งเตือน', 'Alerts')}
+          </Button>
+        </div>
+      </div>
+      {toImport.length > 0 && (
+        <div className="flex items-center justify-between gap-2 rounded border border-line p-1.5">
+          <span>{L(`มี ${toImport.length} พื้นที่จากโหมดเฝ้าระวังเดิมในเบราว์เซอร์นี้`, `${toImport.length} area(s) from the old watch list in this browser`)}</span>
+          <div className="flex gap-1">
+            <Button
+              variant="primary"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                setAois((l) => [...l, ...toImport.map((a) => ({ ...a, editedAt: undefined }))]);
+                writePref(IMPORTED_KEY, true);
+                setImported(true);
+                setBusy(false);
+              }}
+            >{L('นำเข้า', 'Import')}</Button>
+            <Button variant="ghost" onClick={() => { writePref(IMPORTED_KEY, true); setImported(true); }}>{L('ไม่ต้อง', 'Dismiss')}</Button>
+          </div>
+        </div>
+      )}
+      {open && (
+        <div className="max-h-64 space-y-1 overflow-y-auto scroll-thin">
+          {!alerts.length && <p className="text-muted">{L('ยังไม่มีการแจ้งเตือน — รอบแรกของแต่ละพื้นที่จะเก็บภาพอ้างอิงก่อน แล้วแจ้งเมื่อมีภาพใหม่ที่ใช้ได้', 'No alerts yet — the first check of each area only stores a reference; alerts start with the next usable image.')}</p>}
+          {unread.length > 0 && <Button variant="ghost" className="!py-0.5 text-[10px]" onClick={() => readAlerts(unread.map((a) => a.id))}>{L('อ่านทั้งหมดแล้ว', 'Mark all read')}</Button>}
+          {alerts.slice(0, 50).map((a) => (
+            <button
+              key={a.id}
+              onClick={() => {
+                if (!a.readAt) readAlerts([a.id]);
+                window.dispatchEvent(new CustomEvent('ov-watch-open', { detail: a.areaId }));
+              }}
+              className={cx('flex w-full items-center justify-between gap-2 rounded border px-1.5 py-1 text-left', a.readAt ? 'border-line text-muted' : 'border-warn/40 text-slate-100')}
+            >
+              <span className="truncate">{name(a.areaId)} · {lvl(a.level)}</span>
+              <span className="shrink-0 font-mono text-[10px]">
+                {new Date(a.createdAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}
+                {a.emailError ? ' ⚠' : a.emailedAt ? ' ✉' : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function WatchList({ selId, onSelect, onRun, busy }: { selId: string | null; onSelect: (id: string) => void; onRun: (l: MonitorAoi[]) => void; busy: boolean }) {
   const L = useL();
@@ -976,10 +1182,14 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn 
     if (!a || !b) return setSwErr(L('โหลดข้อมูลภาพจากคลังไม่ได้', 'Could not load the scenes from the catalogue'));
     onSwipe(a, b);
   };
-  const { runs, setAois, removeRun } = useMonitor();
+  const { runs, setAois, removeRun, cloud } = useMonitor();
   const mine = runs.filter((r) => r.aoiId === aoi.id);
   const [runId, setRunId] = useState<string | null>(null);
-  const run = mine.find((r) => r.id === runId) ?? mine[0];
+  // server results: the same new scene compared over several time spans
+  const [hz, setHz] = useState<'latest' | 'week' | 'month' | 'year'>('latest');
+  const baseRun = mine.find((r) => r.id === runId) ?? mine[0];
+  const run = hz !== 'latest' && baseRun?.horizons?.[hz] ? baseRun.horizons[hz]! : baseRun;
+  const cl = aoi as MonitorAoi & { notifyLevel?: 'significant' | 'minor' | 'any'; notifyEmail?: string | null; lastCheckedAt?: string | null; lastSceneAt?: string | null };
   const [img, setImg] = useState<{ before: string | null; after: string | null; change: string | null }>({ before: null, after: null, change: null });
   const [showChange, setShowChange] = useState(true);
   useEffect(() => {
@@ -1027,15 +1237,46 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn 
           </div>
         </div>
         <p className="text-[10px] text-cyan-200">🛰 {L(satelliteOf(aoi.sensor).note, satelliteOf(aoi.sensor).noteEn)}</p>
+        {cloud === 'on' && (
+          <div className="space-y-1 rounded border border-line p-1.5">
+            <div className="label">{L('แจ้งเตือนอัตโนมัติ', 'Automatic alerts')}</div>
+            <div className="grid grid-cols-2 gap-1">
+              <Select value={cl.notifyLevel ?? 'significant'} onChange={(e) => upd({ notifyLevel: e.target.value } as Partial<MonitorAoi>)} className="!py-1 text-xs">
+                <option value="significant">{L('เมื่อเปลี่ยนแปลงมีนัยสำคัญ', 'Significant change')}</option>
+                <option value="minor">{L('เมื่อเปลี่ยนแปลงตั้งแต่เล็กน้อย', 'Minor change or more')}</option>
+                <option value="any">{L('ทุกครั้งที่มีภาพใหม่', 'Every new image')}</option>
+              </Select>
+              <Input value={cl.notifyEmail ?? ''} placeholder={L('อีเมล (ว่าง = อีเมลบัญชี)', 'Email (empty = account)')} onChange={(e) => upd({ notifyEmail: e.target.value.trim() || null } as Partial<MonitorAoi>)} className="!py-1 text-xs" />
+            </div>
+            <div className="font-mono text-[10px] text-muted">
+              {L('ตรวจล่าสุด', 'Last check')} {cl.lastCheckedAt ? new Date(cl.lastCheckedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : L('ยังไม่ตรวจ (รอรอบถัดไป)', 'not yet (next run)')}
+              {cl.lastSceneAt ? ` · ${L('ภาพใช้ได้ล่าสุด', 'latest usable image')} ${cl.lastSceneAt.slice(0, 10)}` : ''}
+            </div>
+          </div>
+        )}
         {aoi.sensor === 'sar' && !methodText(aoi.purpose, 'sar') && <p className="text-[10px] text-warn">{L('หัวข้อนี้ใช้เรดาร์วิเคราะห์ไม่ได้ · เลือก Sentinel-2 หรือ Landsat', 'This purpose cannot use radar — pick Sentinel-2 or Landsat')}</p>}
         <p className="text-[10px] text-muted">{methodText(aoi.purpose, aoi.sensor === 'sar' ? 'sar' : 'optical')}</p>
 
         {mine.length > 1 && (
-          <Select value={run?.id} onChange={(e) => setRunId(e.target.value)} className="!py-1 text-xs">
-            {mine.map((r) => <option key={r.id} value={r.id}>{new Date(r.at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}{r.A && r.B ? ` · ภาพ ${r.A.datetime.slice(0, 10)}→${r.B.datetime.slice(0, 10)}` : ''} · {r.status === 'ok' ? fmtArea(r.stats!.interestKm2, unit, lang === 'th') : L('ข้อมูลไม่พอ', 'insufficient')}{r.mode === 'manual' ? ` · ${L('เลือกเอง', 'manual')}` : r.baseline && r.baseline !== 'previous' ? ` · ${L('เทียบ', 'vs ')}${baselineLabel(r.baseline, lang === 'th')}` : ''}</option>)}
+          <Select value={baseRun?.id} onChange={(e) => { setRunId(e.target.value); setHz('latest'); }} className="!py-1 text-xs">
+            {mine.map((r) => <option key={r.id} value={r.id}>{r.server ? '🛰 ' : ''}{new Date(r.at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}{r.A && r.B ? ` · ภาพ ${r.A.datetime.slice(0, 10)}→${r.B.datetime.slice(0, 10)}` : ''} · {r.status === 'ok' ? fmtArea(r.stats!.interestKm2, unit, lang === 'th') : L('ข้อมูลไม่พอ', 'insufficient')}{r.mode === 'manual' ? ` · ${L('เลือกเอง', 'manual')}` : r.baseline && r.baseline !== 'previous' ? ` · ${L('เทียบ', 'vs ')}${baselineLabel(r.baseline, lang === 'th')}` : ''}</option>)}
           </Select>
         )}
 
+        {baseRun?.server && (
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[10px] text-muted">{L('เทียบกับภาพเมื่อ', 'Compared with')}</span>
+            {(['latest', 'week', 'month', 'year'] as const).map((h) => {
+              const has = h === 'latest' || !!baseRun.horizons?.[h];
+              return (
+                <Button key={h} variant={hz === h ? 'active' : 'ghost'} disabled={!has} onClick={() => setHz(h)} className="!px-2 !py-0.5 text-[10px]"
+                  title={has ? undefined : L('ไม่มีภาพที่ใช้ได้ในช่วงนั้น', 'No usable image around that time')}>
+                  {h === 'latest' ? L('ภาพก่อนหน้า', 'previous') : h === 'week' ? L('1 สัปดาห์', '1 week') : h === 'month' ? L('1 เดือน', '1 month') : L('1 ปี', '1 year')}
+                </Button>
+              );
+            })}
+          </div>
+        )}
         {!run && <p className="text-[11px] text-muted">{L('ยังไม่เคยตรวจพื้นที่นี้', 'Not checked yet')}</p>}
         {run && run.status !== 'ok' && (
           <Notice tone="warn">
