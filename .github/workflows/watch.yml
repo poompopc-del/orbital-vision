@@ -1,0 +1,63 @@
+# Automatic area watch: checks every watch area for new cloud-free imagery, compares it with
+# earlier imagery (latest / week / month / year) and emails alerts. See WATCH_SETUP.md.
+name: Area watch
+
+on:
+  schedule:
+    - cron: '17 */3 * * *' # every 3 hours (UTC)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run on a test box (no database). Outputs are attached to the run as "watch-out".'
+        type: boolean
+        default: false
+      test_bbox:
+        description: 'Dry run box: west,south,east,north'
+        default: '102.50,13.62,102.60,13.70'
+      test_email_to:
+        description: 'Dry run: also send the alert email to this address (optional)'
+        default: ''
+      lookback_days:
+        description: 'How many days back to look for new imagery'
+        default: '20'
+
+concurrency:
+  group: area-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      # extra packages used only by the runner (kept out of the website's package.json)
+      - run: npm install --no-save --no-audit --no-fund pngjs@7 jpeg-js@0.4 nodemailer@6
+      - run: node scripts/watch/build.mjs
+      - name: Check areas
+        run: node dist-watch/watch-runner.mjs
+        env:
+          WATCH_DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+          WATCH_TEST_BBOX: ${{ inputs.test_bbox }}
+          WATCH_TEST_EMAIL_TO: ${{ inputs.test_email_to }}
+          WATCH_LOOKBACK_DAYS: ${{ inputs.lookback_days || '20' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_FROM: ${{ secrets.ALERT_FROM }}
+          APP_URL: ${{ vars.APP_URL }}
+      - name: Keep dry-run outputs
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: watch-out
+          path: watch-out
+          if-no-files-found: ignore

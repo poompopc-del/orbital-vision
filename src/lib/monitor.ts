@@ -608,7 +608,11 @@ export async function compareScenes(
   B: ImageryItem,
   progress: RunProgress,
   signal?: AbortSignal,
-  opt: { qc?: QcSettings; clA?: AoiCloud | null; clB?: AoiCloud | null; base?: MonitorRun; mode?: 'auto' | 'manual' } = {},
+  opt: {
+    qc?: QcSettings; clA?: AoiCloud | null; clB?: AoiCloud | null; base?: MonitorRun; mode?: 'auto' | 'manual';
+    /** where the before / after / change images go (default: this browser's IndexedDB; the server checker uploads them) */
+    saveImage?: (key: string, dataUrl: string) => Promise<void>;
+  } = {},
 ): Promise<MonitorRun> {
   const qc = opt.qc ?? loadQc();
   const base: MonitorRun = opt.base ?? {
@@ -722,9 +726,10 @@ export async function compareScenes(
     progress('สร้างภาพประกอบ…');
     const after = await renderScene(B, aoi, { maxPx: 1400, signal }).catch(() => null);
     const before = await renderScene(A, aoi, { maxPx: 1400, signal }).catch(() => null);
-    if (after) await putImage(`${base.id}:after`, after.canvas.toDataURL('image/jpeg', 0.85));
-    if (before) await putImage(`${base.id}:before`, before.canvas.toDataURL('image/jpeg', 0.85));
-    await putImage(`${base.id}:change`, res.imageUrl);
+    const save = opt.saveImage ?? putImage;
+    if (after) await save(`${base.id}:after`, after.canvas.toDataURL('image/jpeg', 0.85));
+    if (before) await save(`${base.id}:before`, before.canvas.toDataURL('image/jpeg', 0.85));
+    await save(`${base.id}:change`, res.imageUrl);
 
     const classKm2: Record<number, number> = {};
     Object.entries(res.areasKm2).forEach(([k, v]) => (classKm2[+k] = v));

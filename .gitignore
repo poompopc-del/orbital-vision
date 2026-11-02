@@ -6,3 +6,5 @@ dist
 *.log
 .DS_Store
 .test-build
+dist-watch
+watch-out
