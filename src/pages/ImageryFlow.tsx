@@ -325,6 +325,9 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
 
   const report = async () => {
     if (!run) return;
+    // open the tab inside the click, before any await, so the browser does not treat it as a pop-up
+    const w = window.open('', '_blank');
+    if (w) w.document.write(`<p style="font:16px sans-serif;padding:24px">${L('กำลังสร้างรายงาน…', 'Building the report…')}</p>`);
     try {
       const html = await buildReportHtml({
         title: L('รายงานการเปลี่ยนแปลงพื้นที่จากภาพดาวเทียม', 'Satellite Area Change Assessment'),
@@ -333,9 +336,11 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
         items: [{ aoi: target, run }],
         unit,
       });
-      const w = window.open(URL.createObjectURL(new Blob([html], { type: 'text/html' })), '_blank');
-      if (!w) setErr(L('เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาตป๊อปอัปแล้วลองอีกครั้ง', 'Pop-up blocked — allow pop-ups and try again'));
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      if (w) w.location.href = url;
+      else if (!window.open(url, '_blank')) setErr(L('เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาตป๊อปอัปแล้วลองอีกครั้ง', 'Pop-up blocked — allow pop-ups and try again'));
     } catch (e: any) {
+      w?.close();
       setErr(e?.message ?? String(e));
     }
   };
@@ -427,7 +432,12 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
       {busy && <p className="text-[10px] text-cyan-300">{busy}</p>}
       {err && <p className="text-[10px] text-bad">{err}</p>}
       {run && <RunResult run={run} />}
-      {run && !watch && <p className="text-[10px] text-muted">{L('ผลนี้ยังไม่ได้บันทึกในรายการเฝ้าระวัง — ไปที่ “ดาวน์โหลด · รายงาน · เฝ้าระวัง” เพื่อออกรายงานหรือเพิ่มพื้นที่นี้', 'Not saved to the watchlist — use “Download · report · watch” to make a report or add this area')}</p>}
+      {run && (
+        <Button variant="primary" className="w-full" onClick={report}>
+          📄 {L('ทำรายงานผลนี้ (พิมพ์ / บันทึกเป็น PDF)', 'Make a report of this result (print / save as PDF)')}
+        </Button>
+      )}
+      {run && !watch && <p className="text-[10px] text-muted">{L('ผลนี้ยังไม่ได้บันทึกในรายการเฝ้าระวัง — ไปที่ “ดาวน์โหลด · รายงาน · เฝ้าระวัง” เพื่อเพิ่มพื้นที่นี้เข้ารายการเฝ้าระวัง', 'Not saved to the watchlist — use “Download · report · watch” to add this area to the watchlist')}</p>}
     </div>
   );
 }
