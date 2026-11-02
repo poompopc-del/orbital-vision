@@ -5,6 +5,7 @@ import AoiPicker from '../components/AoiPicker';
 import CountryHighlight from '../components/CountryHighlight';
 import SatPicker from '../components/SatPicker';
 import PassClassNote from '../components/PassClassNote';
+import PassDetailTable from '../components/PassDetailTable';
 import { Badge, Button, Field, Input, Notice, Panel, Select, Spinner, cx } from '../components/ui';
 import { Cesium, CYAN } from '../lib/cesium';
 import { setLiveClock, useSatPoints } from '../components/satLayer';
@@ -139,6 +140,7 @@ export default function PassTracker() {
   const [passes, setPasses] = useState<VisiblePass[] | null>(null);
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
   /** where the last pass list came from (N2YO first, local SGP4 when N2YO cannot answer) */
+  const [showTable, setShowTable] = useState(false);
   const [passSrc, setPassSrc] = useState<{ n2yo: number; local: number; why?: string } | null>(null);
   const [sel, setSel] = useState<string | null>(SAVED.sel ?? null);
   const [now, setNow] = useState(Date.now());
@@ -609,7 +611,7 @@ export default function PassTracker() {
         </Panel>
 
         {passes && (
-          <Panel title={`${t('Passes')} (${shown.length})`} bodyClass="p-0">
+          <Panel title={`${t('Passes')} (${shown.length})`} bodyClass="p-0" right={<Button onClick={() => setShowTable(true)} disabled={!observer || !ran}>{t('Pass detail table')}</Button>}>
             {ran && (
               <div className="border-b border-line px-3 py-1.5 font-mono text-[10px] text-muted">
                 {fmtLocal(ran.from)} → {fmtLocal(ran.to)} ({t('Thailand time')})
@@ -691,6 +693,9 @@ export default function PassTracker() {
 
       <div ref={mapBox} className="relative min-h-[360px] flex-1 bg-ink-950">
         <GlobeHost onReady={setViewer} options={{ baseLayers: false }} />
+        {showTable && passes && observer && ran && (
+          <PassDetailTable passes={shown} sats={chosen} observer={observer} from={ran.from} to={ran.to} onClose={() => setShowTable(false)} />
+        )}
         {/* one toolbar column: rows wrap instead of overlapping on narrow screens */}
         <div className="pointer-events-none absolute left-3 right-3 top-3 z-20 flex flex-col gap-1.5">
           <div className="flex flex-wrap items-start justify-between gap-1.5">
