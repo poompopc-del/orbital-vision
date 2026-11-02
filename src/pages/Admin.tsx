@@ -4,6 +4,7 @@ import { Badge, Button, KV, Notice, PageHeader, Panel, cx } from '../components/
 import { PROVIDERS } from '../data/providers';
 import { listAudit, storageMode, type AuditEntry } from '../lib/repo';
 import { QUOTA_LIMITS, readQuotas, type QuotaKey } from '../lib/quotas';
+import { n2yoAvailable } from '../lib/n2yo';
 import { supabase, supabaseConfigured, cesiumTokenConfigured } from '../lib/supabase';
 import { useOrbit } from '../store';
 import { fmtUtc } from '../lib/format';
@@ -66,6 +67,7 @@ export default function Admin() {
           <Panel title={t('Data sources')}>
             <dl className="max-w-2xl">
               <KV k={t('Orbital elements')} v={<span>{orbit.source || '—'} · {orbit.sats.length} satellites · fetched {fmtUtc(orbit.fetchedAt)}</span>} />
+              <KV k="N2YO" v={<N2yoStatus />} />
               <KV k={t('Archive search')} v="Microsoft Planetary Computer STAC + data API tiles (fallback: Earth Search) — Sentinel-2 L2A, Landsat C2 L2, Sentinel-1 GRD" />
               <KV k={t('Geocoding')} v="OpenStreetMap Nominatim (rate-limited, 1 req/s)" />
               <KV k={t('Base map')} v={cesiumTokenConfigured ? 'Cesium ion (Bing Maps Aerial) + World Terrain' : 'Esri World Imagery (no ion token — terrain disabled)'} />
@@ -151,5 +153,19 @@ export default function Admin() {
         </Panel>
       )}
     </div>
+  );
+}
+
+/** Whether the server-side N2YO proxy has an API key. */
+function N2yoStatus() {
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    void n2yoAvailable().then(setOn);
+  }, []);
+  if (on == null) return <span className="text-muted">…</span>;
+  return on ? (
+    <span className="text-ok">{t('Connected')} · {t('passes and single-satellite elements (primary)')}</span>
+  ) : (
+    <span className="text-warn">{t('N2YO is not connected (set N2YO_API_KEY on the server)')}</span>
   );
 }

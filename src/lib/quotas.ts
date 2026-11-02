@@ -1,10 +1,11 @@
 // Local usage counters (per browser) so the Administration page can show call volumes
 // against public services that have fair-use policies.
-export type QuotaKey = 'tle' | 'stac' | 'geocode';
+export type QuotaKey = 'tle' | 'n2yo' | 'stac' | 'geocode';
 
 const KEY = 'ov.quotas.v1';
 export const QUOTA_LIMITS: Record<QuotaKey, { label: string; perDay: number; policy: string }> = {
   tle: { label: 'CelesTrak orbital data downloads', perDay: 12, policy: 'CelesTrak: avoid re-downloading the same data more than every ~2 h' },
+  n2yo: { label: 'N2YO API requests', perDay: 1000, policy: 'N2YO: TLE / positions 1000 per hour · passes / above 100 per hour (shared by all users; cached on the server)' },
   stac: { label: 'Earth Search STAC queries', perDay: 500, policy: 'Public endpoint — keep usage reasonable' },
   geocode: { label: 'Nominatim geocoding requests', perDay: 200, policy: 'OSM Nominatim: max 1 request/second, no bulk use' },
 };
@@ -16,10 +17,10 @@ function today() {
 export function readQuotas(): Record<QuotaKey, number> {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) || '{}');
-    if (raw.day !== today()) return { tle: 0, stac: 0, geocode: 0 };
-    return { tle: raw.tle || 0, stac: raw.stac || 0, geocode: raw.geocode || 0 };
+    if (raw.day !== today()) return { tle: 0, n2yo: 0, stac: 0, geocode: 0 };
+    return { tle: raw.tle || 0, n2yo: raw.n2yo || 0, stac: raw.stac || 0, geocode: raw.geocode || 0 };
   } catch {
-    return { tle: 0, stac: 0, geocode: 0 };
+    return { tle: 0, n2yo: 0, stac: 0, geocode: 0 };
   }
 }
 

@@ -51,6 +51,15 @@ export const TH_UX: Record<string, string> = {
   Passes: 'รอบผ่าน',
   'Thailand time': 'เวลาไทย',
   passed: 'ผ่านไปแล้ว',
+  // N2YO
+  Source: 'แหล่งข้อมูล',
+  'satellites computed locally (SGP4)': 'ดวงคำนวณในเครื่อง (SGP4)',
+  'N2YO is not connected (set N2YO_API_KEY on the server)': 'ยังไม่ได้เชื่อมต่อ N2YO (ตั้งค่า N2YO_API_KEY บนเซิร์ฟเวอร์)',
+  'N2YO only predicts from now up to 10 days ahead': 'N2YO คาดการณ์ได้ตั้งแต่ตอนนี้ถึง 10 วันข้างหน้าเท่านั้น',
+  'N2YO is used for up to 25 satellites per run': 'N2YO ใช้ได้ครั้งละไม่เกิน 25 ดวง',
+  'N2YO API requests': 'คำขอ N2YO API',
+  Connected: 'เชื่อมต่อแล้ว',
+  'passes and single-satellite elements (primary)': 'รอบผ่านและข้อมูลวงโคจรรายดวง (แหล่งหลัก)',
   // home
   'Select a mode': 'เลือกโหมด',
   'Each mode finds suitable satellite images and runs the analysis automatically.': 'แต่ละโหมดค้นหาภาพที่เหมาะสมและวิเคราะห์ให้อัตโนมัติ',

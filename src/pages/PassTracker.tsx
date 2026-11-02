@@ -9,7 +9,8 @@ import { Badge, Button, Field, Input, Notice, Panel, Select, Spinner, cx } from 
 import { Cesium, CYAN } from '../lib/cesium';
 import { setLiveClock, useSatPoints } from '../components/satLayer';
 import { centroid } from '../lib/geo';
-import { compass, findVisiblePassesBatched, type Observer, type VisiblePass } from '../lib/lookangles';
+import { compass, findVisiblePasses, findVisiblePassesBatched, type Observer, type VisiblePass } from '../lib/lookangles';
+import { n2yoAvailable, n2yoCovers, n2yoPassesBatched } from '../lib/n2yo';
 import { groundTrack } from '../lib/orbit';
 import { BASEMAPS, LayerController, type BasemapId } from '../lib/basemaps';
 import { SENSOR_COLOR } from '../data/providers';
@@ -137,6 +138,8 @@ export default function PassTracker() {
   const [geoErr, setGeoErr] = useState('');
   const [passes, setPasses] = useState<VisiblePass[] | null>(null);
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
+  /** where the last pass list came from (N2YO first, local SGP4 when N2YO cannot answer) */
+  const [passSrc, setPassSrc] = useState<{ n2yo: number; local: number; why?: string } | null>(null);
   const [sel, setSel] = useState<string | null>(SAVED.sel ?? null);
   const [now, setNow] = useState(Date.now());
   const [hideDay, setHideDay] = useState(SAVED.hideDay ?? false);
@@ -420,7 +423,7 @@ export default function PassTracker() {
     const lines = [
       ...used.map((x) => ({ text: x.name, color: satColor.get(x.noradId)! })),
       { text: `${observer?.name ?? ''} · ${ran ? `${fmtLocal(ran.from)} → ${fmtLocal(ran.to)} (UTC+7)` : ''}`, color: '' },
-      { text: `${visiblePasses.length} passes · min el ${minEl}° · ${side === 'both' ? 'asc+desc' : side === 'asc' ? 'ascending' : 'descending'} · SGP4 / CelesTrak TLE`, color: '' },
+      { text: `${visiblePasses.length} passes · min el ${minEl}° · ${side === 'both' ? 'asc+desc' : side === 'asc' ? 'ascending' : 'descending'} · ${passSrc && passSrc.n2yo ? 'N2YO' : 'SGP4 / CelesTrak TLE'}`, color: '' },
     ];
     ctx.font = `${13 * sc}px Inter, sans-serif`;
     const lh = 19 * sc, pad = 10 * sc;
@@ -454,10 +457,23 @@ export default function PassTracker() {
     setBusy({ done: 0, total: chosen.length });
     calculated.current = true;
     setRan({ from: winFrom, to: winTo, at: Date.now() });
-    const r = await findVisiblePassesBatched(chosen, observer, winFrom, winHours, minEl, (d, tt) => setBusy({ done: d, total: tt }));
+    const progress = (d: number, tt: number) => setBusy({ done: d, total: tt });
+    let r: VisiblePass[];
+    // N2YO is the primary source; it answers from now up to 10 days ahead, max 25 satellites per run
+    // (its pass endpoint allows 100 requests per hour). Otherwise: local SGP4 on CelesTrak elements.
+    const n2yo = await n2yoAvailable();
+    const why = !n2yo ? 'off' : !n2yoCovers(winFrom, winTo) ? 'window' : chosen.length > 25 ? 'count' : undefined;
+    if (!why) {
+      const res = await n2yoPassesBatched(chosen, observer, winFrom, winTo, minEl, (rec) => findVisiblePasses(rec, observer, winFrom, winHours, minEl), progress);
+      r = res.passes;
+      setPassSrc({ n2yo: res.viaN2yo, local: res.viaLocal });
+    } else {
+      r = await findVisiblePassesBatched(chosen, observer, winFrom, winHours, minEl, progress);
+      setPassSrc({ n2yo: 0, local: chosen.length, why });
+    }
     setPasses(r);
     setBusy(null);
-    void logAudit('passes.visible', { sats: chosen.length, from: winFrom.toISOString(), to: winTo.toISOString(), minEl, passes: r.length });
+    void logAudit('passes.visible', { sats: chosen.length, from: winFrom.toISOString(), to: winTo.toISOString(), minEl, passes: r.length, source: why ? 'sgp4' : 'n2yo' });
   };
 
   // remember every setting so a page refresh comes back the same
@@ -597,6 +613,13 @@ export default function PassTracker() {
             {ran && (
               <div className="border-b border-line px-3 py-1.5 font-mono text-[10px] text-muted">
                 {fmtLocal(ran.from)} → {fmtLocal(ran.to)} ({t('Thailand time')})
+                {passSrc && (
+                  <div className={passSrc.n2yo ? 'text-cyan-300' : 'text-warn'}>
+                    {passSrc.n2yo
+                      ? `${t('Source')}: N2YO${passSrc.local ? ` · ${passSrc.local} ${t('satellites computed locally (SGP4)')}` : ''}`
+                      : `${t('Source')}: SGP4 / CelesTrak — ${t(passSrc.why === 'off' ? 'N2YO is not connected (set N2YO_API_KEY on the server)' : passSrc.why === 'window' ? 'N2YO only predicts from now up to 10 days ahead' : 'N2YO is used for up to 25 satellites per run')}`}
+                  </div>
+                )}
               </div>
             )}
             {next && next.los.getTime() > now && (

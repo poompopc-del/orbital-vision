@@ -1,9 +1,11 @@
-// Satellites the user adds by NORAD catalogue number. Element sets are fetched from CelesTrak
-// (via /api/tle?catnr= on Vercel, or directly in local dev) and kept in this browser.
+// Satellites the user adds by NORAD catalogue number. Element sets come from N2YO first
+// (/api/n2yo, key on the server), then CelesTrak (/api/tle?catnr= on Vercel, or directly in
+// local dev), and are kept in this browser.
 import { parseTleText, type SatRecord } from './orbit';
 import { CUSTOM_MISSION } from '../data/missions';
 import { bumpQuota } from './quotas';
 import { logAudit } from './repo';
+import { n2yoAvailable, n2yoTle } from './n2yo';
 
 const KEY = 'ov.custom.sats.v1';
 const MAX_AGE_MS = 2 * 60 * 60 * 1000;
@@ -32,6 +34,14 @@ function write(e: Entry[]) {
 export class NotFoundError extends Error {}
 
 async function fetchTle(id: string): Promise<string> {
+  if (await n2yoAvailable()) {
+    try {
+      const t = await n2yoTle(id);
+      if (t) return t;
+    } catch {
+      /* fall back to CelesTrak */
+    }
+  }
   bumpQuota('tle');
   try {
     const r = await fetch(`/api/tle?catnr=${id}`);
