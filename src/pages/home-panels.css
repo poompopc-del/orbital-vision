@@ -1,0 +1,591 @@
+/*
+ * Home "satellite panels" — layout and motion after Clément Brichon's
+ * "Satellite Website Prototype" (Dribbble, 2016):
+ *   · the page opens with the panels sliding up one after another,
+ *   · hovering a panel brightens it and lifts a big index number from the bottom,
+ *   · clicking a panel shrinks the others away and widens it to full screen,
+ *     then fades its content in; the ✕ reverses the sequence.
+ * Plain CSS (no Tailwind) so the timing chain stays readable in one place.
+ */
+
+.ovp {
+  --gap: 12px;
+  --n: 5;
+  --ease: cubic-bezier(0.7, 0, 0.3, 1);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(34, 211, 238, 0.08), transparent 60%),
+    #07090c;
+}
+
+/* ---------- header strip ---------- */
+.ovp__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 24px;
+  padding: 22px 28px 16px;
+  transition: opacity 0.4s, transform 0.4s;
+}
+.ovp__brand {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.32em;
+  color: #22d3ee;
+  text-transform: uppercase;
+}
+.ovp__title {
+  margin-top: 4px;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: #fff;
+}
+.ovp__sub {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #8b98ab;
+}
+.ovp__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ovp.s--inactive .ovp__top {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+/* ---------- panel stage ---------- */
+.ovp__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin: 0 28px;
+  container-type: inline-size;
+}
+
+.ovp__el {
+  --pw: calc((100cqw - (var(--n) - 1) * var(--gap)) / var(--n));
+  --x: calc(var(--i) * (var(--pw) + var(--gap)));
+  position: absolute;
+  top: 0;
+  left: var(--x);
+  width: var(--pw);
+  height: 100%;
+  border-radius: 6px;
+  background: #0b1524;
+  outline: none;
+  cursor: pointer;
+  /* closing: content out → width back → others return */
+  transition:
+    left 0.6s var(--ease) 0.7s,
+    width 0.7s var(--ease),
+    transform 0.6s var(--ease) 0.7s,
+    opacity 0.6s 0.7s,
+    z-index 0s 1.3s;
+}
+.ovp__el:focus-visible {
+  box-shadow: 0 0 0 2px #22d3ee;
+}
+
+.ovp__overflow {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+}
+.ovp__inner {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  transition: transform 1s var(--ease);
+  transition-delay: calc(var(--i) * 0.1s);
+}
+.ovp.s--inactive .ovp__inner {
+  transform: translate3d(0, 100%, 0);
+}
+
+/* the picture is as wide as the whole stage, shifted so each panel shows its slice */
+.ovp__bg {
+  position: absolute;
+  top: 0;
+  left: calc(-1 * var(--x));
+  width: 100cqw;
+  height: 100%;
+  transition: left 0.6s var(--ease) 0.7s;
+}
+.ovp__bg::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: -5%;
+  width: 100%;
+  height: 110%;
+  background-image: var(--img), var(--fallback);
+  background-size: cover, cover;
+  background-position: center;
+  transform: translate3d(0, 0, 0) scale(1);
+  transition: transform 1s var(--ease);
+  transition-delay: calc(var(--i) * 0.1s);
+}
+.ovp.s--inactive .ovp__bg::before {
+  transform: translate3d(0, -100%, 0) scale(1.2);
+}
+/* readability: darken the bottom, plus a faint scan-line texture */
+.ovp__bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(7, 9, 12, 0.15) 0%, rgba(7, 9, 12, 0.05) 45%, rgba(7, 9, 12, 0.85) 100%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px);
+}
+/* dim every panel while the pointer is over the stage, except the hovered one */
+.ovp__dim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgba(4, 7, 12, 0.55);
+  opacity: 0;
+  transition: opacity 0.5s;
+  pointer-events: none;
+}
+.ovp__stage:hover .ovp__dim {
+  opacity: 1;
+}
+.ovp__stage:hover .ovp__el:hover .ovp__dim,
+.ovp__el:focus-visible .ovp__dim {
+  opacity: 0;
+}
+
+/* ---------- preview (collapsed) ---------- */
+.ovp__preview {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 12px;
+  text-align: center;
+  transition: opacity 0.3s 1.2s, transform 0.3s 1.2s;
+}
+.ovp.s--inactive .ovp__preview {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.ovp__code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  color: #7ce7f7;
+  border: 1px solid rgba(124, 231, 247, 0.35);
+  border-radius: 3px;
+  padding: 3px 7px;
+  background: rgba(7, 9, 12, 0.45);
+}
+.ovp__heading {
+  max-width: 220px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85);
+}
+
+/* corner brackets — a viewfinder on the hovered panel */
+.ovp__frame {
+  position: absolute;
+  inset: 14px;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s, inset 0.4s var(--ease);
+  background:
+    linear-gradient(#22d3ee, #22d3ee) top left / 18px 1.5px,
+    linear-gradient(#22d3ee, #22d3ee) top left / 1.5px 18px,
+    linear-gradient(#22d3ee, #22d3ee) top right / 18px 1.5px,
+    linear-gradient(#22d3ee, #22d3ee) top right / 1.5px 18px,
+    linear-gradient(#22d3ee, #22d3ee) bottom left / 18px 1.5px,
+    linear-gradient(#22d3ee, #22d3ee) bottom left / 1.5px 18px,
+    linear-gradient(#22d3ee, #22d3ee) bottom right / 18px 1.5px,
+    linear-gradient(#22d3ee, #22d3ee) bottom right / 1.5px 18px;
+  background-repeat: no-repeat;
+}
+.ovp__el:hover .ovp__frame,
+.ovp__el:focus-visible .ovp__frame {
+  opacity: 0.9;
+  inset: 10px;
+}
+
+/* big index number that rises from the bottom on hover */
+.ovp__index {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 100%;
+  overflow: hidden;
+  text-align: center;
+  font-size: clamp(90px, 13cqw, 220px);
+  font-weight: 700;
+  line-height: 0.85;
+  letter-spacing: -0.04em;
+  pointer-events: none;
+  transform: translate3d(0, 0.08em, 0);
+  transition: transform 0.5s var(--ease), opacity 0.3s 1.4s;
+}
+.ovp__el:hover .ovp__index,
+.ovp__el:focus-visible .ovp__index {
+  transform: translate3d(0, 0, 0);
+}
+.ovp.s--el-active .ovp__index {
+  opacity: 0;
+  transition: transform 0.5s, opacity 0.3s;
+}
+.ovp__index-back {
+  color: rgba(124, 231, 247, 0.18);
+  opacity: 0;
+  transition: opacity 0.25s 0.25s;
+}
+.ovp__el:hover .ovp__index-back,
+.ovp__el:focus-visible .ovp__index-back {
+  opacity: 1;
+  transition: opacity 0.25s;
+}
+.ovp__index-front {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  transform: translate3d(0, 100%, 0);
+  transition: transform 0.5s var(--ease) 0.1s;
+}
+.ovp__index-front > span {
+  display: block;
+  color: #fff;
+  transform: translate3d(0, -100%, 0);
+  transition: transform 0.5s var(--ease) 0.1s;
+}
+.ovp__el:hover .ovp__index-front,
+.ovp__el:hover .ovp__index-front > span,
+.ovp__el:focus-visible .ovp__index-front,
+.ovp__el:focus-visible .ovp__index-front > span {
+  transform: translate3d(0, 0, 0);
+}
+
+/* ---------- active (expanded) ---------- */
+.ovp.s--el-active .ovp__el:not(.s--active) {
+  transform: scale(0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.95s var(--ease), opacity 0.95s;
+}
+.ovp__el.s--active {
+  z-index: 3;
+  left: 0;
+  width: 100%;
+  cursor: default;
+  transition:
+    left 0.6s var(--ease),
+    width 0.7s var(--ease) 0.7s,
+    transform 0.6s,
+    z-index 0s;
+}
+.ovp__el.s--active .ovp__bg {
+  left: 0;
+  transition: left 0.6s var(--ease);
+}
+.ovp__el.s--active .ovp__bg::before {
+  transform: scale(1.08);
+  transition: transform 8s ease-out 0.6s;
+}
+.ovp__el.s--active .ovp__dim {
+  opacity: 0 !important;
+}
+.ovp.s--el-active .ovp__preview {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.5s, transform 0.5s;
+}
+.ovp.s--el-active .ovp__el.s--active .ovp__frame {
+  opacity: 0.6;
+  inset: 18px;
+  transition: opacity 0.5s 1.4s, inset 0.5s 1.4s;
+}
+
+.ovp__content {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 44px 48px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
+}
+.ovp__el.s--active .ovp__content {
+  z-index: 4;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.5s 1.4s;
+}
+.ovp__content > * {
+  transform: translateY(16px);
+  transition: transform 0.1s;
+}
+.ovp__el.s--active .ovp__content > * {
+  transform: none;
+  transition: transform 0.6s var(--ease) 1.4s;
+}
+.ovp__el.s--active .ovp__content > *:nth-child(2) { transition-delay: 1.48s; }
+.ovp__el.s--active .ovp__content > *:nth-child(3) { transition-delay: 1.56s; }
+.ovp__el.s--active .ovp__content > *:nth-child(4) { transition-delay: 1.64s; }
+.ovp__el.s--active .ovp__content > *:nth-child(5) { transition-delay: 1.72s; }
+
+.ovp__big {
+  max-width: 760px;
+  margin-top: 12px;
+  font-size: clamp(30px, 4.4cqw, 60px);
+  font-weight: 600;
+  line-height: 1.05;
+  color: #fff;
+  letter-spacing: -0.01em;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+}
+.ovp__desc {
+  max-width: 560px;
+  margin-top: 12px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: #cbd5e1;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+}
+.ovp__modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 200px));
+  gap: 8px;
+  margin-top: 20px;
+}
+.ovp__mode {
+  display: block;
+  border: 1px solid rgba(148, 178, 214, 0.25);
+  border-radius: 4px;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: #e2e8f0;
+  background: rgba(7, 12, 20, 0.6);
+  backdrop-filter: blur(6px);
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+.ovp__mode:hover {
+  border-color: rgba(34, 211, 238, 0.7);
+  background: rgba(34, 211, 238, 0.1);
+  color: #fff;
+}
+.ovp__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  align-self: flex-start;
+  margin-top: 22px;
+  border-radius: 4px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #04121a;
+  background: #22d3ee;
+  transition: background 0.2s, gap 0.3s;
+}
+.ovp__open:hover {
+  background: #7ce7f7;
+  gap: 16px;
+}
+.ovp__credit {
+  position: absolute;
+  right: 44px;
+  bottom: 30px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: rgba(203, 213, 225, 0.6);
+  transform: none !important;
+}
+
+/* close ✕ — two bars that slide in after the panel has opened */
+.ovp__close {
+  position: absolute;
+  right: 40px;
+  top: 40px;
+  z-index: -1;
+  width: 44px;
+  height: 44px;
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  transition: opacity 0s 0.45s;
+}
+.ovp__el.s--active .ovp__close {
+  z-index: 5;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0s 1.4s;
+}
+.ovp__close::before,
+.ovp__close::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 2px;
+  background: #fff;
+}
+.ovp__close::before { transform: rotate(45deg) translateX(110%); }
+.ovp__close::after { transform: rotate(-45deg) translateX(110%); }
+.ovp__el.s--active .ovp__close::before {
+  transform: rotate(45deg) translateX(0);
+  transition: transform 0.3s cubic-bezier(0.72, 0.09, 0.32, 1.57) 1.4s;
+}
+.ovp__el.s--active .ovp__close::after {
+  transform: rotate(-45deg) translateX(0);
+  transition: transform 0.3s cubic-bezier(0.72, 0.09, 0.32, 1.57) 1.55s;
+}
+.ovp__close:hover::before,
+.ovp__close:hover::after {
+  background: #22d3ee;
+}
+
+/* ---------- footer strip ---------- */
+.ovp__bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 24px;
+  padding: 14px 28px 18px;
+  transition: opacity 0.4s 0.8s;
+}
+.ovp.s--inactive .ovp__bottom {
+  opacity: 0;
+}
+.ovp__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.ovp__tool {
+  border: 1px solid rgba(148, 178, 214, 0.14);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: #cbd5e1;
+  transition: border-color 0.2s, color 0.2s;
+}
+.ovp__tool:hover {
+  border-color: rgba(34, 211, 238, 0.6);
+  color: #fff;
+}
+.ovp__note {
+  max-width: 560px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: #6b7789;
+}
+
+/* ---------- narrow screens: panels stack as rows ---------- */
+@media (max-width: 767px) {
+  .ovp {
+    overflow-y: auto;
+  }
+  .ovp__top {
+    padding: 18px 16px 12px;
+  }
+  .ovp__title {
+    font-size: 21px;
+  }
+  .ovp__stage {
+    flex: none;
+    margin: 0 12px;
+    container-type: normal;
+  }
+  .ovp__el,
+  .ovp__el.s--active {
+    position: relative;
+    left: auto;
+    width: auto;
+    height: 116px;
+    margin-bottom: 8px;
+    transition: height 0.6s var(--ease);
+  }
+  .ovp.s--el-active .ovp__el:not(.s--active) {
+    transform: none;
+    opacity: 0.35;
+    pointer-events: auto;
+  }
+  .ovp.s--el-active .ovp__el:not(.s--active) .ovp__preview {
+    opacity: 1;
+    transform: none;
+  }
+  .ovp__el.s--active {
+    height: auto;
+    min-height: 420px;
+  }
+  .ovp__bg,
+  .ovp__el.s--active .ovp__bg {
+    left: 0;
+    width: 100%;
+  }
+  .ovp__index {
+    display: none;
+  }
+  .ovp__content {
+    padding: 70px 20px 40px;
+  }
+  .ovp__el.s--active .ovp__content {
+    position: relative;
+    min-height: 420px;
+    transition: opacity 0.4s 0.4s;
+  }
+  .ovp__el.s--active .ovp__content > * {
+    transition-delay: 0.4s !important;
+  }
+  .ovp__el.s--active .ovp__close {
+    transition: opacity 0s 0.4s;
+  }
+  .ovp__el.s--active .ovp__close::before,
+  .ovp__el.s--active .ovp__close::after {
+    transition-delay: 0.4s;
+  }
+  .ovp__modes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ovp__bottom {
+    padding: 8px 16px 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ovp *,
+  .ovp *::before,
+  .ovp *::after {
+    transition-duration: 0.01s !important;
+    transition-delay: 0s !important;
+  }
+}
