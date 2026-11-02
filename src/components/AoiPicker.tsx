@@ -143,7 +143,7 @@ export default function AoiPicker({ viewer, compact, onMany }: { viewer?: Cesium
       )}
       {drawing && (
         <p className="text-[11px] text-cyan-300">
-          {drawing === 'point' ? t('Click the globe.') : drawing === 'rectangle' ? t('Click two corners.') : t('Click vertices; double-click or right-click to finish.')} {t('Esc cancels.')}
+          {drawing === 'point' ? t('Click the globe.') : drawing === 'rectangle' ? t('Drag a box, or click two opposite corners.') : t('Click vertices; double-click or right-click to finish.')} {t('Esc cancels.')}
         </p>
       )}
       <div className="flex items-center gap-1.5">

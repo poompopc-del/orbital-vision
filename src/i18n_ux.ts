@@ -60,6 +60,11 @@ export const TH_UX: Record<string, string> = {
   'N2YO API requests': 'คำขอ N2YO API',
   Connected: 'เชื่อมต่อแล้ว',
   'passes and single-satellite elements (primary)': 'รอบผ่านและข้อมูลวงโคจรรายดวง (แหล่งหลัก)',
+  // right-click coordinates
+  Coordinates: 'พิกัด',
+  Copy: 'คัดลอก',
+  Copied: 'คัดลอกแล้ว',
+  'Terrain height': 'ความสูงภูมิประเทศ',
   // pass detail table
   'Pass detail table': 'ตารางรอบผ่านแบบละเอียด',
   'All satellites': 'ทุกดวง',

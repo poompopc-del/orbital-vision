@@ -54,7 +54,7 @@ export const TH: Record<string, string> = {
   'Area of interest': 'พื้นที่สนใจ (AOI)',
   'No match': 'ไม่พบผลลัพธ์',
   'Click the globe.': 'คลิกบนลูกโลก',
-  'Click two corners.': 'คลิกมุมสองมุม',
+  'Drag a box, or click two opposite corners.': 'ลากเป็นกรอบ หรือคลิกมุมตรงข้ามสองมุม',
   'Click vertices; double-click or right-click to finish.': 'คลิกจุดยอด แล้วดับเบิลคลิกหรือคลิกขวาเพื่อจบ',
   'Esc cancels.': 'กด Esc เพื่อยกเลิก',
 

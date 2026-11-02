@@ -141,42 +141,66 @@ export type DrawMode = 'point' | 'rectangle' | 'polygon' | 'line';
  * Interactive drawing on the ellipsoid. Resolves with lon/lat vertices.
  * Polygon / line: click to add vertices, double-click or right-click to finish. Esc cancels.
  */
+/** True while drawOnGlobe is waiting for input (other map handlers can stay quiet). */
+export let drawingActive = false;
+
+/**
+ * Let the user draw on the globe. Rectangle: press-and-drag, or click two corners.
+ * Polygon / line: click vertices, double-click or right-click to finish. Esc cancels.
+ * While drawing a rectangle the camera is locked so dragging draws instead of panning.
+ */
 export function drawOnGlobe(viewer: Cesium.Viewer, mode: DrawMode): { promise: Promise<[number, number][] | null>; cancel: () => void } {
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  const cam = viewer.scene.screenSpaceCameraController;
+  const camWas = cam.enableInputs;
   const pts: Cesium.Cartesian3[] = [];
   let hover: Cesium.Cartesian3 | null = null;
+  let downAt: Cesium.Cartesian2 | null = null;
   let resolveFn: (v: [number, number][] | null) => void = () => {};
   const promise = new Promise<[number, number][] | null>((r) => (resolveFn = r));
+  drawingActive = true;
+  if (mode === 'rectangle') cam.enableInputs = false;
 
-  const pick = (pos: Cesium.Cartesian2) => viewer.camera.pickEllipsoid(pos, viewer.scene.globe.ellipsoid) ?? null;
+  // terrain surface first (correct where 3D terrain is on), then the ellipsoid
+  const pick = (pos: Cesium.Cartesian2) => {
+    const ray = viewer.camera.getPickRay(pos);
+    return (ray && viewer.scene.globe.pick(ray, viewer.scene)) || viewer.camera.pickEllipsoid(pos, viewer.scene.globe.ellipsoid) || null;
+  };
   const toLL = (c: Cesium.Cartesian3): [number, number] => {
     const k = Cesium.Cartographic.fromCartesian(c);
     return [Cesium.Math.toDegrees(k.longitude), Cesium.Math.toDegrees(k.latitude)];
+  };
+  const rectRing = (p: Cesium.Cartesian3, q: Cesium.Cartesian3): [number, number][] => {
+    const [a, b] = [toLL(p), toLL(q)];
+    const w = Math.min(a[0], b[0]), e = Math.max(a[0], b[0]), s = Math.min(a[1], b[1]), n = Math.max(a[1], b[1]);
+    return [[w, s], [e, s], [e, n], [w, n], [w, s]];
   };
 
   const temp = viewer.entities.add({
     id: `ov-draw-${Date.now()}`,
     polyline: {
       positions: new Cesium.CallbackProperty(() => {
-        if (mode === 'rectangle' && pts.length === 1 && hover) {
-          const [a, b] = [toLL(pts[0]), toLL(hover)];
-          return Cesium.Cartesian3.fromDegreesArray([a[0], a[1], b[0], a[1], b[0], b[1], a[0], b[1], a[0], a[1]]);
-        }
+        if (mode === 'rectangle' && pts.length === 1 && hover) return Cesium.Cartesian3.fromDegreesArray(rectRing(pts[0], hover).flat());
         const arr = hover ? [...pts, hover] : [...pts];
         if (mode === 'polygon' && arr.length > 2) arr.push(arr[0]);
         return arr;
       }, false),
-      width: 2,
+      width: 2.5,
       material: CYAN_SOFT,
       arcType: Cesium.ArcType.GEODESIC,
     },
   });
 
   const finish = (val: [number, number][] | null) => {
+    drawingActive = false;
     handler.destroy();
     window.removeEventListener('keydown', onKey);
-    if (!viewer.isDestroyed()) viewer.entities.remove(temp);
-    viewer.scene.canvas.style.cursor = '';
+    cam.enableInputs = camWas;
+    if (!viewer.isDestroyed()) {
+      viewer.entities.remove(temp);
+      viewer.scene.canvas.style.cursor = '';
+      viewer.scene.requestRender();
+    }
     resolveFn(val);
   };
   const onKey = (e: KeyboardEvent) => {
@@ -187,19 +211,36 @@ export function drawOnGlobe(viewer: Cesium.Viewer, mode: DrawMode): { promise: P
 
   handler.setInputAction((e: any) => {
     hover = pick(e.endPosition);
+    viewer.scene.requestRender();
   }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
-  handler.setInputAction((e: any) => {
-    const c = pick(e.position);
-    if (!c) return;
-    if (mode === 'point') return finish([toLL(c)]);
-    pts.push(c);
-    if (mode === 'rectangle' && pts.length === 2) {
-      const [a, b] = [toLL(pts[0]), toLL(pts[1])];
-      const w = Math.min(a[0], b[0]), e2 = Math.max(a[0], b[0]), s = Math.min(a[1], b[1]), n = Math.max(a[1], b[1]);
-      finish([[w, s], [e2, s], [e2, n], [w, n], [w, s]]);
-    }
-  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+  if (mode === 'rectangle') {
+    // press = first corner (if none yet); release far from the press = drag finished;
+    // release on the spot = a click, so wait for the second corner's click
+    handler.setInputAction((e: any) => {
+      downAt = Cesium.Cartesian2.clone(e.position);
+      if (pts.length === 0) {
+        const c = pick(e.position);
+        if (c) pts.push(c);
+      }
+    }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+    handler.setInputAction((e: any) => {
+      if (!pts.length || !downAt) return;
+      const moved = Cesium.Cartesian2.distance(downAt, e.position) > 6;
+      const secondClick = !moved && pts.length === 1 && hover && Cesium.Cartesian3.distance(pts[0], hover) > 1;
+      downAt = null;
+      if (!moved && !secondClick) return; // first corner placed by a click
+      const c = pick(e.position);
+      if (c) finish(rectRing(pts[0], c));
+    }, Cesium.ScreenSpaceEventType.LEFT_UP);
+  } else {
+    handler.setInputAction((e: any) => {
+      const c = pick(e.position);
+      if (!c) return;
+      if (mode === 'point') return finish([toLL(c)]);
+      pts.push(c);
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+  }
 
   const complete = () => {
     // a double-click also fires two single clicks — drop near-duplicate trailing vertices
@@ -212,8 +253,10 @@ export function drawOnGlobe(viewer: Cesium.Viewer, mode: DrawMode): { promise: P
       finish(ring);
     } else if (mode === 'line' && pts.length >= 2) finish(pts.map(toLL));
   };
-  handler.setInputAction(complete, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-  handler.setInputAction(complete, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+  if (mode === 'polygon' || mode === 'line') {
+    handler.setInputAction(complete, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+    handler.setInputAction(complete, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+  }
 
   return { promise, cancel: () => finish(null) };
 }
