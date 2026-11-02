@@ -4,25 +4,22 @@ import { t } from '../i18n';
 import { useOrbit, useWorkspace } from '../store';
 import { areaKm2 } from '../lib/geo';
 import { Badge } from '../components/ui';
-import { esri } from '../lib/report';
 import './home-panels.css';
 
 /**
- * Panel pictures: sharp Esri World Imagery of one real place per mode (the same source the
- * reports use), centred on the subject. A collapsed panel shows the middle strip of its picture;
- * the open panel shows all of it. Boxes are 16:9 on the ground.
+ * Panel pictures: sharp Esri World Imagery of one real place per mode, centred on the subject.
+ * Served by /api/home-image, which caches them on the CDN (Esri renders each one on demand,
+ * which is slow). A 160 px version loads first as a placeholder under the full picture.
  */
-function placeImage(lat: number, lon: number, widthDeg: number) {
-  const h = widthDeg * Math.cos((lat * Math.PI) / 180) * (9 / 16);
-  return esri({ west: lon - widthDeg / 2, east: lon + widthDeg / 2, south: lat - h / 2, north: lat + h / 2 }, 1920, 1080);
-}
+const placeImage = (id: string, w: 160 | 1600) => `/api/home-image?id=${id}&w=${w}`;
 
 type Panel = {
   to: string;
   code: string;
   title: string;
   desc: string;
-  loc: { lat: number; lon: number; w: number };
+  img: string;
+  loc: { lat: number; lon: number };
   imgNote: string;
   fallback: string;
   modes?: { start: string; icon: string; label: string }[];
@@ -33,14 +30,14 @@ const PANELS: Panel[] = [
     to: '/disaster?tab=map', code: 'HAZARD', title: 'Disaster situation mode',
     desc: 'Floods, hotspots, earthquakes, heavy rain, drought and PM2.5 across Thailand from open agency data — with a situation report.',
     // Ayutthaya old city, ringed by the Chao Phraya, Pa Sak and Lopburi rivers — flood-prone (2011)
-    loc: { lat: 14.356, lon: 100.566, w: 0.13 },
+    img: 'ayutthaya', loc: { lat: 14.356, lon: 100.566 },
     imgNote: 'Ayutthaya', fallback: 'linear-gradient(160deg,#3a2a22,#1b2023 70%)',
   },
   {
     to: '/imagery?tab=flow', code: 'IMAGERY', title: 'Satellite imagery',
     desc: 'Choose an area, pick images on the timeline, then choose what to do with them.',
     // Bang Krachao: the green river loop in the middle of Bangkok
-    loc: { lat: 13.683, lon: 100.565, w: 0.16 },
+    img: 'bangkrachao', loc: { lat: 13.683, lon: 100.565 },
     imgNote: 'Bang Krachao, Bangkok', fallback: 'linear-gradient(160deg,#223a3a,#1b2023 70%)',
     modes: [
       { start: 'change', icon: '🔍', label: 'Change analysis' },
@@ -55,21 +52,21 @@ const PANELS: Panel[] = [
     to: '/imagery?tab=watch', code: 'WATCH', title: 'Border & area watch mode',
     desc: 'Weekly change checks along the Cambodia, Malaysia and Myanmar borders, forests and disaster areas — with an OPP-style report.',
     // Aranyaprathet – Poipet border crossing (Thailand–Cambodia)
-    loc: { lat: 13.663, lon: 102.548, w: 0.12 },
+    img: 'aranyaprathet', loc: { lat: 13.663, lon: 102.548 },
     imgNote: 'Aranyaprathet – Poipet', fallback: 'linear-gradient(160deg,#2a3a26,#1b2023 70%)',
   },
   {
     to: '/imagery?tab=advanced&task=dams', code: 'RID', title: 'Dam monitoring mode',
     desc: 'Current storage, inflow and release from the Royal Irrigation Department.',
     // Bhumibol Dam and its reservoir, Tak
-    loc: { lat: 17.243, lon: 98.972, w: 0.10 },
+    img: 'bhumibol', loc: { lat: 17.243, lon: 98.972 },
     imgNote: 'Bhumibol Dam, Tak', fallback: 'linear-gradient(160deg,#22323e,#1b2023 70%)',
   },
   {
     to: '/track?tab=passes', code: 'PASS', title: 'Satellite pass mode',
     desc: 'Pass times for NAPA, ISS or any satellite over your location.',
     // Suvarnabhumi Airport, Samut Prakan
-    loc: { lat: 13.690, lon: 100.750, w: 0.08 },
+    img: 'suvarnabhumi', loc: { lat: 13.690, lon: 100.750 },
     imgNote: 'Suvarnabhumi Airport', fallback: 'linear-gradient(160deg,#1e2226,#0f1213 70%)',
   },
 ];
@@ -114,7 +111,7 @@ export default function Home() {
           const isActive = active === i;
           const style = {
             '--i': i,
-            '--img': `url("${placeImage(p.loc.lat, p.loc.lon, p.loc.w)}")`,
+            '--img': `url("${placeImage(p.img, 1600)}"), url("${placeImage(p.img, 160)}")`,
             '--fallback': p.fallback,
           } as CSSProperties;
           return (
