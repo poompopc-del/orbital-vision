@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { useWorkspace } from '../store';
-import { aoiFromFile, areaKm2, bboxPolygon, downloadJson, geocode, pointAoi, type GeocodeHit } from '../lib/geo';
+import { aoiFromFile, areaKm2, bboxPolygon, centroid, downloadJson, geocode, pointAoi, type GeocodeHit } from '../lib/geo';
 import { bounds, editAoi, isRectangle, readFavourites, writeFavourites, type FavAoi } from '../lib/aoiEdit';
 import { uid } from '../lib/repo';
 import { Cesium, drawOnGlobe, flyToPolygon, type DrawMode } from '../lib/cesium';
 import { logAudit } from '../lib/repo';
 import { Button, Input, Select, Spinner, cx } from './ui';
 import type { ImportedPlace } from '../lib/coordImport';
+
+const PINS_KEY = 'ov.aoi.pins.v1';
+const PINS_HIDDEN_KEY = 'ov.aoi.pins.hidden.v1';
+const PIN_COLOR = Cesium.Color.fromCssColorString('#d5aa69');
 
 export default function AoiPicker({ viewer, compact, onMany }: { viewer?: Cesium.Viewer | null; compact?: boolean; /** offered when a file holds several places */ onMany?: (places: ImportedPlace[]) => void }) {
   const { aoi, setAoi } = useWorkspace();
@@ -25,6 +29,55 @@ export default function AoiPicker({ viewer, compact, onMany }: { viewer?: Cesium
   const [favName, setFavName] = useState('');
   const [favDesc, setFavDesc] = useState('');
   const [showFavs, setShowFavs] = useState(true);
+  // saved AOIs as pins on the map: all on/off, plus per-item hide (remembered in this browser)
+  const [pinsOn, setPinsOnS] = useState<boolean>(() => { try { return localStorage.getItem(PINS_KEY) !== '0'; } catch { return true; } });
+  const [pinHidden, setPinHiddenS] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem(PINS_HIDDEN_KEY) || '[]'); } catch { return []; } });
+  const setPinsOn = (v: boolean) => { setPinsOnS(v); try { localStorage.setItem(PINS_KEY, v ? '1' : '0'); } catch { /* ignore */ } };
+  const togglePin = (id: string) => {
+    const next = pinHidden.includes(id) ? pinHidden.filter((x) => x !== id) : [...pinHidden, id];
+    setPinHiddenS(next);
+    try { localStorage.setItem(PINS_HIDDEN_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+  useEffect(() => {
+    if (!viewer || viewer.isDestroyed()) return;
+    const ds = new Cesium.CustomDataSource('saved-aoi-pins');
+    void viewer.dataSources.add(ds);
+    if (pinsOn) {
+      for (const f of favs) {
+        if (pinHidden.includes(f.id)) continue;
+        const [lon, lat] = centroid(f.geometry);
+        ds.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(lon, lat),
+          point: { pixelSize: 11, color: PIN_COLOR, outlineColor: Cesium.Color.fromCssColorString('#141719'), outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+          label: {
+            text: f.name,
+            font: '12px "IBM Plex Sans", "IBM Plex Sans Thai", sans-serif',
+            fillColor: Cesium.Color.WHITE,
+            showBackground: true,
+            backgroundColor: Cesium.Color.fromCssColorString('#1b2023').withAlpha(0.85),
+            backgroundPadding: new Cesium.Cartesian2(6, 3),
+            pixelOffset: new Cesium.Cartesian2(0, -18),
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            // hide labels when zoomed far out so the globe does not fill with text
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2.5e6),
+          },
+        });
+        ds.entities.add({
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArray(f.geometry.coordinates[0].flat()),
+            width: 1.5,
+            material: new Cesium.PolylineDashMaterialProperty({ color: PIN_COLOR.withAlpha(0.8), dashLength: 10 }),
+            clampToGround: true,
+          },
+        });
+      }
+    }
+    viewer.scene.requestRender();
+    return () => {
+      if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
+    };
+  }, [viewer, favs, pinsOn, pinHidden]);
   const [renaming, setRenaming] = useState(false);
   const [nameV, setNameV] = useState('');
   const [favEdit, setFavEdit] = useState<string | null>(null);
@@ -233,10 +286,21 @@ export default function AoiPicker({ viewer, compact, onMany }: { viewer?: Cesium
       })()}
       {favs.length > 0 && (
         <div className="rounded border border-line">
-          <button onClick={() => setShowFavs(!showFavs)} className="label flex w-full justify-between px-2 py-1.5">
-            <span>★ {t('Favourite AOIs')} ({favs.length})</span>
-            <span>{showFavs ? '−' : '+'}</span>
-          </button>
+          <div className="flex items-center gap-1 px-2 py-1.5">
+            <button onClick={() => setShowFavs(!showFavs)} className="label flex min-w-0 flex-1 justify-between text-left">
+              <span className="truncate">★ {t('Favourite AOIs')} ({favs.length})</span>
+              <span>{showFavs ? '−' : '+'}</span>
+            </button>
+            {viewer && (
+              <button
+                onClick={() => setPinsOn(!pinsOn)}
+                className={cx('ml-1 shrink-0 rounded border px-1.5 py-0.5 text-[10px]', pinsOn ? 'border-sel-400/60 text-sel-300' : 'border-line text-muted hover:text-white')}
+                title={t(pinsOn ? 'Hide saved AOIs on the map' : 'Show saved AOIs on the map')}
+              >
+                📍 {t(pinsOn ? 'On map' : 'Hidden')}
+              </button>
+            )}
+          </div>
           {showFavs && (
             <ul className="max-h-40 overflow-y-auto border-t border-line scroll-thin">
               {favs.map((f) => (
@@ -266,6 +330,11 @@ export default function AoiPicker({ viewer, compact, onMany }: { viewer?: Cesium
                     </button>
                   )}
                   <span className="font-mono text-[10px] text-muted">{areaKm2(f.geometry).toFixed(1)} km²</span>
+                  {viewer && pinsOn && (
+                    <button onClick={() => togglePin(f.id)} className={cx('w-4 text-center', pinHidden.includes(f.id) ? 'text-muted' : 'text-sel-300')} title={t(pinHidden.includes(f.id) ? 'Show on the map' : 'Hide from the map')}>
+                      {pinHidden.includes(f.id) ? '◌' : '●'}
+                    </button>
+                  )}
                   <button onClick={() => { setFavEdit(f.id); setFavEditV(f.name); }} className="text-muted hover:text-white" title={t('Rename')}>✎</button>
                   <button
                     onClick={() => {

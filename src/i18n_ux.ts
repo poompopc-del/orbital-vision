@@ -60,6 +60,13 @@ export const TH_UX: Record<string, string> = {
   'N2YO API requests': 'คำขอ N2YO API',
   Connected: 'เชื่อมต่อแล้ว',
   'passes and single-satellite elements (primary)': 'รอบผ่านและข้อมูลวงโคจรรายดวง (แหล่งหลัก)',
+  // saved AOI pins
+  'Hide saved AOIs on the map': 'ซ่อนพื้นที่ที่บันทึกไว้บนแผนที่',
+  'Show saved AOIs on the map': 'แสดงพื้นที่ที่บันทึกไว้บนแผนที่',
+  'On map': 'แสดงบนแผนที่',
+  Hidden: 'ซ่อนอยู่',
+  'Show on the map': 'แสดงบนแผนที่',
+  'Hide from the map': 'ซ่อนจากแผนที่',
   // right-click coordinates
   Coordinates: 'พิกัด',
   Copy: 'คัดลอก',
