@@ -102,11 +102,12 @@
   transition-delay: calc(var(--i) * 0.1s);
 }
 
-/* the picture is as wide as the whole stage, shifted so each panel shows its slice */
+/* the picture is as wide as the whole stage; the panel shows the middle strip of it */
 .ovp__bg {
   position: absolute;
   top: 0;
-  left: calc(-1 * var(--x));
+  /* each picture is centred on its subject: centre it under the panel while collapsed */
+  left: calc(var(--pw) / 2 - 50cqw);
   width: 100cqw;
   height: 100%;
   transition: left 0.6s var(--ease) 0.7s;
@@ -184,6 +185,31 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85);
+}
+
+/* place name + coordinates of the picture, bottom-left of each panel */
+.ovp__place {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 3;
+  font-size: 11px;
+  font-weight: 500;
+  color: #e6e9e7;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+  transition: opacity 0.3s;
+}
+.ovp__place span {
+  display: block;
+  margin-top: 2px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+  color: #b7c6b3;
+}
+.ovp__el:hover .ovp__place,
+.ovp.s--el-active .ovp__place {
+  opacity: 0;
 }
 
 /* corner brackets — a viewfinder on the hovered panel */

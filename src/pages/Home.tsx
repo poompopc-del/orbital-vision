@@ -4,33 +4,17 @@ import { t } from '../i18n';
 import { useOrbit, useWorkspace } from '../store';
 import { areaKm2 } from '../lib/geo';
 import { Badge } from '../components/ui';
+import { esri } from '../lib/report';
 import './home-panels.css';
 
 /**
- * Panel pictures: real satellite imagery from NASA GIBS (public domain), requested as a single
- * WMS GetMap image per panel. Each request is a 16:9 box in degrees (lon × lat) so the picture
- * fills the expanded panel without distortion. If a request fails the gradient underneath shows.
+ * Panel pictures: sharp Esri World Imagery of one real place per mode (the same source the
+ * reports use), centred on the subject. A collapsed panel shows the middle strip of its picture;
+ * the open panel shows all of it. Boxes are 16:9 on the ground.
  */
-const GIBS = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi';
-function gibs(layer: string, bbox: [number, number, number, number], time?: string) {
-  const p = new URLSearchParams({
-    SERVICE: 'WMS',
-    REQUEST: 'GetMap',
-    VERSION: '1.1.1',
-    LAYERS: layer,
-    STYLES: '',
-    SRS: 'EPSG:4326',
-    BBOX: bbox.join(','),
-    WIDTH: '1920',
-    HEIGHT: '1080',
-    FORMAT: 'image/jpeg',
-  });
-  if (time) p.set('TIME', time);
-  return `${GIBS}?${p.toString()}`;
-}
-/** Daily true-colour mosaics are complete about a day later; use the day before yesterday (UTC). */
-function recentDay() {
-  return new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
+function placeImage(lat: number, lon: number, widthDeg: number) {
+  const h = widthDeg * Math.cos((lat * Math.PI) / 180) * (9 / 16);
+  return esri({ west: lon - widthDeg / 2, east: lon + widthDeg / 2, south: lat - h / 2, north: lat + h / 2 }, 1920, 1080);
 }
 
 type Panel = {
@@ -38,7 +22,7 @@ type Panel = {
   code: string;
   title: string;
   desc: string;
-  img: () => string;
+  loc: { lat: number; lon: number; w: number };
   imgNote: string;
   fallback: string;
   modes?: { start: string; icon: string; label: string }[];
@@ -48,16 +32,16 @@ const PANELS: Panel[] = [
   {
     to: '/disaster?tab=map', code: 'HAZARD', title: 'Disaster situation mode',
     desc: 'Floods, hotspots, earthquakes, heavy rain, drought and PM2.5 across Thailand from open agency data — with a situation report.',
-    // whole of Thailand and neighbours, latest daily VIIRS true colour (clouds and storms included)
-    img: () => gibs('VIIRS_SNPP_CorrectedReflectance_TrueColor', [93.5, 6.5, 109.5, 15.5], recentDay()),
-    imgNote: 'VIIRS true colour', fallback: 'linear-gradient(160deg,#3a2a22,#1b2023 70%)',
+    // Ayutthaya old city, ringed by the Chao Phraya, Pa Sak and Lopburi rivers — flood-prone (2011)
+    loc: { lat: 14.356, lon: 100.566, w: 0.13 },
+    imgNote: 'Ayutthaya', fallback: 'linear-gradient(160deg,#3a2a22,#1b2023 70%)',
   },
   {
     to: '/imagery?tab=flow', code: 'IMAGERY', title: 'Satellite imagery',
     desc: 'Choose an area, pick images on the timeline, then choose what to do with them.',
-    // Bangkok, the Chao Phraya delta and the head of the Gulf of Thailand
-    img: () => gibs('BlueMarble_NextGeneration', [98.6, 12.2, 103.4, 14.9]),
-    imgNote: 'Blue Marble', fallback: 'linear-gradient(160deg,#223a3a,#1b2023 70%)',
+    // Bang Krachao: the green river loop in the middle of Bangkok
+    loc: { lat: 13.683, lon: 100.565, w: 0.16 },
+    imgNote: 'Bang Krachao, Bangkok', fallback: 'linear-gradient(160deg,#223a3a,#1b2023 70%)',
     modes: [
       { start: 'change', icon: '🔍', label: 'Change analysis' },
       { start: 'view', icon: '◐', label: 'Swipe / blink' },
@@ -70,23 +54,23 @@ const PANELS: Panel[] = [
   {
     to: '/imagery?tab=watch', code: 'WATCH', title: 'Border & area watch mode',
     desc: 'Weekly change checks along the Cambodia, Malaysia and Myanmar borders, forests and disaster areas — with an OPP-style report.',
-    // Thai–Cambodian border, Tonlé Sap
-    img: () => gibs('BlueMarble_ShadedRelief_Bathymetry', [101.4, 11.6, 106.2, 14.3]),
-    imgNote: 'Blue Marble shaded relief', fallback: 'linear-gradient(160deg,#2a3a26,#1b2023 70%)',
+    // Aranyaprathet – Poipet border crossing (Thailand–Cambodia)
+    loc: { lat: 13.663, lon: 102.548, w: 0.12 },
+    imgNote: 'Aranyaprathet – Poipet', fallback: 'linear-gradient(160deg,#2a3a26,#1b2023 70%)',
   },
   {
     to: '/imagery?tab=advanced&task=dams', code: 'RID', title: 'Dam monitoring mode',
     desc: 'Current storage, inflow and release from the Royal Irrigation Department.',
-    // northern Thailand: Bhumibol and Sirikit reservoirs
-    img: () => gibs('BlueMarble_NextGeneration', [97.6, 15.6, 102.4, 18.3]),
-    imgNote: 'Blue Marble', fallback: 'linear-gradient(160deg,#22323e,#1b2023 70%)',
+    // Bhumibol Dam and its reservoir, Tak
+    loc: { lat: 17.243, lon: 98.972, w: 0.10 },
+    imgNote: 'Bhumibol Dam, Tak', fallback: 'linear-gradient(160deg,#22323e,#1b2023 70%)',
   },
   {
     to: '/track?tab=passes', code: 'PASS', title: 'Satellite pass mode',
     desc: 'Pass times for NAPA, ISS or any satellite over your location.',
-    // South-East Asia at night
-    img: () => gibs('VIIRS_Black_Marble', [88, 1, 120, 19]),
-    imgNote: 'VIIRS Black Marble', fallback: 'linear-gradient(160deg,#1e2226,#0f1213 70%)',
+    // Suvarnabhumi Airport, Samut Prakan
+    loc: { lat: 13.690, lon: 100.750, w: 0.08 },
+    imgNote: 'Suvarnabhumi Airport', fallback: 'linear-gradient(160deg,#1e2226,#0f1213 70%)',
   },
 ];
 
@@ -130,7 +114,7 @@ export default function Home() {
           const isActive = active === i;
           const style = {
             '--i': i,
-            '--img': `url("${p.img()}")`,
+            '--img': `url("${placeImage(p.loc.lat, p.loc.lon, p.loc.w)}")`,
             '--fallback': p.fallback,
           } as CSSProperties;
           return (
@@ -159,6 +143,10 @@ export default function Home() {
                     <span className="ovp__code">MODE · {p.code}</span>
                     <h2 className="ovp__heading">{t(p.title)}</h2>
                   </div>
+                  <div className="ovp__place">
+                    {p.imgNote}
+                    <span>{p.loc.lat.toFixed(3)}°N {p.loc.lon.toFixed(3)}°E</span>
+                  </div>
 
                   <div className="ovp__content" aria-hidden={!isActive}>
                     <span className="ovp__code" style={{ alignSelf: 'flex-start' }}>MODE · {p.code}</span>
@@ -176,7 +164,7 @@ export default function Home() {
                     <Link to={p.to} className="ovp__open" tabIndex={isActive ? 0 : -1}>
                       {t('Open mode')} <span aria-hidden>→</span>
                     </Link>
-                    <span className="ovp__credit">NASA GIBS · {p.imgNote}</span>
+                    <span className="ovp__credit">Esri World Imagery · {p.imgNote}</span>
                   </div>
                   <button
                     type="button"
