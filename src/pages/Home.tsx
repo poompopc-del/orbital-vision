@@ -1,13 +1,63 @@
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { t } from '../i18n';
 import { useOrbit, useWorkspace } from '../store';
 import { areaKm2 } from '../lib/geo';
 import { Badge } from '../components/ui';
+import './home-panels.css';
 
-const MAIN: { to: string; code: string; icon: string; title: string; desc: string; modes?: { start: string; icon: string; label: string }[] }[] = [
-  { to: '/disaster?tab=map', code: 'HAZARD', icon: '⚠', title: 'Disaster situation mode', desc: 'Floods, hotspots, earthquakes, heavy rain, drought and PM2.5 across Thailand from open agency data — with a situation report.' },
+/**
+ * Panel pictures: real satellite imagery from NASA GIBS (public domain), requested as a single
+ * WMS GetMap image per panel. Each request is a 16:9 box in degrees (lon × lat) so the picture
+ * fills the expanded panel without distortion. If a request fails the gradient underneath shows.
+ */
+const GIBS = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi';
+function gibs(layer: string, bbox: [number, number, number, number], time?: string) {
+  const p = new URLSearchParams({
+    SERVICE: 'WMS',
+    REQUEST: 'GetMap',
+    VERSION: '1.1.1',
+    LAYERS: layer,
+    STYLES: '',
+    SRS: 'EPSG:4326',
+    BBOX: bbox.join(','),
+    WIDTH: '1920',
+    HEIGHT: '1080',
+    FORMAT: 'image/jpeg',
+  });
+  if (time) p.set('TIME', time);
+  return `${GIBS}?${p.toString()}`;
+}
+/** Daily true-colour mosaics are complete about a day later; use the day before yesterday (UTC). */
+function recentDay() {
+  return new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
+}
+
+type Panel = {
+  to: string;
+  code: string;
+  title: string;
+  desc: string;
+  img: () => string;
+  imgNote: string;
+  fallback: string;
+  modes?: { start: string; icon: string; label: string }[];
+};
+
+const PANELS: Panel[] = [
   {
-    to: '/imagery?tab=flow', code: 'IMAGERY', icon: '🛰', title: 'Satellite imagery', desc: 'Choose an area, pick images on the timeline, then choose what to do with them.',
+    to: '/disaster?tab=map', code: 'HAZARD', title: 'Disaster situation mode',
+    desc: 'Floods, hotspots, earthquakes, heavy rain, drought and PM2.5 across Thailand from open agency data — with a situation report.',
+    // whole of Thailand and neighbours, latest daily VIIRS true colour (clouds and storms included)
+    img: () => gibs('VIIRS_SNPP_CorrectedReflectance_TrueColor', [93.5, 6.5, 109.5, 15.5], recentDay()),
+    imgNote: 'VIIRS true colour', fallback: 'linear-gradient(160deg,#3a1f1a,#0b1524 70%)',
+  },
+  {
+    to: '/imagery?tab=flow', code: 'IMAGERY', title: 'Satellite imagery',
+    desc: 'Choose an area, pick images on the timeline, then choose what to do with them.',
+    // Bangkok, the Chao Phraya delta and the head of the Gulf of Thailand
+    img: () => gibs('BlueMarble_NextGeneration', [98.6, 12.2, 103.4, 14.9]),
+    imgNote: 'Blue Marble', fallback: 'linear-gradient(160deg,#103a4a,#0b1524 70%)',
     modes: [
       { start: 'change', icon: '🔍', label: 'Change analysis' },
       { start: 'view', icon: '◐', label: 'Swipe / blink' },
@@ -17,9 +67,27 @@ const MAIN: { to: string; code: string; icon: string; title: string; desc: strin
       { start: 'export', icon: '📷', label: 'Latest image / download' },
     ],
   },
-  { to: '/imagery?tab=watch', code: 'WATCH', icon: '🛡', title: 'Border & area watch mode', desc: 'Weekly change checks along the Cambodia, Malaysia and Myanmar borders, forests and disaster areas — with an OPP-style report.' },
-  { to: '/imagery?tab=advanced&task=dams', code: 'RID', icon: '💧', title: 'Dam monitoring mode', desc: 'Current storage, inflow and release from the Royal Irrigation Department.' },
-  { to: '/track?tab=passes', code: 'PASS', icon: '🛰', title: 'Satellite pass mode', desc: 'Pass times for NAPA, ISS or any satellite over your location.' },
+  {
+    to: '/imagery?tab=watch', code: 'WATCH', title: 'Border & area watch mode',
+    desc: 'Weekly change checks along the Cambodia, Malaysia and Myanmar borders, forests and disaster areas — with an OPP-style report.',
+    // Thai–Cambodian border, Tonlé Sap
+    img: () => gibs('BlueMarble_ShadedRelief_Bathymetry', [101.4, 11.6, 106.2, 14.3]),
+    imgNote: 'Blue Marble shaded relief', fallback: 'linear-gradient(160deg,#1f3a24,#0b1524 70%)',
+  },
+  {
+    to: '/imagery?tab=advanced&task=dams', code: 'RID', title: 'Dam monitoring mode',
+    desc: 'Current storage, inflow and release from the Royal Irrigation Department.',
+    // northern Thailand: Bhumibol and Sirikit reservoirs
+    img: () => gibs('BlueMarble_NextGeneration', [97.6, 15.6, 102.4, 18.3]),
+    imgNote: 'Blue Marble', fallback: 'linear-gradient(160deg,#14304a,#0b1524 70%)',
+  },
+  {
+    to: '/track?tab=passes', code: 'PASS', title: 'Satellite pass mode',
+    desc: 'Pass times for NAPA, ISS or any satellite over your location.',
+    // South-East Asia at night
+    img: () => gibs('VIIRS_Black_Marble', [88, 1, 120, 19]),
+    imgNote: 'VIIRS Black Marble', fallback: 'linear-gradient(160deg,#151b3a,#05070c 70%)',
+  },
 ];
 
 const MORE = [
@@ -32,64 +100,124 @@ const MORE = [
 export default function Home() {
   const { sats, status } = useOrbit();
   const { aoi } = useWorkspace();
+  const [ready, setReady] = useState(false);
+  const [active, setActive] = useState<number | null>(null);
+
+  // panels slide up one after another a moment after the page appears
+  useEffect(() => {
+    const id = setTimeout(() => setReady(true), 200);
+    return () => clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
+    if (active === null) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setActive(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [active]);
+
+  const cls = ['ovp', !ready && 's--inactive', active !== null && 's--el-active'].filter(Boolean).join(' ');
+
   return (
-    <div className="h-full overflow-y-auto scroll-thin">
-      <div className="mx-auto max-w-5xl px-4 py-8">
-        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-cyan-400">ORBITAL VISION</div>
-        <h1 className="mt-1 text-2xl font-semibold text-white">{t('Select a mode')}</h1>
-        <p className="mt-1 text-sm text-muted">{t('Each mode finds suitable satellite images and runs the analysis automatically.')}</p>
-        <div className="mt-3 flex flex-wrap gap-1.5">
+    <div className={cls}>
+      <div className="ovp__top">
+        <div>
+          <div className="ovp__brand">Orbital Vision</div>
+          <h1 className="ovp__title">{t('Select a mode')}</h1>
+          <p className="ovp__sub">{t('Each mode finds suitable satellite images and runs the analysis automatically.')}</p>
+        </div>
+        <div className="ovp__badges">
           {status === 'ready' && <Badge tone="cyan">{sats.length} {t('satellites')} · SGP4</Badge>}
           {aoi && <Badge>{t('Last area')}: {aoi.name} · {areaKm2(aoi.geometry).toFixed(1)} km²</Badge>}
         </div>
+      </div>
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {MAIN.map((c) => c.modes ? (
-            <div key={c.to} className="flex flex-col rounded-lg border border-cyan-400/40 bg-navy-900 p-4 sm:col-span-2">
-              <span className="flex items-start justify-between">
-                <span className="text-3xl">{c.icon}</span>
-                <span className="rounded border border-cyan-400/30 px-1.5 py-0.5 font-mono text-[9px] tracking-[0.2em] text-cyan-300">MODE · {c.code}</span>
-              </span>
-              <span className="mt-2 text-base font-semibold text-white">{t(c.title)}</span>
-              <span className="mt-1 text-xs leading-relaxed text-muted">{t(c.desc)}</span>
-              <div className="mt-3 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                {c.modes.map((m) => (
-                  <Link key={m.start} to={`${c.to}&start=${m.start}`} className="rounded border border-line px-2 py-1.5 text-xs text-slate-200 transition hover:border-cyan-400/60 hover:bg-cyan-400/5 hover:text-white">
-                    {m.icon} {t(m.label)}
-                  </Link>
-                ))}
-              </div>
-              <Link to={c.to} className="mt-3 text-xs text-cyan-300 hover:underline">{t('Open mode')} →</Link>
-            </div>
-          ) : (
-            <Link
-              key={c.to}
-              to={c.to}
-              className="group flex flex-col rounded-lg border border-line bg-navy-900 p-4 transition hover:border-cyan-400/50 hover:bg-navy-850"
+      <div className="ovp__stage">
+        {PANELS.map((p, i) => {
+          const isActive = active === i;
+          const style = {
+            '--i': i,
+            '--img': `url("${p.img()}")`,
+            '--fallback': p.fallback,
+          } as CSSProperties;
+          return (
+            <div
+              key={p.code}
+              className={'ovp__el' + (isActive ? ' s--active' : '')}
+              style={style}
+              role="button"
+              tabIndex={active === null || isActive ? 0 : -1}
+              aria-expanded={isActive}
+              aria-label={t(p.title)}
+              onClick={() => active !== i && setActive(i)}
+              onKeyDown={(e) => {
+                if (active === null && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault();
+                  setActive(i);
+                }
+              }}
             >
-              <span className="flex items-start justify-between">
-                <span className="text-3xl">{c.icon}</span>
-                <span className="rounded border border-cyan-400/30 px-1.5 py-0.5 font-mono text-[9px] tracking-[0.2em] text-cyan-300">MODE · {c.code}</span>
-              </span>
-              <span className="mt-2 text-base font-semibold text-white">{t(c.title)}</span>
-              <span className="mt-1 flex-1 text-xs leading-relaxed text-muted">{t(c.desc)}</span>
-              <span className="mt-3 text-xs text-cyan-300 group-hover:underline">{t('Open mode')} →</span>
+              <div className="ovp__overflow">
+                <div className="ovp__inner">
+                  <div className="ovp__bg" />
+                  <div className="ovp__dim" />
+                  <div className="ovp__frame" />
+                  <div className="ovp__preview">
+                    <span className="ovp__code">MODE · {p.code}</span>
+                    <h2 className="ovp__heading">{t(p.title)}</h2>
+                  </div>
+
+                  <div className="ovp__content" aria-hidden={!isActive}>
+                    <span className="ovp__code" style={{ alignSelf: 'flex-start' }}>MODE · {p.code}</span>
+                    <div className="ovp__big">{t(p.title)}</div>
+                    <p className="ovp__desc">{t(p.desc)}</p>
+                    {p.modes && (
+                      <div className="ovp__modes">
+                        {p.modes.map((m) => (
+                          <Link key={m.start} to={`${p.to}&start=${m.start}`} className="ovp__mode" tabIndex={isActive ? 0 : -1}>
+                            {m.icon} {t(m.label)}
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                    <Link to={p.to} className="ovp__open" tabIndex={isActive ? 0 : -1}>
+                      {t('Open mode')} <span aria-hidden>→</span>
+                    </Link>
+                    <span className="ovp__credit">NASA GIBS · {p.imgNote}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="ovp__close"
+                    aria-label={t('Close')}
+                    tabIndex={isActive ? 0 : -1}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActive(null);
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="ovp__index" aria-hidden>
+                <div className="ovp__index-back">{String(i + 1).padStart(2, '0')}</div>
+                <div className="ovp__index-front">
+                  <span>{String(i + 1).padStart(2, '0')}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="ovp__bottom">
+        <div className="ovp__tools">
+          <span className="label mr-1">{t('Other tools')}</span>
+          {MORE.map((c) => (
+            <Link key={c.to} to={c.to} className="ovp__tool">
+              {c.icon} {t(c.title)}
             </Link>
           ))}
         </div>
-
-        <div className="mt-8">
-          <div className="label mb-2">{t('Other tools')}</div>
-          <div className="flex flex-wrap gap-2">
-            {MORE.map((c) => (
-              <Link key={c.to} to={c.to} className="rounded border border-line px-3 py-2 text-xs text-slate-200 hover:border-cyan-400/50 hover:text-white">
-                {c.icon} {t(c.title)}
-              </Link>
-            ))}
-          </div>
-        </div>
-
-        <p className="mt-8 text-[11px] leading-relaxed text-muted">
+        <p className="ovp__note">
           {t('Satellite positions are calculated from public orbital data; images come from open Copernicus Sentinel and USGS Landsat archives via Microsoft Planetary Computer. Results are estimates from satellite data, not confirmation of events on the ground.')}
         </p>
       </div>
