@@ -282,7 +282,7 @@ class AreaJob {
       valid_pct: run.stats ? (100 * run.stats.validKm2) / Math.max(run.stats.aoiKm2, 1e-9) : null,
       a_datetime: A.datetime, b_datetime: B.datetime, run, images,
     });
-    log(`    → ${run.status}${run.level ? ' / ' + run.level : ''}${run.stats ? ` · change ${run.stats.interestKm2.toFixed(3)} km² · checkable ${((100 * run.stats.validKm2) / run.stats.aoiKm2).toFixed(0)}%` : ''}${run.reason ? ' · ' + run.reason : ''}`);
+    log(`    → ${run.status}${run.level ? ' / ' + run.level : ''}${run.stats ? ` · change ${run.stats.interestKm2.toFixed(3)} km² · checkable ${((100 * run.stats.validKm2) / run.stats.aoiKm2).toFixed(0)}%` : ''}${run.maskPct ? ` · mask scl ${run.maskPct.scl}% thin ${run.maskPct.thin}% haze ${run.maskPct.haze}% total ${run.maskPct.total}%` : ''}${run.reason ? ' · ' + run.reason.slice(0, 60) : ''}`);
     return { id, horizon, run, images, raw };
   }
 

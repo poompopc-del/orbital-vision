@@ -147,6 +147,8 @@ export interface MonitorRun {
   horizons?: Partial<Record<'week' | 'month' | 'year', MonitorRun>>;
   /** change seen on two successive usable images (the server only alerts on these) */
   confirmedBy?: { first: string; second: string };
+  /** what the stricter cloud mask removed, % of the grid inside the image: scene mask · thin cloud · local haze · total after the buffer */
+  maskPct?: { scl: number; thin: number; haze: number; total: number };
   /** other scenes that pass the thresholds (offered when this run could not conclude) */
   suggestions?: { id: string; datetime: string; cloud: number | null; collection: string }[];
 }
@@ -703,14 +705,18 @@ export async function compareScenes(
     const W = grid.width, H = grid.height, NP = W * H;
     const mPx = Math.max(1, gridMetres(grid));
     const cloudM = new Uint8Array(NP), shadowM = new Uint8Array(NP);
+    const inAoi = new Uint8Array(NP);
+    let nA = 0, nScl = 0, nThin = 0;
     for (let p = 0; p < NP; p++) {
       const sa = st(ra.state, p), sb = st(rb.state, p);
-      if (sa === 8 || sb === 8) cloudM[p] = 1;
+      if (sa !== 0 && sb !== 0) { inAoi[p] = 1; nA++; }
+      if (sa === 8 || sb === 8) { cloudM[p] = 1; nScl += inAoi[p]; }
       else if (sa === 3 || sb === 3) shadowM[p] = 1;
       // thin cloud: clearly positive haze index in either image
-      if ((ra.hot && ra.hot.values[p] > 0.02) || (rb.hot && rb.hot.values[p] > 0.02)) cloudM[p] = 1;
+      else if ((ra.hot && ra.hot.values[p] > 0.05) || (rb.hot && rb.hot.values[p] > 0.05)) { cloudM[p] = 1; nThin += inAoi[p]; }
     }
     let hazeM: Uint8Array | null = null;
+    let nHaze = 0;
     if (ra.hot && rb.hot) {
       // haze over one image only: the haze index of that image rises over a wide area (≈ 300 m around),
       // while a new road or yard changes it little and only locally
@@ -721,15 +727,24 @@ export async function compareScenes(
         d[p] = b - a;
         one[p] = 1;
       }
+      // the whole image can be a little hazier on one date (season, smoke): only local haze patches count,
+      // measured against the area's typical difference
+      const vals = Array.from(d).filter((x) => !Number.isNaN(x)).sort((x, y) => x - y);
+      const med = vals.length ? vals[vals.length >> 1] : 0;
+      for (let p = 0; p < NP; p++) if (!Number.isNaN(d[p])) d[p] -= med;
       const r = Math.max(2, Math.round(150 / mPx));
       const sum = boxSum(d, W, H, r), cnt = boxSum(one, W, H, r);
       hazeM = new Uint8Array(NP);
-      for (let p = 0; p < NP; p++) if (cnt[p] > 4 && Math.abs(sum[p] / cnt[p]) > 0.02) hazeM[p] = 1;
+      for (let p = 0; p < NP; p++) if (cnt[p] > 4 && Math.abs(sum[p] / cnt[p]) > 0.03) { hazeM[p] = 1; nHaze += inAoi[p] && !cloudM[p] ? 1 : 0; }
     }
     // grow cloud and shadow ≈ 100 m: their soft edges are not flagged by the scene mask
     const grow = sensor === 'optical' ? Math.min(8, Math.max(1, Math.round(100 / mPx))) : 0;
     const cloudD = dilate(hazeM ? cloudM.map((v, p) => v | hazeM![p]) : cloudM, W, H, grow);
     const shadowD = dilate(shadowM, W, H, grow);
+    let nAll = 0;
+    for (let p = 0; p < NP; p++) if (inAoi[p] && (cloudD[p] || shadowD[p])) nAll++;
+    const pc = (k: number) => +((100 * k) / Math.max(1, nA)).toFixed(1);
+    const maskPct = { scl: pc(nScl), thin: pc(nThin), haze: pc(nHaze), total: pc(nAll) };
     const defs: ClassDef[] = [
       ...m.legend.map((l) => ({ id: l.id, label: l.label, rgba: hexRgba(l.color, 215) })),
       { id: 3, label: 'No significant change', rgba: [0, 0, 0, 0] },
@@ -792,7 +807,7 @@ export async function compareScenes(
       changeKm2, noChangeKm2: Math.max(0, validKm2 - changeKm2), classKm2, interestKm2: totalKm2,
     };
     const common = {
-      ...base, sensor, A: metaOf(A, clA), B: metaOf(B, clB), stats, legend: m.legend, interest: m.interest, method: m.text, quality, pairNotes: pair.notes, qc,
+      ...base, sensor, A: metaOf(A, clA), B: metaOf(B, clB), stats, maskPct, legend: m.legend, interest: m.interest, method: m.text, quality, pairNotes: pair.notes, qc,
       bounds: after ? { west: after.west, south: after.south, east: after.east, north: after.north } : undefined,
       overlayBounds: { west: res.grid.west, south: res.grid.south, east: res.grid.east, north: res.grid.north },
     };
