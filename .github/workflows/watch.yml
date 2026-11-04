@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '22'
           cache: npm
       - run: npm ci --no-audit --no-fund
       # extra packages used only by the runner (kept out of the website's package.json)
