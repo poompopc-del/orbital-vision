@@ -129,7 +129,7 @@ export default function ExtentBar({
   return (
     <div className="pointer-events-auto absolute right-3 top-3 z-10 w-[268px] rounded-md border border-line bg-ink-950/90 p-2 text-[11px] text-slate-200">
       <div className="flex items-center gap-1">
-        {([['overview', L('ภาพรวมประเทศไทย', 'Thailand overview')], ['border', L('เน้นชายแดน', 'Border focus')], ['custom', L('พื้นที่เฝ้าระวัง', 'Watch area')]] as const).map(([k, t]) => (
+        {([['overview', L('ภาพรวมประเทศไทย', 'Thailand overview')], ['border', L('เส้นชายแดน', 'Border line')], ['custom', L('พื้นที่เฝ้าระวัง', 'Watch area')]] as const).map(([k, t]) => (
           <button key={k} disabled={k === 'custom' && !customRect} onClick={() => { setMode(k); void apply(k); }} className={cx('flex-1 rounded border px-1 py-1 disabled:opacity-40', mode === k ? 'border-cyan-400 bg-cyan-400/15 text-white' : 'border-line hover:border-cyan-400/40')}>{t}</button>
         ))}
       </div>
