@@ -346,7 +346,15 @@ class AreaJob {
     const usable: ImageryItem[] = [];
     for (const it of fresh) if ((await this.examine(it)).usable) usable.push(it);
     if (!fresh.length) log('  no new scenes');
-    const todo = (firstRun ? usable.slice(-1) : usable.slice(-MAX_NEW_PER_AREA));
+    // one satellite pass can appear as two overlapping tiles: keep one per pass (best coverage of the area)
+    const pass = new Map<string, ImageryItem>();
+    for (const it of usable) {
+      const k = `${it.platform}|${it.datetime.slice(0, 13)}`;
+      const had = pass.get(k);
+      if (!had || (it.coveragePct ?? 0) > (had.coveragePct ?? 0)) pass.set(k, it);
+    }
+    const passes = [...pass.values()].sort((p, q) => p.datetime.localeCompare(q.datetime));
+    const todo = (firstRun ? passes.slice(-1) : passes.slice(-MAX_NEW_PER_AREA));
     for (const B of todo) {
       if (!timeLeft()) break;
       await this.process(B, firstRun);
