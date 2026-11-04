@@ -738,9 +738,18 @@ export async function compareScenes(
       for (let p = 0; p < NP; p++) if (cnt[p] > 4 && Math.abs(sum[p] / cnt[p]) > 0.03) { hazeM[p] = 1; nHaze += inAoi[p] && !cloudM[p] ? 1 : 0; }
     }
     // grow cloud and shadow ≈ 100 m: their soft edges are not flagged by the scene mask
-    const grow = sensor === 'optical' ? Math.min(8, Math.max(1, Math.round(100 / mPx))) : 0;
-    const cloudD = dilate(hazeM ? cloudM.map((v, p) => v | hazeM![p]) : cloudM, W, H, grow);
-    const shadowD = dilate(shadowM, W, H, grow);
+    // only solid cloud bodies get the buffer; scattered single pixels (speckle in the scene mask) are masked
+    // as they are, otherwise a sprinkle of them would blank out most of the area
+    const grow = sensor === 'optical' ? Math.min(6, Math.max(1, Math.round(80 / mPx))) : 0;
+    const buffered = (m: Uint8Array) => {
+      if (!grow) return m;
+      const dens = boxSum(Float32Array.from(m), W, H, 2);
+      const seeds = Uint8Array.from(m, (v, p) => (v && dens[p] >= 10 ? 1 : 0)); // ≥ 10 of the 25 around it
+      const g = dilate(seeds, W, H, grow);
+      return Uint8Array.from(m, (v, p) => v | g[p]);
+    };
+    const cloudD = buffered(hazeM ? cloudM.map((v, p) => v | hazeM![p]) : cloudM);
+    const shadowD = buffered(shadowM);
     let nAll = 0;
     for (let p = 0; p < NP; p++) if (inAoi[p] && (cloudD[p] || shadowD[p])) nAll++;
     const pc = (k: number) => +((100 * k) / Math.max(1, nA)).toFixed(1);
