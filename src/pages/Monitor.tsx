@@ -868,7 +868,11 @@ export function MonitorWatch() {
           <Button variant={panel === 'import' ? 'active' : 'ghost'} onClick={() => setPanel('import')}>{L('+ นำเข้าพิกัดหลายจุด', '+ Import coordinates')}</Button>
         </div>
 
-        <Panel collapsible storeKey="checkwin" title={L('การตรวจอัตโนมัติ: เทียบกับช่วงเวลาใด', 'Automatic check: compare against')} right={<span className="text-[10px] text-cyan-300">{baselineLabel(baseline, lang === 'th')}</span>}>
+        {/* with the server watching, comparisons (previous / week / month / year) and quality checks run there:
+            these manual-check settings would only clutter the panel */}
+        {cloud !== 'on' && (
+          <>
+        <Panel collapsible storeKey="checkwin" defaultOpen={false} title={L('การตรวจอัตโนมัติ: เทียบกับช่วงเวลาใด', 'Automatic check: compare against')} right={<span className="text-[10px] text-cyan-300">{baselineLabel(baseline, lang === 'th')}</span>}>
           <div className="grid grid-cols-3 gap-1">
             {BASELINES.map((b) => <Button key={b.id} variant={baseline === b.id ? 'active' : 'ghost'} onClick={() => setBaseline(b.id)}>{L(b.th, b.en)}</Button>)}
           </div>
@@ -895,6 +899,8 @@ export function MonitorWatch() {
         </Panel>
 
         <QcPanel />
+          </>
+        )}
 
         {busy && (
           <Panel>
@@ -1112,6 +1118,7 @@ function CloudBar() {
         <span>
           <span className="mr-1 inline-block h-2 w-2 rounded-full bg-cyan-400 align-middle" />
           {L('เฝ้าอัตโนมัติ: ตรวจภาพใหม่ทุก ~3 ชม. แล้วแจ้งทางอีเมล', 'Auto watch: new imagery checked every ~3 h, alerts by email')}
+          <span className="mt-0.5 block text-[10px] text-muted">{L('ใช้เฉพาะภาพ Sentinel-2 ที่เมฆในกรอบไม่เกิน 20% · เทียบกับภาพก่อนหน้า, ~1 สัปดาห์, ~1 เดือน และ ~1 ปีก่อนให้อัตโนมัติ', 'Only Sentinel-2 images with ≤ 20% cloud in the box · compared automatically with the previous image and ~1 week, ~1 month and ~1 year earlier')}</span>
         </span>
         <div className="flex gap-1">
           <Button variant="ghost" onClick={() => void syncCloud()} title={L('โหลดผลล่าสุดจากเซิร์ฟเวอร์', 'Reload the latest results')} className="!px-2 !py-0.5">↻</Button>
