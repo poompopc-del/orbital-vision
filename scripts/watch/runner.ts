@@ -200,10 +200,15 @@ class AreaJob {
   }
 
   async search(from: number, to: number): Promise<ImageryItem[]> {
-    const list = await searchArchive({ aoi: this.a.geometry, collections: collectionsFor(this.a.sensor), from: iso(from), to: iso(to), maxCloud: this.qc().maxSceneCloud, limit: Math.min(250, Math.max(60, Math.ceil((to - from) / day))) });
-    const out = list.filter((x) => x.source === 'planetary-computer' && (x.coveragePct ?? 100) >= 60);
+    // Planetary Computer returns at most ~100 items per query: long windows are split into 45-day pieces
+    const out = new Map<string, ImageryItem>();
+    for (let a = from; a < to; a += 45 * day) {
+      const b = Math.min(to, a + 45 * day);
+      const list = await searchArchive({ aoi: this.a.geometry, collections: collectionsFor(this.a.sensor), from: iso(a), to: iso(b), maxCloud: this.qc().maxSceneCloud, limit: 100 });
+      list.filter((x) => x.source === 'planetary-computer' && (x.coveragePct ?? 100) >= 60).forEach((x) => out.set(x.id, x));
+    }
     out.forEach((x) => this.items.set(x.id, x));
-    return out.sort((p, q) => p.datetime.localeCompare(q.datetime));
+    return [...out.values()].sort((p, q) => p.datetime.localeCompare(q.datetime));
   }
 
   /** Measure AOI cloud once per scene and remember the verdict (database + memory). */
