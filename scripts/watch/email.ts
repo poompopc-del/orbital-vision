@@ -67,8 +67,22 @@ export function alertEmail(o: AlertItem): string {
 
 function section(o: AlertItem): string {
   const latest = primary(o);
-  const show = (h: HorizonResult['horizon']) => `${o.areaUrl}${o.areaUrl.includes('?') ? '&' : '?'}${latest.id ? `run=${latest.id}&` : ''}hz=${h}&view=swipe`;
-  const at = (lat: number, lon: number) => `${o.areaUrl}${o.areaUrl.includes('?') ? '&' : '?'}${latest.id ? `run=${latest.id}&` : ''}pt=${lat.toFixed(5)},${lon.toFixed(5)}`;
+  const sep = o.areaUrl.includes('?') ? '&' : '?';
+  const HL: Record<HorizonResult['horizon'], string> = { latest: 'ภาพก่อนหน้า', week: '1 สัปดาห์', month: '1 เดือน', year: '1 ปี' };
+  // a link that carries everything the page needs (scenes, result, spots), so it works on its own
+  const link = (x: HorizonResult, extra = '') => {
+    const rr = x.run;
+    const hs = (rr.hotspots ?? []).slice(0, 8).map((h) => `${h.lat.toFixed(5)},${h.lon.toFixed(5)}`).join(';');
+    const q = [
+      latest.id ? `run=${latest.id}` : '', `hz=${x.horizon}`, 'view=swipe',
+      rr.A ? `a=${encodeURIComponent(`${rr.A.collection}:${rr.A.id}`)}` : '', rr.B ? `b=${encodeURIComponent(`${rr.B.collection}:${rr.B.id}`)}` : '',
+      `hl=${encodeURIComponent(HL[x.horizon])}`, rr.level ? `lv=${rr.level}` : '', rr.stats ? `km2=${rr.stats.interestKm2.toFixed(3)}` : '',
+      hs ? `hs=${encodeURIComponent(hs)}` : '', extra,
+    ].filter(Boolean).join('&');
+    return `${o.areaUrl}${sep}${q}`;
+  };
+  const show = (h: HorizonResult['horizon']) => link(o.results.find((x) => x.horizon === h) ?? latest);
+  const at = (lat: number, lon: number) => link(latest, `pt=${lat.toFixed(5)},${lon.toFixed(5)}`);
   const r = latest.run;
   const lines = narrative(r, 'th');
   const purpose = PURPOSES.find((p) => p.id === o.purpose)?.labelTh ?? o.purpose;

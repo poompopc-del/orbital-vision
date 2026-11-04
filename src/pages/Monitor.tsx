@@ -194,6 +194,13 @@ export function MonitorWatch() {
       swipe: params.get('view') === 'swipe',
       bbox: num('bbox').length === 4 ? (num('bbox') as [number, number, number, number]) : null,
       pt: num('pt').length === 2 ? (num('pt') as [number, number]) : null,
+      // the two scenes, so "show" works on its own (no saved result needed): collection:itemId
+      a: params.get('a'),
+      b: params.get('b'),
+      hl: params.get('hl') ?? '',
+      lv: params.get('lv') ?? '',
+      km2: params.get('km2') ?? '',
+      hs: (params.get('hs') ?? '').split(';').map((x) => x.split(',').map(Number)).filter((x) => x.length === 2 && x.every(Number.isFinite)) as [number, number][],
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -488,6 +495,41 @@ export function MonitorWatch() {
     setSelId(a.id);
     if (!deep.pt && !deep.bbox) setTimeout(() => !viewer.isDestroyed() && flyToPolygon(viewer, a.geometry), 1200);
   }, [deepArea, aois, viewer]);
+  const [deepNote, setDeepNote] = useState<null | { A: string; B: string }>(null);
+  const deepSwiped = useRef(false);
+  useEffect(() => {
+    if (!viewer || deepSwiped.current || !deep.a || !deep.b) return;
+    deepSwiped.current = true;
+    const [ca, ia] = deep.a.split(':'), [cb, ib] = deep.b.split(':');
+    const bb = deep.bbox;
+    const g: GeoJSON.Polygon | null = bb ? { type: 'Polygon', coordinates: [[[bb[0], bb[1]], [bb[2], bb[1]], [bb[2], bb[3]], [bb[0], bb[3]], [bb[0], bb[1]]]] } : aois.find((x) => x.id === deepArea)?.geometry ?? null;
+    if (!g || !ia || !ib) return;
+    void Promise.all([fetchItem(ca, ia, g), fetchItem(cb, ib, g)]).then(([A, B]) => {
+      if (!A || !B) return;
+      setSwipe({ A, B });
+      setSplit(0.5);
+      setShow('split');
+      setDeepNote({ A: A.datetime.slice(0, 10), B: B.datetime.slice(0, 10) });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewer]);
+  // numbered markers on the spots the email listed
+  useEffect(() => {
+    if (!viewer || !deepNote || !deep.hs.length) return;
+    const ds = new Cesium.CustomDataSource('deep-hotspots');
+    deep.hs.forEach(([lat, lon], i) =>
+      ds.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        point: { pixelSize: 9, color: Cesium.Color.fromCssColorString('#d0705f'), outlineColor: Cesium.Color.WHITE, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+        label: { text: `${i + 1}`, font: '12px sans-serif', fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#d0705f'), pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      }),
+    );
+    void viewer.dataSources.add(ds);
+    viewer.scene.requestRender();
+    return () => {
+      if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
+    };
+  }, [viewer, deepNote]);
   const nudge = (b: BB) => {
     live.current = b;
     setEdit((e) => (e ? { ...e, b } : e));
@@ -1107,7 +1149,7 @@ export function MonitorWatch() {
             onSet={nudge}
           />
         )}
-        {sel && panel === 'list' && !edit && <AoiDetail key={sel.id} init={sel.id === deepArea ? deep : undefined} aoi={sel} baseline={baseline} onRun={(b) => runList([sel], b)} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
+        {sel && panel === 'list' && !edit && <AoiDetail key={sel.id} init={sel.id === deepArea ? { ...deep, swipe: deep.swipe && !deep.a } : undefined} aoi={sel} baseline={baseline} onRun={(b) => runList([sel], b)} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
         {sel && panel === 'list' && !edit && <ComparePanel key={sel.id} aoi={sel} onRun={(r) => addRun(r)} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
       </aside>
       <div ref={mapRef} className="relative min-h-[360px] flex-1">
@@ -1131,6 +1173,26 @@ export function MonitorWatch() {
             </label>
           )}
         </div>
+        {swipe && deepNote && (
+          <div className="absolute left-1/2 top-3 z-30 w-[min(560px,92%)] -translate-x-1/2 rounded-md border border-cyan-400/60 bg-ink-950/90 px-3 py-2 text-xs text-slate-100 shadow-lg">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="font-semibold text-white">
+                  {L('จากอีเมลแจ้งเตือน', 'From the alert email')}{deep.hl ? ` · ${L('เทียบ', 'compared')} ${deep.hl}` : ''}
+                  {deep.lv ? <span className={cx('ml-1', deep.lv === 'significant' ? 'text-bad' : deep.lv === 'minor' ? 'text-warn' : 'text-cyan-300')}>· {deep.lv === 'significant' ? L('เปลี่ยนแปลงมีนัยสำคัญ', 'significant change') : deep.lv === 'minor' ? L('เปลี่ยนแปลงเล็กน้อย', 'minor change') : L('ไม่พบการเปลี่ยนแปลงเกินเกณฑ์', 'no change above threshold')}{deep.km2 ? ` ${deep.km2} ${L('ตร.กม.', 'km²')}` : ''}</span> : null}
+                </div>
+                <div className="mt-0.5 text-[11px] text-slate-300">
+                  {L(`ซ้ายของเส้น = ภาพก่อน (${deepNote.A}) · ขวาของเส้น = ภาพหลัง (${deepNote.B})`, `Left of the line = before (${deepNote.A}) · right = after (${deepNote.B})`)}
+                </div>
+                <div className="mt-0.5 text-[11px] text-muted">
+                  {L('ลากเส้นแบ่งไปมาเพื่อดูว่าอะไรเปลี่ยน · หรือกด “A ก่อน” / “B หลัง” ด้านล่างเพื่อสลับดูทีละภาพ · “กะพริบ” จะสลับให้อัตโนมัติ', 'Drag the divider to see what changed · or press “A before” / “B after” below to flip between them · “Blink” flips automatically')}
+                  {deep.hs.length ? L(` · จุดแดงมีเลข = จุดที่ตรวจพบ (${deep.hs.length} จุด)`, ` · numbered red dots = detected spots (${deep.hs.length})`) : ''}
+                </div>
+              </div>
+              <button className="shrink-0 text-muted hover:text-white" onClick={() => setDeepNote(null)}>✕</button>
+            </div>
+          </div>
+        )}
         {swipe && (
           <>
             {show === 'split' && (
