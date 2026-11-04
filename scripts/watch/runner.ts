@@ -20,7 +20,7 @@ import nodemailer from 'nodemailer';
 import { compareScenes, measureAoiCloud, type MonitorAoi, type MonitorRun, type Purpose, type Region, type SensorMode } from '../../src/lib/monitor';
 import { fetchItem, searchArchive, type ImageryItem, type StacCollectionId } from '../../src/lib/stac';
 import { checkScene, QC_DEFAULT, type AoiCloud, type QcSettings } from '../../src/lib/qc';
-import { alertEmail, alertSubject, type HorizonResult } from './email';
+import { alertEmail, alertSubject, digestEmail, digestSubject, type AlertItem, type HorizonResult } from './email';
 
 // ------------------------------------------------------------------ settings
 const env = process.env;
@@ -291,11 +291,8 @@ class AreaJob {
   async process(B: ImageryItem, firstRun: boolean) {
     const t = new Date(B.datetime).getTime();
     const A = await this.usableIn(B, t - BASELINE_DAYS * day, t - 3600e3);
-    if (!A) {
-      log(`  no usable earlier scene within ${BASELINE_DAYS} days — ${B.datetime.slice(0, 10)} becomes the baseline`);
-      return;
-    }
-    const results: (HorizonResult & { id: string })[] = [await this.compare(A, B, 'latest')];
+    if (!A) log(`  no usable earlier scene within ${BASELINE_DAYS} days — trying week / month / year`);
+    const results: (HorizonResult & { id: string })[] = A ? [await this.compare(A, B, 'latest')] : [];
     for (const hz of HORIZONS) {
       if (!timeLeft()) break;
       const target = t - hz.days * day;
@@ -304,7 +301,16 @@ class AreaJob {
         log(`  ${hz.h}: no usable scene near ${iso(target)}`);
         continue;
       }
-      results.push(H.id === A.id ? await this.copyAs(results[0], hz.h, A, B) : await this.compare(H, B, hz.h));
+      results.push(A && H.id === A.id ? await this.copyAs(results[0], hz.h, A, B) : await this.compare(H, B, hz.h));
+    }
+    if (!results.length) {
+      log(`  nothing to compare with — ${B.datetime.slice(0, 10)} becomes the reference`);
+      return;
+    }
+    // after a long cloudy spell the nearest usable earlier image is the month / year one: it stands in as "latest"
+    if (!A) {
+      const first = results[0];
+      results.unshift(await this.copyAs(first, 'latest', first.run.A as ImageryItem, B));
     }
     const latest = results[0].run;
     const lvl = this.a.notify_level;
@@ -316,20 +322,13 @@ class AreaJob {
     }
     const to = this.a.notify_email || (await this.store.emailOf(this.a.user_id));
     const areaUrl = APP_URL ? `${APP_URL}/imagery?tab=watch&area=${this.a.id}` : '#';
-    const html = alertEmail({ areaName: this.a.name, region: this.a.region, purpose: this.a.purpose, areaUrl, results });
-    const alert: Record<string, unknown> = { id: randomUUID(), area_id: this.a.id, run_id: results[0].id, user_id: this.a.user_id, level: latest.level, emailed_to: to };
-    if (DRY) fs.writeFileSync(path.join('watch-out', 'alert-email.html'), html);
-    if (to && mailer) {
-      try {
-        await mailer.sendMail({ from: env.ALERT_FROM || env.SMTP_USER, to, subject: alertSubject(this.a.name, latest), html });
-        alert.emailed_at = new Date().toISOString();
-        log(`  ✉ alert sent to ${to}`);
-      } catch (e: any) {
-        alert.email_error = String(e?.message ?? e);
-        log(`  ✉ email failed: ${alert.email_error}`);
-      }
-    } else alert.email_error = !to ? 'no recipient' : 'SMTP not configured';
-    await this.store.insertAlert(alert);
+    // emails go out once at the end of the run: one message per recipient listing every area that changed
+    PENDING.push({
+      to, store: this.store,
+      item: { areaName: this.a.name, region: this.a.region, purpose: this.a.purpose, areaUrl, results },
+      alert: { id: randomUUID(), area_id: this.a.id, run_id: results[0].id, user_id: this.a.user_id, level: latest.level, emailed_to: to },
+    });
+    log(`  ⚑ alert queued (${latest.level})`);
   }
 
   async run() {
@@ -380,6 +379,35 @@ function testArea(): Area {
   };
 }
 
+interface Pending { to: string | null; store: Store; item: AlertItem; alert: Record<string, unknown> }
+const PENDING: Pending[] = [];
+
+async function flushAlerts() {
+  const groups = new Map<string, Pending[]>();
+  for (const p of PENDING) {
+    const k = p.to ?? '';
+    groups.set(k, [...(groups.get(k) ?? []), p]);
+  }
+  for (const [to, list] of groups) {
+    const items = list.map((p) => p.item);
+    const html = items.length === 1 ? alertEmail(items[0]) : digestEmail(items, APP_URL ? `${APP_URL}/imagery?tab=watch` : '#');
+    const subject = items.length === 1 ? alertSubject(items[0].areaName, items[0].results[0].run) : digestSubject(items);
+    if (DRY) fs.writeFileSync(path.join('watch-out', 'alert-email.html'), html);
+    let sent: string | null = null, err: string | null = null;
+    if (to && mailer) {
+      try {
+        await mailer.sendMail({ from: env.ALERT_FROM || env.SMTP_USER, to, subject, html });
+        sent = new Date().toISOString();
+        log(`✉ ${items.length} area(s) in one email to ${to}`);
+      } catch (e: any) {
+        err = String(e?.message ?? e);
+        log(`✉ email failed: ${err}`);
+      }
+    } else err = !to ? 'no recipient' : 'SMTP not configured';
+    for (const p of list) await p.store.insertAlert({ ...p.alert, ...(sent ? { emailed_at: sent } : {}), ...(err ? { email_error: err } : {}) });
+  }
+}
+
 async function main() {
   let store: Store;
   if (DRY) {
@@ -406,6 +434,7 @@ async function main() {
       log(`✖ ${a.name}: ${e?.message ?? e}`);
     }
   }
+  await flushAlerts();
   log(`finished: ${done} checked, ${failed} failed, ${((Date.now() - started) / 60e3).toFixed(1)} min`);
   if (failed && !done) process.exitCode = 1;
 }

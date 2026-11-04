@@ -1270,10 +1270,80 @@ function WatchList({ selId, onSelect, onRun, busy }: { selId: string | null; onS
   const { unit } = useQc();
   const [filter, setFilter] = useState<Region | 'all'>('all');
   const shown = aois.filter((a) => filter === 'all' || a.region === filter);
+  const [msg, setMsg] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+  const exportGeoJson = () => {
+    const list = shown.length ? shown : aois;
+    downloadJson(`orbital-vision-watch-${new Date().toISOString().slice(0, 10)}.geojson`, {
+      type: 'FeatureCollection',
+      ov: 'watch-areas-v1',
+      features: list.map((a) => {
+        const c = a as MonitorAoi & { notifyLevel?: string };
+        return { type: 'Feature', geometry: a.geometry, properties: { name: a.name, region: a.region, purpose: a.purpose, sensor: a.sensor, freqDays: a.freqDays, notifyLevel: c.notifyLevel ?? 'significant' } };
+      }),
+    });
+  };
+  const exportKml = () => {
+    const list = shown.length ? shown : aois;
+    const esc = (x: string) => x.replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]!);
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Orbital Vision watch areas</name>${list
+      .map((a) => `<Placemark><name>${esc(a.name)}</name><Polygon><outerBoundaryIs><LinearRing><coordinates>${a.geometry.coordinates[0].map(([x, y]) => `${x},${y},0`).join(' ')}</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>`)
+      .join('')}</Document></kml>`;
+    const el = document.createElement('a');
+    el.href = URL.createObjectURL(new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' }));
+    el.download = `orbital-vision-watch-${new Date().toISOString().slice(0, 10)}.kml`;
+    el.click();
+  };
+  const importFile = async (f: File) => {
+    setMsg('');
+    try {
+      const j = JSON.parse(await f.text());
+      const feats: any[] = j.type === 'FeatureCollection' ? j.features : j.type === 'Feature' ? [j] : [];
+      const have = new Set(aois.map((a) => geomKey(a.geometry)));
+      const add: MonitorAoi[] = [];
+      feats.forEach((ft, i) => {
+        const g = ft?.geometry;
+        const polys: GeoJSON.Polygon[] = g?.type === 'Polygon' ? [g] : g?.type === 'MultiPolygon' ? g.coordinates.map((c: any) => ({ type: 'Polygon', coordinates: c })) : [];
+        const pr = ft.properties ?? {};
+        polys.forEach((pg, k) => {
+          if (have.has(geomKey(pg))) return;
+          have.add(geomKey(pg));
+          const region = (REGIONS.some((r) => r.id === pr.region) ? pr.region : REGIONS[0].id) as Region;
+          const purpose = (PURPOSES.some((x) => x.id === pr.purpose) ? pr.purpose : PURPOSES[0].id) as Purpose;
+          const sensor = (SATELLITES.some((x) => x.id === pr.sensor) ? pr.sensor : 'auto') as SensorMode;
+          const a = aoiFromPolygon(String(pr.name ?? pr.NAME ?? `${L('พื้นที่', 'Area')} ${i + 1}${polys.length > 1 ? `-${k + 1}` : ''}`), pg, region, purpose, +pr.freqDays || 7, sensor);
+          add.push({ ...a, id: `${a.id}_${i}_${k}`, ...(pr.notifyLevel ? { notifyLevel: pr.notifyLevel } : {}) } as MonitorAoi);
+        });
+      });
+      if (!add.length) return setMsg(L('ไม่พบพื้นที่ใหม่ในไฟล์ (หรือมีอยู่ในรายการแล้วทั้งหมด)', 'No new areas in the file (or all are already listed)'));
+      setAois((l) => [...l, ...add]);
+      setMsg(L(`นำเข้า ${add.length} พื้นที่แล้ว`, `Imported ${add.length} area(s)`));
+    } catch (e: any) {
+      setMsg(L('อ่านไฟล์ไม่ได้ — ใช้ไฟล์ .geojson ที่ส่งออกจากเว็บนี้ หรือ GeoJSON ที่มีรูปหลายเหลี่ยม', 'Could not read the file — use a .geojson exported here, or any GeoJSON with polygons') + ` (${e?.message ?? e})`);
+    }
+  };
+  const share = (
+    <div className="rounded border border-line p-1.5 text-[11px]">
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="mr-1 text-muted">{L('แชร์รายการ', 'Share list')}</span>
+        <Button className="!px-2 !py-0.5 text-[10px]" disabled={!aois.length} onClick={exportGeoJson} title={L('ส่งไฟล์นี้ให้อีกคน แล้วให้เขากด “นำเข้าไฟล์” — ได้ชื่อ เป้าหมาย ดาวเทียม และระดับแจ้งเตือนครบ', 'Send this file; the other person presses “Import file” — names, purpose, satellite and alert level come along')}>⬇ GeoJSON</Button>
+        <Button className="!px-2 !py-0.5 text-[10px]" disabled={!aois.length} onClick={exportKml} title={L('เปิดใน Google Earth / QGIS (เฉพาะรูปกรอบและชื่อ)', 'For Google Earth / QGIS (shapes and names only)')}>⬇ KML</Button>
+        <Button className="!px-2 !py-0.5 text-[10px]" onClick={() => fileRef.current?.click()}>⬆ {L('นำเข้าไฟล์', 'Import file')}</Button>
+        <input ref={fileRef} type="file" accept=".geojson,.json,application/geo+json,application/json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f); }} />
+      </div>
+      {msg && <p className="mt-1 text-[10px] text-cyan-200">{msg}</p>}
+    </div>
+  );
   if (!aois.length)
-    return <p className="text-xs text-muted">{L('ยังไม่มีพื้นที่ในรายการ · เพิ่มได้จาก “+ ตามแนวชายแดน” หรือ “+ วาด / ค้นหา”', 'No areas yet — add them with “+ Along border” or “+ Draw / search”.')}</p>;
+    return (
+      <div className="space-y-1.5">
+        <p className="text-xs text-muted">{L('ยังไม่มีพื้นที่ในรายการ · เพิ่มได้จาก “+ ตามแนวชายแดน” หรือ “+ วาด / ค้นหา” หรือนำเข้าไฟล์ที่คนอื่นส่งมา', 'No areas yet — add them with “+ Along border” or “+ Draw / search”, or import a file someone sent you.')}</p>
+        {share}
+      </div>
+    );
   return (
     <div className="space-y-1.5">
+      {share}
       <div className="flex items-center gap-1.5">
         <Select value={filter} onChange={(e) => setFilter(e.target.value as any)} className="!py-1 text-xs">
           <option value="all">{L('ทุกพื้นที่', 'All regions')}</option>
