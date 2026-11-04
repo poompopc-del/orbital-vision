@@ -194,8 +194,11 @@ function collectionsFor(sensor: SensorMode): StacCollectionId[] {
   if (sensor === 'optical-any') return ['sentinel-2-l2a', 'landsat-c2-l2'];
   return ['sentinel-2-l2a']; // optical alerts; radar areas also use Sentinel-2 here for now
 }
+// the stricter mask (cloud edges, haze, buffer) removes more than the scene mask, and only the checkable part is
+// judged — alerts also need a second image — so 70 % checkable is enough for a result here
 function qcFor(sensor: SensorMode): QcSettings {
-  return sensor === 'landsat' || sensor === 'optical-any' ? { ...QC_DEFAULT, maxGsdM: 30 } : QC_DEFAULT;
+  const q = { ...QC_DEFAULT, minValidPct: 70 };
+  return sensor === 'landsat' || sensor === 'optical-any' ? { ...q, maxGsdM: 30 } : q;
 }
 const toMonitorAoi = (a: Area): MonitorAoi => ({
   id: a.id, name: a.name, region: a.region, purpose: a.purpose, sensor: a.sensor, geometry: a.geometry,
