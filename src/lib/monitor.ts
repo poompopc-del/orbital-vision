@@ -9,7 +9,7 @@
 //  • confidence is derived from cloud-free coverage, scene geometry and time gap, and is shown
 import { classify, cellAreaKm2, cellLonLat, fetchRaster, gridFor, type ClassDef, type Classified, type Raster } from './change';
 import { pickBestScene } from './autoscene';
-import { aoiStatistics, indexExpression, indexSummary, INDICES, S2_CLEAR_EXPR, sarDbExpression, sensorOf } from './spectral';
+import { aoiStatistics, indexExpression, indexSummary, INDICES, refl, S2_CLEAR_EXPR, sarDbExpression, sensorOf } from './spectral';
 import { renderScene } from './export';
 import { centroid } from './geo';
 import { geometryAreaKm2, fmtArea, type AreaUnit } from './area';
@@ -73,6 +73,10 @@ export interface Hotspot {
   areaHa: number;
   areaKm2?: number;
   cls: number;
+  /** 'linear' = long and thin (likely a road / track / cut line) · 'patch' = compact (clearing, yard, structure) */
+  shape?: 'linear' | 'patch';
+  /** length of the long axis, km */
+  lengthKm?: number;
 }
 export const hotspotKm2 = (h: Hotspot) => h.areaKm2 ?? h.areaHa / 100;
 
@@ -141,6 +145,8 @@ export interface MonitorRun {
   horizon?: 'latest' | 'week' | 'month' | 'year';
   /** server results: the same new scene compared with the scene ~1 week / 1 month / 1 year earlier */
   horizons?: Partial<Record<'week' | 'month' | 'year', MonitorRun>>;
+  /** change seen on two successive usable images (the server only alerts on these) */
+  confirmedBy?: { first: string; second: string };
   /** other scenes that pass the thresholds (offered when this run could not conclude) */
   suggestions?: { id: string; datetime: string; cloud: number | null; collection: string }[];
 }
@@ -489,7 +495,8 @@ const lsBit = (k: number) => `(((qa_pixel/${2 ** k})%2)>=1)`;
 /** per-pixel state codes: 0 no data · 3 cloud shadow · 8 cloud · 4 clear */
 function stateExpr(it: ImageryItem): string | null {
   const k = sensorOf(it);
-  if (k === 's2') return 'where((SCL==0)|(SCL==1),0,where(SCL==3,3,where((SCL==8)|(SCL==9)|(SCL==10),8,4)))';
+  // SCL 7 "unclassified" is mostly cloud edges and haze on Sentinel-2 L2A: treated as cloud
+  if (k === 's2') return 'where((SCL==0)|(SCL==1),0,where(SCL==3,3,where((SCL==7)|(SCL==8)|(SCL==9)|(SCL==10),8,4)))';
   if (k === 'landsat') return `where(${lsBit(0)},0,where(${lsBit(1)}|${lsBit(2)}|${lsBit(3)},8,where(${lsBit(4)},3,4)))`;
   return null;
 }
@@ -671,7 +678,9 @@ export async function compareScenes(
       for (let k = 0; k < ins.length; k++) out.push(await fetchRaster(it, ins[k].expr, ins[k].range, grid, signal, (d, n) => progress(`อ่านภาพ${lbl} ${k + 1}/${ins.length} · ${d}/${n}`)));
       const se = stateExpr(it);
       const state = se ? await fetchRaster(it, se, [0, 255], grid, signal, (d, n) => progress(`อ่านหน้ากากเมฆภาพ${lbl} ${d}/${n}`)) : null;
-      return { vals: sensorOf(it) === 's1' ? out.map(despeckle) : out, state };
+      const he = sensor === 'optical' ? hotExpr(it) : null;
+      const hot = he ? await fetchRaster(it, he, [-1, 1], grid, signal, (d, n) => progress(`ตรวจหมอกภาพ${lbl} ${d}/${n}`)).catch(() => null) : null;
+      return { vals: sensorOf(it) === 's1' ? out.map(despeckle) : out, state, hot };
     };
     const ra = await read(A, 'ก่อน');
     const rb = await read(B, 'หลัง');
@@ -689,6 +698,38 @@ export async function compareScenes(
       return c <= 1 ? 0 : c <= 5 ? (c === 3 ? 3 : 4) : 8;
     };
     const anyNaN = (rs: Raster[], p: number) => rs.some((r) => Number.isNaN(r.values[p]));
+    // ---- stricter cloud mask (optical): cloud edges, thin cloud and haze are what most often look like
+    // "vegetation gone, bare ground appeared" — remove them before classifying
+    const W = grid.width, H = grid.height, NP = W * H;
+    const mPx = Math.max(1, gridMetres(grid));
+    const cloudM = new Uint8Array(NP), shadowM = new Uint8Array(NP);
+    for (let p = 0; p < NP; p++) {
+      const sa = st(ra.state, p), sb = st(rb.state, p);
+      if (sa === 8 || sb === 8) cloudM[p] = 1;
+      else if (sa === 3 || sb === 3) shadowM[p] = 1;
+      // thin cloud: clearly positive haze index in either image
+      if ((ra.hot && ra.hot.values[p] > 0.02) || (rb.hot && rb.hot.values[p] > 0.02)) cloudM[p] = 1;
+    }
+    let hazeM: Uint8Array | null = null;
+    if (ra.hot && rb.hot) {
+      // haze over one image only: the haze index of that image rises over a wide area (≈ 300 m around),
+      // while a new road or yard changes it little and only locally
+      const d = new Float32Array(NP), one = new Float32Array(NP);
+      for (let p = 0; p < NP; p++) {
+        const a = ra.hot.values[p], b = rb.hot.values[p];
+        if (Number.isNaN(a) || Number.isNaN(b) || cloudM[p]) { d[p] = NaN; continue; }
+        d[p] = b - a;
+        one[p] = 1;
+      }
+      const r = Math.max(2, Math.round(150 / mPx));
+      const sum = boxSum(d, W, H, r), cnt = boxSum(one, W, H, r);
+      hazeM = new Uint8Array(NP);
+      for (let p = 0; p < NP; p++) if (cnt[p] > 4 && Math.abs(sum[p] / cnt[p]) > 0.02) hazeM[p] = 1;
+    }
+    // grow cloud and shadow ≈ 100 m: their soft edges are not flagged by the scene mask
+    const grow = sensor === 'optical' ? Math.min(8, Math.max(1, Math.round(100 / mPx))) : 0;
+    const cloudD = dilate(hazeM ? cloudM.map((v, p) => v | hazeM![p]) : cloudM, W, H, grow);
+    const shadowD = dilate(shadowM, W, H, grow);
     const defs: ClassDef[] = [
       ...m.legend.map((l) => ({ id: l.id, label: l.label, rgba: hexRgba(l.color, 215) })),
       { id: 3, label: 'No significant change', rgba: [0, 0, 0, 0] },
@@ -699,8 +740,8 @@ export async function compareScenes(
     const res: Classified = classify(aoi, idxR, idxR, (pa) => {
       const p = pa as number;
       const sa = st(ra.state, p), sb = st(rb.state, p);
-      if (sa === 8 || sb === 8) return CLOUD;
-      if (sa === 3 || sb === 3) return SHADOW;
+      if (cloudD[p]) return CLOUD;
+      if (shadowD[p]) return SHADOW;
       if (sa === 0 || sb === 0 || anyNaN(ra.vals, p) || anyNaN(rb.vals, p)) return NODATA;
       const va: number[] = [], vb: number[] = [];
       for (let k = 0; k < n; k++) {
@@ -777,6 +818,43 @@ export async function compareScenes(
   }
 }
 
+/** Box sum over (2r+1)² with an integral image; `v` NaN → 0. */
+function boxSum(v: Float32Array, W: number, H: number, r: number): Float32Array {
+  const I = new Float64Array((W + 1) * (H + 1));
+  for (let y = 0; y < H; y++) {
+    let row = 0;
+    for (let x = 0; x < W; x++) {
+      const a = v[y * W + x];
+      row += Number.isNaN(a) ? 0 : a;
+      I[(y + 1) * (W + 1) + x + 1] = I[y * (W + 1) + x + 1] + row;
+    }
+  }
+  const out = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(H, y + r + 1);
+    for (let x = 0; x < W; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(W, x + r + 1);
+      out[y * W + x] = I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0];
+    }
+  }
+  return out;
+}
+/** Grow a 0/1 mask by r pixels. */
+function dilate(m: Uint8Array, W: number, H: number, r: number): Uint8Array {
+  if (r <= 0) return m;
+  const s = boxSum(Float32Array.from(m), W, H, r);
+  return Uint8Array.from(s, (x) => (x > 0.5 ? 1 : 0));
+}
+/** Haze-optimised transform (Zhang et al. 2002): blue − 0.5·red − 0.08. Rises with haze / thin cloud but
+ *  hardly moves when vegetation turns into bare soil, so it separates the two. */
+const hotExpr = (it: ImageryItem) => {
+  const b = refl(it, 'blue'), r = refl(it, 'red');
+  return b && r ? `(${b})-0.5*(${r})-0.08` : null;
+};
+/** metres per pixel of the analysis grid */
+const gridMetres = (g: { west: number; east: number; south: number; north: number; width: number }) =>
+  ((g.east - g.west) * 111320 * Math.cos((((g.south + g.north) / 2) * Math.PI) / 180)) / g.width;
+
 function hexRgba(hex: string, a: number): [number, number, number, number] {
   const h = hex.replace('#', '');
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), a];
@@ -794,7 +872,7 @@ function findHotspots(res: Classified, interest: number[], minKm2: number): { li
   for (let p0 = 0; p0 < W * H; p0++) {
     const c0 = res.classes[p0];
     if (!want[c0] || seen[p0]) continue;
-    let area = 0, sx = 0, sy = 0, cnt = 0;
+    let area = 0, sx = 0, sy = 0, cnt = 0, mx = 0, my = 0, mxx = 0, myy = 0, mxy = 0;
     stack.push(p0);
     seen[p0] = 1;
     while (stack.length) {
@@ -803,6 +881,7 @@ function findHotspots(res: Classified, interest: number[], minKm2: number): { li
       const [lon, lat] = cellLonLat(g, row, col);
       area += cellAreaKm2(g, row);
       sx += lon; sy += lat; cnt++;
+      mx += col; my += row; mxx += col * col; myy += row * row; mxy += col * row;
       for (let dr = -1; dr <= 1; dr++)
         for (let dc = -1; dc <= 1; dc++) {
           const r = row + dr, c = col + dc;
@@ -814,7 +893,17 @@ function findHotspots(res: Classified, interest: number[], minKm2: number): { li
           }
         }
     }
-    if (area >= minKm2) out.push({ n: 0, lat: sy / cnt, lon: sx / cnt, areaHa: area * 100, areaKm2: area, cls: c0 });
+    if (area >= minKm2) {
+      // long axis from the second moments of the patch: long and thin → likely a road, track or cut line
+      const ux = mx / cnt, uy = my / cnt;
+      const cxx = mxx / cnt - ux * ux, cyy = myy / cnt - uy * uy, cxy = mxy / cnt - ux * uy;
+      const tr = cxx + cyy, det = cxx * cyy - cxy * cxy;
+      const l1 = tr / 2 + Math.sqrt(Math.max(0, (tr * tr) / 4 - det)), l2 = Math.max(1e-6, tr / 2 - Math.sqrt(Math.max(0, (tr * tr) / 4 - det)));
+      const pxKm = Math.sqrt(area / cnt);
+      const lengthKm = 4 * Math.sqrt(l1) * pxKm;
+      const shape: 'linear' | 'patch' = Math.sqrt(l1 / l2) >= 4 && lengthKm >= 0.15 ? 'linear' : 'patch';
+      out.push({ n: 0, lat: sy / cnt, lon: sx / cnt, areaHa: area * 100, areaKm2: area, cls: c0, shape, lengthKm });
+    }
   }
   out.sort((x, y) => (y.areaKm2 ?? 0) - (x.areaKm2 ?? 0));
   const totalKm2 = out.reduce((s, h) => s + (h.areaKm2 ?? 0), 0);
@@ -840,6 +929,12 @@ export function narrative(r: MonitorRun, lang: 'th' | 'en', unit: AreaUnit = 'km
   const what = th ? label?.labelTh ?? 'การเปลี่ยนแปลง' : label?.label ?? 'change';
   if (r.level === 'none') lines.push(th ? `ไม่พบการเปลี่ยนแปลงที่เกินเกณฑ์ในส่วนที่ตรวจสอบได้` : `No change above the threshold in the part that could be checked.`);
   else lines.push(th ? `พบ${what} รวม ${A(s.interestKm2)} ${r.hotspots?.length ?? 0} จุด` : `${what}: ${A(s.interestKm2)} in ${r.hotspots?.length ?? 0} patch(es).`);
+  const lin = (r.hotspots ?? []).filter((h) => h.shape === 'linear');
+  if (lin.length && r.level !== 'none') {
+    const km = lin.reduce((t, h) => t + (h.lengthKm ?? 0), 0);
+    lines.push(th ? `ในนี้ ${lin.length} จุดเป็นแนวยาว (รวมราว ${fmt(km, 1)} กม.) — ลักษณะแบบถนน ทางตัดใหม่ หรือแนวถางป่า · ที่เหลือเป็นผืน (ลานดิน ที่โล่ง หรือสิ่งปลูกสร้าง)` : `${lin.length} of them are long and thin (≈ ${fmt(km, 1)} km in total) — the shape of a road, new track or cut line · the rest are patches (yards, clearings or structures).`);
+  }
+  if (r.confirmedBy && r.level !== 'none') lines.push(th ? `ยืนยันแล้ว: พบในภาพ ${r.confirmedBy.first.slice(0, 10)} และยังอยู่ในภาพ ${r.confirmedBy.second.slice(0, 10)} (ไม่ใช่เมฆหรือหมอกชั่วคราว)` : `Confirmed: seen on ${r.confirmedBy.first.slice(0, 10)} and still there on ${r.confirmedBy.second.slice(0, 10)} (not passing cloud or haze).`);
   const big = r.hotspots?.[0];
   if (big && r.level !== 'none') lines.push(th ? `จุดใหญ่ที่สุด ${A(hotspotKm2(big))} ที่พิกัด ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}` : `Largest patch ${A(hotspotKm2(big))} at ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}.`);
   const sa = SENSOR_TH[r.A?.collection ?? ''] ?? r.A?.label, sb = SENSOR_TH[r.B?.collection ?? ''] ?? r.B?.label;

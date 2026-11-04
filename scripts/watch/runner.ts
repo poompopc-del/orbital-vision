@@ -17,7 +17,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import nodemailer from 'nodemailer';
-import { compareScenes, measureAoiCloud, type MonitorAoi, type MonitorRun, type Purpose, type Region, type SensorMode } from '../../src/lib/monitor';
+import { compareScenes, hotspotKm2, measureAoiCloud, type Hotspot, type MonitorAoi, type MonitorRun, type Purpose, type Region, type SensorMode } from '../../src/lib/monitor';
 import { fetchItem, searchArchive, type ImageryItem, type StacCollectionId } from '../../src/lib/stac';
 import { checkScene, QC_DEFAULT, type AoiCloud, type QcSettings } from '../../src/lib/qc';
 import { alertEmail, alertSubject, digestEmail, digestSubject, type AlertItem, type HorizonResult } from './email';
@@ -78,6 +78,8 @@ interface Store {
   insertAlert(row: Record<string, unknown>): Promise<void>;
   updateArea(id: string, patch: Partial<Area>): Promise<void>;
   emailOf(userId: string): Promise<string | null>;
+  /** the newest stored "latest" comparison of this area whose new image is older than `before` */
+  prevLatest(areaId: string, before: string): Promise<MonitorRun | null>;
 }
 
 // ------------------------------------------------------------------ stores
@@ -125,7 +127,11 @@ class SupabaseStore implements Store {
   async emailOf(userId: string) {
     const { data } = await this.db.auth.admin.getUserById(userId);
     return data?.user?.email ?? null;
+  }  async prevLatest(areaId: string, before: string) {
+    const { data } = await this.db.from('watch_runs').select('run').eq('area_id', areaId).eq('horizon', 'latest').lt('b_datetime', before).order('b_datetime', { ascending: false }).limit(1);
+    return (data?.[0]?.run as MonitorRun) ?? null;
   }
+
 }
 
 /** Dry run: one test area, everything kept in memory and written to ./watch-out. */
@@ -151,8 +157,14 @@ class FileStore implements Store {
     fs.writeFileSync(f, Buffer.from(dataUrl.split(',')[1], 'base64'));
     return path.basename(f);
   }
+  private runs: Record<string, any>[] = [];
   async insertRun(row: Record<string, unknown>) {
+    this.runs.push(row);
     fs.writeFileSync(path.join(this.dir, `run_${row.horizon}_${row.id}.json`), JSON.stringify(row, null, 2));
+  }
+  async prevLatest(_id: string, before: string) {
+    const r = this.runs.filter((x) => x.horizon === 'latest' && String(x.b_datetime) < before).sort((a, b) => String(b.b_datetime).localeCompare(String(a.b_datetime)))[0];
+    return (r?.run as MonitorRun) ?? null;
   }
   async insertAlert(row: Record<string, unknown>) {
     fs.writeFileSync(path.join(this.dir, `alert_${row.id}.json`), JSON.stringify(row, null, 2));
@@ -253,7 +265,7 @@ class AreaJob {
     return null;
   }
 
-  async compare(A: ImageryItem, B: ImageryItem, horizon: HorizonResult['horizon']): Promise<HorizonResult & { id: string }> {
+  async compare(A: ImageryItem, B: ImageryItem, horizon: HorizonResult['horizon'], persist = true): Promise<HorizonResult & { id: string }> {
     const id = randomUUID();
     const images: Record<string, string> = {};
     const raw: Record<string, string> = {};
@@ -263,8 +275,8 @@ class AreaJob {
       saveImage: async (key, dataUrl) => void (raw[key.split(':')[1]] = dataUrl),
     });
     run.id = id;
-    for (const [k, v] of Object.entries(raw)) images[k] = await this.store.upload(`${this.a.id}/${id}/${k}.${/jpeg/.test(v.slice(0, 30)) ? 'jpg' : 'png'}`, v);
-    await this.store.insertRun({
+    if (persist) for (const [k, v] of Object.entries(raw)) images[k] = await this.store.upload(`${this.a.id}/${id}/${k}.${/jpeg/.test(v.slice(0, 30)) ? 'jpg' : 'png'}`, v);
+    if (persist) await this.store.insertRun({
       id, area_id: this.a.id, user_id: this.a.user_id, horizon, trigger_scene: B.id, status: run.status, level: run.level ?? null,
       confidence: run.confidence ?? null, change_km2: run.stats?.interestKm2 ?? null,
       valid_pct: run.stats ? (100 * run.stats.validKm2) / Math.max(run.stats.aoiKm2, 1e-9) : null,
@@ -286,6 +298,34 @@ class AreaJob {
     });
     log(`  ${horizon}: same earlier scene as "latest" (${A.datetime.slice(0, 10)})`);
     return { id, horizon, run, images: src.images, raw: src.raw };
+  }
+
+  /** Spots found by the previous comparison that are still there on image B (compared from the same "before"). */
+  async confirm(B: ImageryItem): Promise<(HorizonResult & { id: string }) | null> {
+    const prev = await this.store.prevLatest(this.a.id, B.datetime);
+    if (!prev || prev.status !== 'ok' || prev.level === 'none' || !prev.hotspots?.length || !prev.A || !prev.B) return null;
+    const A0 = this.items.get(prev.A.id) ?? (await fetchItem(prev.A.collection, prev.A.id, this.a.geometry).catch(() => null));
+    if (!A0) return null;
+    log(`  confirming ${prev.hotspots.length} spot(s) of ${prev.B.datetime.slice(0, 10)} on ${B.datetime.slice(0, 10)}`);
+    const c = await this.compare(A0, B, 'latest', false);
+    const r = c.run;
+    if (r.status !== 'ok' || !r.hotspots?.length || !r.stats) return null;
+    const near = (h: Hotspot) =>
+      prev.hotspots!.some((q) => {
+        if (q.cls !== h.cls) return false;
+        const dKm = Math.hypot((h.lon - q.lon) * 111.32 * Math.cos((h.lat * Math.PI) / 180), (h.lat - q.lat) * 110.574);
+        return dKm <= Math.max(0.06, 0.75 * (Math.sqrt(hotspotKm2(h)) + Math.sqrt(hotspotKm2(q))));
+      });
+    const kept = r.hotspots.filter(near).map((h, i) => ({ ...h, n: i + 1 }));
+    if (!kept.length) {
+      log('  not confirmed: the earlier spots are gone on this image (cloud / haze / passing change)');
+      return null;
+    }
+    const km2 = kept.reduce((t, h) => t + hotspotKm2(h), 0);
+    const sig = Math.max(0.02, 0.01 * r.stats.validKm2);
+    const level = km2 >= sig ? 'significant' : km2 >= 0.003 ? 'minor' : 'none';
+    log(`  ✔ confirmed ${kept.length} spot(s), ${km2.toFixed(3)} km² → ${level}`);
+    return { ...c, run: { ...r, hotspots: kept, level, stats: { ...r.stats, interestKm2: km2 }, confirmedBy: { first: prev.B.datetime, second: B.datetime } } };
   }
 
   async process(B: ImageryItem, firstRun: boolean) {
@@ -312,8 +352,20 @@ class AreaJob {
       const first = results[0];
       results.unshift(await this.copyAs(first, 'latest', first.run.A as ImageryItem, B));
     }
-    const latest = results[0].run;
     const lvl = this.a.notify_level;
+    // ---- a change only counts once the next usable image still shows it (cloud edges, haze and smoke
+    // last one image; a new road or yard stays). Compare the earlier "before" with this image and keep the
+    // spots that were already found last time.
+    if (lvl !== 'any') {
+      const conf = await this.confirm(B);
+      if (!conf) {
+        const l = results[0].run;
+        if (l.status === 'ok' && l.level !== 'none') log(`  ${l.level} change waits for the next usable image to confirm it`);
+        return;
+      }
+      results.unshift({ ...conf, horizon: 'confirmed' });
+    }
+    const latest = results[0].run;
     const meets = latest.status === 'ok' && (lvl === 'any' || latest.level === 'significant' || (lvl === 'minor' && latest.level === 'minor'));
     if (!meets) return;
     if (firstRun && !ALERT_ON_FIRST) {
@@ -329,7 +381,7 @@ class AreaJob {
     PENDING.push({
       to, store: this.store,
       item: { areaName: this.a.name, region: this.a.region, purpose: this.a.purpose, areaUrl, results },
-      alert: { id: randomUUID(), area_id: this.a.id, run_id: results[0].id, user_id: this.a.user_id, level: latest.level, emailed_to: to },
+      alert: { id: randomUUID(), area_id: this.a.id, run_id: (results.find((x) => x.horizon === 'latest') ?? results[0]).id, user_id: this.a.user_id, level: latest.level, emailed_to: to },
     });
     log(`  ⚑ alert queued (${latest.level})`);
   }
@@ -377,7 +429,7 @@ function testArea(): Area {
   }
   return {
     id: '00000000-0000-0000-0000-000000000000', user_id: 'dry-run', name: env.WATCH_TEST_NAME || 'ทดสอบ (dry run)', region: 'TH-KH', purpose: (env.WATCH_TEST_PURPOSE as Purpose) || 'construction',
-    sensor: 'optical', geometry, notify_level: 'any', notify_email: env.WATCH_TEST_EMAIL_TO || null,
+    sensor: 'optical', geometry, notify_level: (env.WATCH_TEST_LEVEL as Area['notify_level']) || 'minor', notify_email: env.WATCH_TEST_EMAIL_TO || null,
     last_checked_at: ALERT_ON_FIRST ? null : '1970-01-01T00:00:00Z', last_scene_at: null,
   };
 }

@@ -3,7 +3,7 @@
 import { hotspotKm2, narrative, PURPOSES, REGIONS, type MonitorRun } from '../../src/lib/monitor';
 
 export interface HorizonResult {
-  horizon: 'latest' | 'week' | 'month' | 'year';
+  horizon: 'confirmed' | 'latest' | 'week' | 'month' | 'year';
   run: MonitorRun;
   images: Record<string, string>;
   /** the images as data URLs (kept in memory for this run, so the email can carry them inline) */
@@ -12,7 +12,7 @@ export interface HorizonResult {
   id?: string;
 }
 
-const H_TH: Record<HorizonResult['horizon'], string> = { latest: 'ล่าสุด (เทียบภาพที่ใช้ได้ก่อนหน้า)', week: '1 สัปดาห์', month: '1 เดือน', year: '1 ปี' };
+const H_TH: Record<HorizonResult['horizon'], string> = { confirmed: 'ยืนยันแล้ว (ภาพก่อนเปลี่ยน → ภาพล่าสุด)', latest: 'ล่าสุด (เทียบภาพที่ใช้ได้ก่อนหน้า)', week: '1 สัปดาห์', month: '1 เดือน', year: '1 ปี' };
 const LV_TH: Record<string, string> = { significant: 'เปลี่ยนแปลงมีนัยสำคัญ', minor: 'เปลี่ยนแปลงเล็กน้อย', none: 'ไม่พบการเปลี่ยนแปลงเกินเกณฑ์' };
 const LV_COLOR: Record<string, string> = { significant: '#d0705f', minor: '#d5aa69', none: '#8fb98a' };
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -32,7 +32,7 @@ const wrap = (inner: string) => `<!doctype html><html><body style="margin:0;back
   ${inner}
   ${FOOT}
 </div></body></html>`;
-const primary = (o: AlertItem) => o.results.find((x) => x.horizon === 'latest') ?? o.results[0];
+const primary = (o: AlertItem) => o.results.find((x) => x.horizon === 'confirmed') ?? o.results.find((x) => x.horizon === 'latest') ?? o.results[0];
 const rank = (o: AlertItem) => {
   const r = primary(o).run;
   return (r.level === 'significant' ? 2 : r.level === 'minor' ? 1 : 0) * 1e6 + (r.stats?.interestKm2 ?? 0);
@@ -68,13 +68,14 @@ export function alertEmail(o: AlertItem): string {
 function section(o: AlertItem): string {
   const latest = primary(o);
   const sep = o.areaUrl.includes('?') ? '&' : '?';
-  const HL: Record<HorizonResult['horizon'], string> = { latest: 'ภาพก่อนหน้า', week: '1 สัปดาห์', month: '1 เดือน', year: '1 ปี' };
+  const saved = (o.results.find((x) => x.horizon === 'latest') ?? latest).id;
+  const HL: Record<HorizonResult['horizon'], string> = { confirmed: 'ยืนยันแล้ว', latest: 'ภาพก่อนหน้า', week: '1 สัปดาห์', month: '1 เดือน', year: '1 ปี' };
   // a link that carries everything the page needs (scenes, result, spots), so it works on its own
   const link = (x: HorizonResult, extra = '') => {
     const rr = x.run;
     const hs = (rr.hotspots ?? []).slice(0, 8).map((h) => `${h.lat.toFixed(5)},${h.lon.toFixed(5)}`).join(';');
     const q = [
-      latest.id ? `run=${latest.id}` : '', `hz=${x.horizon}`, 'view=swipe',
+      saved ? `run=${saved}` : '', `hz=${x.horizon === 'confirmed' ? 'latest' : x.horizon}`, 'view=swipe',
       rr.A ? `a=${encodeURIComponent(`${rr.A.collection}:${rr.A.id}`)}` : '', rr.B ? `b=${encodeURIComponent(`${rr.B.collection}:${rr.B.id}`)}` : '',
       `hl=${encodeURIComponent(HL[x.horizon])}`, rr.level ? `lv=${rr.level}` : '', rr.stats ? `km2=${rr.stats.interestKm2.toFixed(3)}` : '',
       hs ? `hs=${encodeURIComponent(hs)}` : '', extra,
@@ -90,7 +91,7 @@ function section(o: AlertItem): string {
   const img = (src: string | undefined, cap: string) =>
     src ? `<td style="padding:4px;vertical-align:top;width:33%"><img src="${src}" alt="${esc(cap)}" style="width:100%;border:1px solid #343b3f;display:block"><div style="font-size:12px;color:#939d9a;margin-top:4px">${esc(cap)}</div></td>` : '';
   const spots = (r.hotspots ?? []).slice(0, 8).map((h) =>
-    `<tr><td style="padding:4px 8px">${h.n}</td><td style="padding:4px 8px;font-family:monospace">${h.lat.toFixed(5)}, ${h.lon.toFixed(5)}</td><td style="padding:4px 8px;text-align:right">${hotspotKm2(h).toFixed(3)} ตร.กม. (${rai(hotspotKm2(h))} ไร่)</td><td style="padding:4px 8px;white-space:nowrap"><a href="${at(h.lat, h.lon)}" style="color:#91a58d">ดูในเว็บ</a> · <a href="https://www.google.com/maps?q=${h.lat},${h.lon}" style="color:#939d9a">Google Maps</a></td></tr>`).join('');
+    `<tr><td style="padding:4px 8px">${h.n}</td><td style="padding:4px 8px;color:#939d9a">${h.shape === 'linear' ? `แนวยาว ~${Math.round((h.lengthKm ?? 0) * 1000)} ม. (อาจเป็นถนน/ทาง)` : 'ผืน (ลานดิน/ที่โล่ง/สิ่งปลูกสร้าง)'}</td><td style="padding:4px 8px;font-family:monospace">${h.lat.toFixed(5)}, ${h.lon.toFixed(5)}</td><td style="padding:4px 8px;text-align:right">${hotspotKm2(h).toFixed(3)} ตร.กม. (${rai(hotspotKm2(h))} ไร่)</td><td style="padding:4px 8px;white-space:nowrap"><a href="${at(h.lat, h.lon)}" style="color:#91a58d">ดูในเว็บ</a> · <a href="https://www.google.com/maps?q=${h.lat},${h.lon}" style="color:#939d9a">Google Maps</a></td></tr>`).join('');
   const horizons = o.results.map((x) => {
     const rr = x.run;
     const ok = rr.status === 'ok';
