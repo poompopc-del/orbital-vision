@@ -271,7 +271,7 @@ class AreaJob {
       a_datetime: A.datetime, b_datetime: B.datetime, run, images,
     });
     log(`    → ${run.status}${run.level ? ' / ' + run.level : ''}${run.stats ? ` · change ${run.stats.interestKm2.toFixed(3)} km² · checkable ${((100 * run.stats.validKm2) / run.stats.aoiKm2).toFixed(0)}%` : ''}${run.reason ? ' · ' + run.reason : ''}`);
-    return { id, horizon, run, images };
+    return { id, horizon, run, images, raw };
   }
 
   /** Same pair as an earlier comparison: store it again under another horizon (no recomputation). */
@@ -285,7 +285,7 @@ class AreaJob {
       a_datetime: A.datetime, b_datetime: B.datetime, run, images: src.images,
     });
     log(`  ${horizon}: same earlier scene as "latest" (${A.datetime.slice(0, 10)})`);
-    return { id, horizon, run, images: src.images };
+    return { id, horizon, run, images: src.images, raw: src.raw };
   }
 
   async process(B: ImageryItem, firstRun: boolean) {
@@ -389,14 +389,30 @@ async function flushAlerts() {
     groups.set(k, [...(groups.get(k) ?? []), p]);
   }
   for (const [to, list] of groups) {
-    const items = list.map((p) => p.item);
+    // images travel inside the email (cid:) — many mail apps hide or block linked images
+    const attachments: { filename: string; content: Buffer; cid: string; contentType: string }[] = [];
+    const items = list.map((p, i) => ({
+      ...p.item,
+      results: p.item.results.map((r, j) => {
+        if (!r.raw) return r;
+        const images = { ...r.images };
+        for (const [k, v] of Object.entries(r.raw)) {
+          const cid = `img${i}_${j}_${k}@ov`;
+          const type = /image\/jpeg/.test(v.slice(0, 30)) ? 'image/jpeg' : 'image/png';
+          attachments.push({ filename: `${k}.${type === 'image/jpeg' ? 'jpg' : 'png'}`, content: Buffer.from(v.split(',')[1], 'base64'), cid, contentType: type });
+          images[k] = `cid:${cid}`;
+        }
+        return { ...r, images };
+      }),
+    }));
     const html = items.length === 1 ? alertEmail(items[0]) : digestEmail(items, APP_URL ? `${APP_URL}/imagery?tab=watch` : '#');
+    const used = attachments.filter((a) => html.includes(`cid:${a.cid}`));
     const subject = items.length === 1 ? alertSubject(items[0].areaName, items[0].results[0].run) : digestSubject(items);
     if (DRY) fs.writeFileSync(path.join('watch-out', 'alert-email.html'), html);
     let sent: string | null = null, err: string | null = null;
     if (to && mailer) {
       try {
-        await mailer.sendMail({ from: env.ALERT_FROM || env.SMTP_USER, to, subject, html });
+        await mailer.sendMail({ from: env.ALERT_FROM || env.SMTP_USER, to, subject, html, attachments: used });
         sent = new Date().toISOString();
         log(`✉ ${items.length} area(s) in one email to ${to}`);
       } catch (e: any) {

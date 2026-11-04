@@ -6,6 +6,8 @@ export interface HorizonResult {
   horizon: 'latest' | 'week' | 'month' | 'year';
   run: MonitorRun;
   images: Record<string, string>;
+  /** the images as data URLs (kept in memory for this run, so the email can carry them inline) */
+  raw?: Record<string, string>;
 }
 
 const H_TH: Record<HorizonResult['horizon'], string> = { latest: 'ล่าสุด (เทียบภาพที่ใช้ได้ก่อนหน้า)', week: '1 สัปดาห์', month: '1 เดือน', year: '1 ปี' };
