@@ -206,23 +206,48 @@ export function MonitorWatch() {
   const tedRef = useRef(ted);
   tedRef.current = ted;
   const tedHist = useRef<TileEd[]>([]);
+  const tedFuture = useRef<TileEd[]>([]);
   const [histN, setHistN] = useState(0);
-  const commitTed = (n: TileEd) => {
-    tedHist.current = [...tedHist.current.slice(-49), tedRef.current];
+  const [futN, setFutN] = useState(0);
+  const lastMerge = useRef<{ key: string; at: number } | null>(null);
+  /** mergeKey: repeated small steps of the same kind (arrow-key nudges) become one undo step */
+  const commitTed = (n: TileEd, mergeKey?: string) => {
+    const now = Date.now();
+    const merge = mergeKey && lastMerge.current?.key === mergeKey && now - lastMerge.current.at < 1200;
+    if (!merge) tedHist.current = [...tedHist.current.slice(-49), tedRef.current];
+    lastMerge.current = mergeKey ? { key: mergeKey, at: now } : null;
+    tedFuture.current = [];
     setHistN(tedHist.current.length);
+    setFutN(0);
     tedRef.current = n;
     setTedS(n);
   };
   const undoTed = () => {
     const prev = tedHist.current.pop();
-    setHistN(tedHist.current.length);
+    lastMerge.current = null;
     if (!prev) return;
+    tedFuture.current.push(tedRef.current);
+    setHistN(tedHist.current.length);
+    setFutN(tedFuture.current.length);
     tedRef.current = prev;
     setTedS(prev);
   };
+  const redoTed = () => {
+    const next = tedFuture.current.pop();
+    lastMerge.current = null;
+    if (!next) return;
+    tedHist.current.push(tedRef.current);
+    setHistN(tedHist.current.length);
+    setFutN(tedFuture.current.length);
+    tedRef.current = next;
+    setTedS(next);
+  };
+
   useEffect(() => {
     tedHist.current = [];
+    tedFuture.current = [];
     setHistN(0);
+    setFutN(0);
     tedRef.current = NO_TED;
     setTedS(NO_TED);
   }, [tileSrc]);
@@ -237,6 +262,8 @@ export function MonitorWatch() {
   commitRef.current = commitTed;
   const undoRef = useRef(undoTed);
   undoRef.current = undoTed;
+  const redoRef = useRef(redoTed);
+  redoRef.current = redoTed;
   // "add a tile" mode: the next click on the map places a new tile there
   const [placing, setPlacing] = useState(false);
   const placingRef = useRef(false);
@@ -258,20 +285,83 @@ export function MonitorWatch() {
   };
   const removeRef = useRef(removePicked);
   removeRef.current = removePicked;
-  // Ctrl+Z = undo one step · Delete = remove the selected tiles · Esc = stop placing
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
-      if (!tilesRef.current.length && !tedHist.current.length) return;
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        undoRef.current();
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && pickedRef.current.size) {
-        e.preventDefault();
-        removeRef.current();
-      } else if (e.key === 'Escape') setPlacing(false);
+  // keyboard shortcuts for the candidate tiles (e.code, so they also work with the Thai keyboard layout)
+  const clip = useRef<Tile[]>([]);
+  const mouseLL = useRef<[number, number] | null>(null);
+  const kbRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  kbRef.current = (e: KeyboardEvent) => {
+    const el = e.target as HTMLElement | null;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+    if (!tilesRef.current.length && !tedHist.current.length && !tedFuture.current.length) return;
+    const mod = e.ctrlKey || e.metaKey;
+    const sel = tilesRef.current.filter((t) => pickedRef.current.has(t.id));
+    const cur = tedRef.current;
+    const shiftEdits = (dd: (t: Tile) => BB, key?: string) => {
+      const edits = { ...cur.edits };
+      sel.forEach((t) => {
+        const o = edits[t.id] ?? [0, 0, 0, 0], d = dd(t);
+        edits[t.id] = [o[0] + d[0], o[1] + d[1], o[2] + d[2], o[3] + d[3]];
+      });
+      commitRef.current({ ...cur, edits }, key);
     };
+    const paste = (list: Tile[], at: [number, number] | null) => {
+      if (!list.length) return;
+      const cx = list.reduce((a, t) => a + t.center[0], 0) / list.length, cy = list.reduce((a, t) => a + t.center[1], 0) / list.length;
+      // at the mouse, or one tile-width to the right of the originals
+      const off = (tileKmRef.current / (111.32 * Math.cos((cy * Math.PI) / 180))) * 1.1;
+      const [dx, dy] = at ? [at[0] - cx, at[1] - cy] : [off, 0];
+      const stamp = Date.now().toString(36).slice(-4);
+      const added = list.map((t, i) => ({ ...t, id: `ADD-${stamp}${i.toString(36)}`, n: 0, center: [t.center[0] + dx, t.center[1] + dy] as [number, number], geometry: { ...t.geometry, coordinates: t.geometry.coordinates.map((r) => r.map(([x, y]) => [x + dx, y + dy])) } }));
+      commitRef.current({ ...cur, extras: [...cur.extras, ...added] });
+      setPicked(new Set(added.map((t) => t.id)));
+    };
+    const act = (f: () => void) => {
+      e.preventDefault();
+      f();
+    };
+    const c = e.code;
+    if (mod && c === 'KeyZ' && !e.shiftKey) return act(() => undoRef.current());
+    if (mod && (c === 'KeyY' || (c === 'KeyZ' && e.shiftKey))) return act(() => redoRef.current());
+    if (mod && c === 'KeyA' && tilesRef.current.length) return act(() => setPicked(new Set(tilesRef.current.map((t) => t.id))));
+    if (mod && c === 'KeyC' && sel.length) return act(() => (clip.current = sel));
+    if (mod && c === 'KeyX' && sel.length) return act(() => {
+      clip.current = sel;
+      removeRef.current();
+    });
+    if (mod && c === 'KeyV' && clip.current.length) return act(() => paste(clip.current, mouseLL.current));
+    if (mod && c === 'KeyD' && sel.length) return act(() => paste(sel, null));
+    if ((e.key === 'Delete' || e.key === 'Backspace') && sel.length) return act(() => removeRef.current());
+    if (e.key === 'Escape') return act(() => {
+      setPlacing(false);
+      setPicked(new Set());
+    });
+    if (!mod && c === 'KeyN' && tilesRef.current.length) return act(() => setPlacing(true));
+    if (!sel.length) return;
+    // arrows: move 100 m (Shift = 1 km) · + / − : grow or shrink by 10 %
+    const arrows: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+    if (arrows[e.key]) {
+      const km = e.shiftKey ? 1 : 0.1;
+      const [ax, ay] = arrows[e.key];
+      return act(() =>
+        shiftEdits((t) => {
+          const dx = (ax * km) / (111.32 * Math.cos((t.center[1] * Math.PI) / 180)), dy = (ay * km) / 110.574;
+          return [dx, dy, dx, dy];
+        }, `nudge`),
+      );
+    }
+    if (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_' || c === 'NumpadAdd' || c === 'NumpadSubtract') {
+      const grow = e.key === '+' || e.key === '=' || c === 'NumpadAdd' ? 1 : -1;
+      return act(() =>
+        shiftEdits((t) => {
+          const [w, s0, ee, n] = bboxOf(t.geometry);
+          const gx = ((ee - w) * 0.05) * grow, gy = ((n - s0) * 0.05) * grow;
+          return [-gx, -gy, gx, gy];
+        }, 'scale'),
+      );
+    }
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => kbRef.current(e);
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
@@ -686,9 +776,9 @@ export function MonitorWatch() {
     });
     on(Cesium.ScreenSpaceEventType.MOUSE_MOVE, (e) => {
       const d = tileDrag.current;
-      if (!d) return;
       const p = ll(e.endPosition);
-      if (!p) return;
+      if (p) mouseLL.current = p; // where Ctrl+V pastes
+      if (!d || !p) return;
       if (!d.started) {
         if (Math.hypot(e.endPosition.x - d.px0[0], e.endPosition.y - d.px0[1]) < 6) return;
         d.started = true;
@@ -938,6 +1028,8 @@ export function MonitorWatch() {
             onResetMoves={() => commitTed(NO_TED)}
             canUndo={histN > 0}
             onUndo={undoTed}
+            canRedo={futN > 0}
+            onRedo={redoTed}
             placing={placing}
             onPlace={() => setPlacing((v) => !v)}
             onRemove={removePicked}
@@ -1276,13 +1368,54 @@ function AddPanel({ viewer, onAdd, onDone }: { viewer: Cesium.Viewer | null; onA
 
 // ---------------------------------------------------------------- border tiles
 
+const KEYS: [string, string, string][] = [
+  ['คลิก', 'เลือกช่อง', 'Select a tile'],
+  ['Shift/Ctrl + คลิก', 'เลือกเพิ่ม / เอาออก', 'Add to / remove from selection'],
+  ['Shift + ลาก', 'ลากคลุมเลือกหลายช่อง', 'Box-select'],
+  ['ลากช่อง', 'ย้ายช่องที่เลือก', 'Move selected tiles'],
+  ['ลากจุดมุม', 'ขยาย / ย่อช่อง', 'Resize a tile'],
+  ['ดับเบิลคลิก · N', 'เพิ่มช่องใหม่', 'Add a tile'],
+  ['← ↑ → ↓', 'ขยับ 100 ม. (Shift = 1 กม.)', 'Nudge 100 m (Shift = 1 km)'],
+  ['+ / −', 'ขยาย / ย่อ 10%', 'Grow / shrink 10 %'],
+  ['Ctrl+C · Ctrl+V', 'คัดลอก · วางที่ตำแหน่งเมาส์', 'Copy · paste at the mouse'],
+  ['Ctrl+X · Ctrl+D', 'ตัด · ทำสำเนาข้างกัน', 'Cut · duplicate beside'],
+  ['Ctrl+A · Esc', 'เลือกทั้งหมด · ยกเลิกการเลือก', 'Select all · clear selection'],
+  ['Delete', 'ลบช่องที่เลือก', 'Remove selected'],
+  ['Ctrl+Z · Ctrl+Y', 'ย้อนกลับ · ทำซ้ำ', 'Undo · redo'],
+];
+function ShortcutHelp() {
+  const L = useL();
+  const [open, setOpenS] = useState(() => readPref('ov.tiles.keys', false));
+  const setOpen = (v: boolean) => { setOpenS(v); writePref('ov.tiles.keys', v); };
+  return (
+    <div className="mt-1 rounded border border-line text-[10px]">
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between px-1.5 py-1 text-left text-slate-300 hover:text-white">
+        <span>⌨ {L('คีย์ลัดและเมาส์', 'Keyboard & mouse')}</span>
+        <span className="text-muted">{open ? '▴' : '▾'}</span>
+      </button>
+      {open && (
+        <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 border-t border-line px-1.5 py-1">
+          {KEYS.map(([k, th, en]) => (
+            <div key={k} className="contents">
+              <span className="whitespace-nowrap font-mono text-cyan-200">{k === 'คลิก' ? L('คลิก', 'Click') : k.replace('คลิก', L('คลิก', 'click')).replace('ลากช่อง', L('ลากช่อง', 'Drag tile')).replace('ลากจุดมุม', L('ลากจุดมุม', 'Drag corner')).replace('ดับเบิลคลิก', L('ดับเบิลคลิก', 'Double-click')).replace('ลาก', L('ลาก', 'drag'))}</span>
+              <span className="text-muted">{L(th, en)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BorderPanel({
-  viewer, tiles, picked, setPicked, nb, setNb, shift, setShift, onGenerate, onAdd, moved = 0, onResetMoves, canUndo, onUndo, placing, onPlace, onRemove,
+  viewer, tiles, picked, setPicked, nb, setNb, shift, setShift, onGenerate, onAdd, moved = 0, onResetMoves, canUndo, onUndo, canRedo, onRedo, placing, onPlace, onRemove,
 }: {
   moved?: number;
   onResetMoves?: () => void;
   canUndo?: boolean;
   onUndo?: () => void;
+  canRedo?: boolean;
+  onRedo?: () => void;
   placing?: boolean;
   onPlace?: () => void;
   onRemove?: () => void;
@@ -1352,17 +1485,12 @@ function BorderPanel({
           <p className="mt-2 text-[11px] text-slate-200">
             {L(`แนวชายแดนยาวราว ${Math.round(len)} กม. · ${tiles.length} ช่อง`, `Border ≈ ${Math.round(len)} km · ${tiles.length} tiles`)}
           </p>
-          <ul className="mt-1 space-y-0.5 text-[10px] leading-relaxed text-muted">
-            <li>• {L('คลิกช่อง = เลือกช่องนั้น · Shift/Ctrl + คลิก = เลือกเพิ่มหรือเอาออก', 'Click a tile = select it · Shift/Ctrl + click = add or remove')}</li>
-            <li>• {L('กด Shift ค้างแล้วลากบนแผนที่ = ลากคลุมเลือกหลายช่อง', 'Hold Shift and drag on the map = box-select tiles')}</li>
-            <li>• {L('ลากช่องที่เลือก = ย้ายทุกช่องที่เลือกไปพร้อมกัน', 'Drag a selected tile = move all selected tiles together')}</li>
-            <li>• {L('ลากจุดขาวที่มุมช่องที่เลือก = ขยาย/ย่อช่องนั้น', 'Drag a white corner of a selected tile = resize it')}</li>
-            <li>• {L('ดับเบิลคลิกที่ว่างบนแผนที่ = เพิ่มช่องใหม่ · Delete = ลบช่องที่เลือก · Ctrl+Z = ย้อนกลับ', 'Double-click an empty spot = add a tile · Delete = remove selected · Ctrl+Z = undo')}</li>
-          </ul>
+          <ShortcutHelp />
           <div className="mt-1 flex flex-wrap gap-1">
             <Button variant={placing ? 'active' : 'ghost'} className="!px-2 !py-0.5 text-[10px]" onClick={onPlace}>{placing ? L('คลิกบนแผนที่เพื่อวางช่อง… (Esc ยกเลิก)', 'Click the map to place… (Esc cancels)') : L('+ เพิ่มช่อง', '+ Add tile')}</Button>
             <Button variant="ghost" className="!px-2 !py-0.5 text-[10px]" disabled={!picked.size} onClick={onRemove}>{L(`ลบช่องที่เลือก (${picked.size})`, `Remove selected (${picked.size})`)}</Button>
-            <Button variant="ghost" className="!px-2 !py-0.5 text-[10px]" disabled={!canUndo} onClick={onUndo}>↶ {L('ย้อนกลับ', 'Undo')}</Button>
+            <Button variant="ghost" className="!px-2 !py-0.5 text-[10px]" disabled={!canUndo} onClick={onUndo} title="Ctrl+Z">↶ {L('ย้อนกลับ', 'Undo')}</Button>
+            <Button variant="ghost" className="!px-2 !py-0.5 text-[10px]" disabled={!canRedo} onClick={onRedo} title="Ctrl+Y">↷ {L('ทำซ้ำ', 'Redo')}</Button>
             {moved > 0 && <Button variant="ghost" className="!px-2 !py-0.5 text-[10px]" onClick={onResetMoves}>{L(`คืนทั้งหมด (แก้ไว้ ${moved})`, `Reset all (${moved} edits)`)}</Button>}
           </div>
           <TileShift shift={shift} setShift={setShift} nbTh={meta.th} nbEn={meta.en} />
