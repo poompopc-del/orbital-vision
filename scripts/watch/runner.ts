@@ -200,7 +200,7 @@ class AreaJob {
   }
 
   async search(from: number, to: number): Promise<ImageryItem[]> {
-    const list = await searchArchive({ aoi: this.a.geometry, collections: collectionsFor(this.a.sensor), from: iso(from), to: iso(to), maxCloud: this.qc().maxSceneCloud, limit: 60 });
+    const list = await searchArchive({ aoi: this.a.geometry, collections: collectionsFor(this.a.sensor), from: iso(from), to: iso(to), maxCloud: this.qc().maxSceneCloud, limit: Math.min(250, Math.max(60, Math.ceil((to - from) / day))) });
     const out = list.filter((x) => x.source === 'planetary-computer' && (x.coveragePct ?? 100) >= 60);
     out.forEach((x) => this.items.set(x.id, x));
     return out.sort((p, q) => p.datetime.localeCompare(q.datetime));
