@@ -158,9 +158,20 @@ const bbKm = (b: BB) => {
   const lat = (b[1] + b[3]) / 2;
   return { w: (b[2] - b[0]) * 111.32 * Math.cos((lat * Math.PI) / 180), h: (b[3] - b[1]) * 110.574 };
 };
-function moveTile(t: Tile, [dx, dy]: [number, number]): Tile {
-  return { ...t, center: [t.center[0] + dx, t.center[1] + dy], geometry: { ...t.geometry, coordinates: t.geometry.coordinates.map((r) => r.map(([x, y]) => [x + dx, y + dy])) } };
+/** A tile with its edges moved by d (degrees: west, south, east, north) — moves and stretches the tile. */
+function editTile(t: Tile, d: BB): Tile {
+  const b = bboxOf(t.geometry);
+  const nb: BB = [b[0] + d[0], b[1] + d[1], b[2] + d[2], b[3] + d[3]];
+  return { ...t, center: [(nb[0] + nb[2]) / 2, (nb[1] + nb[3]) / 2], geometry: remap(t.geometry, nb) };
 }
+/** A square tile of `km` × `km` centred on a point. */
+function squareTile(id: string, [x, y]: [number, number], km: number): Tile {
+  const hy = km / 2 / 110.574, hx = km / 2 / (111.32 * Math.cos((y * Math.PI) / 180));
+  return { id, n: 0, center: [x, y], geometry: { type: 'Polygon', coordinates: [[[x - hx, y - hy], [x + hx, y - hy], [x + hx, y + hy], [x - hx, y + hy], [x - hx, y - hy]]] } };
+}
+/** Hand edits on the candidate tiles: per-tile edge offsets, tiles added by hand, tiles removed. */
+interface TileEd { edits: Record<string, BB>; extras: Tile[]; removed: string[] }
+const NO_TED: TileEd = { edits: {}, extras: [], removed: [] };
 
 type Handle = 'c' | 'nw' | 'ne' | 'se' | 'sw' | 'n' | 'e' | 's' | 'w';
 
@@ -191,9 +202,79 @@ export function MonitorWatch() {
     [tileSrc, tileShift],
   );
   // tiles the user dragged on the map: offset in degrees, kept per tile id (on top of the shift slider)
-  const [tileMoves, setTileMoves] = useState<Record<string, [number, number]>>({});
-  useEffect(() => setTileMoves({}), [tileSrc]);
-  const tiles: Tile[] = useMemo(() => baseTiles.map((t) => (tileMoves[t.id] ? moveTile(t, tileMoves[t.id]) : t)), [baseTiles, tileMoves]);
+  const [ted, setTedS] = useState<TileEd>(NO_TED);
+  const tedRef = useRef(ted);
+  tedRef.current = ted;
+  const tedHist = useRef<TileEd[]>([]);
+  const [histN, setHistN] = useState(0);
+  const commitTed = (n: TileEd) => {
+    tedHist.current = [...tedHist.current.slice(-49), tedRef.current];
+    setHistN(tedHist.current.length);
+    tedRef.current = n;
+    setTedS(n);
+  };
+  const undoTed = () => {
+    const prev = tedHist.current.pop();
+    setHistN(tedHist.current.length);
+    if (!prev) return;
+    tedRef.current = prev;
+    setTedS(prev);
+  };
+  useEffect(() => {
+    tedHist.current = [];
+    setHistN(0);
+    tedRef.current = NO_TED;
+    setTedS(NO_TED);
+  }, [tileSrc]);
+  const tiles: Tile[] = useMemo(
+    () => [...baseTiles, ...ted.extras].filter((t) => !ted.removed.includes(t.id)).map((t) => (ted.edits[t.id] ? editTile(t, ted.edits[t.id]) : t)),
+    [baseTiles, ted],
+  );
+  const tileKm = tileSrc?.size ?? 10;
+  const tileKmRef = useRef(tileKm);
+  tileKmRef.current = tileKm;
+  const commitRef = useRef(commitTed);
+  commitRef.current = commitTed;
+  const undoRef = useRef(undoTed);
+  undoRef.current = undoTed;
+  // "add a tile" mode: the next click on the map places a new tile there
+  const [placing, setPlacing] = useState(false);
+  const placingRef = useRef(false);
+  placingRef.current = placing;
+  const addTileAt = (p: [number, number]) => {
+    const t = squareTile(`ADD-${Date.now().toString(36).slice(-5)}`, p, tileKmRef.current);
+    commitRef.current({ ...tedRef.current, extras: [...tedRef.current.extras, t] });
+    setPicked(new Set([t.id]));
+  };
+  const addTileRef = useRef(addTileAt);
+  addTileRef.current = addTileAt;
+  const removePicked = () => {
+    const ids = [...pickedRef.current];
+    if (!ids.length) return;
+    const cur = tedRef.current;
+    const extra = new Set(cur.extras.map((t) => t.id));
+    commitRef.current({ ...cur, extras: cur.extras.filter((t) => !ids.includes(t.id)), removed: [...cur.removed, ...ids.filter((id) => !extra.has(id))] });
+    setPicked(new Set());
+  };
+  const removeRef = useRef(removePicked);
+  removeRef.current = removePicked;
+  // Ctrl+Z = undo one step · Delete = remove the selected tiles · Esc = stop placing
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      if (!tilesRef.current.length && !tedHist.current.length) return;
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        undoRef.current();
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && pickedRef.current.size) {
+        e.preventDefault();
+        removeRef.current();
+      } else if (e.key === 'Escape') setPlacing(false);
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
   const tilesRef = useRef(tiles);
   tilesRef.current = tiles;
   const showBorderTiles = async (nb: Neighbour, size = tileSrc?.size ?? 10) => {
@@ -298,36 +379,55 @@ export function MonitorWatch() {
     viewer?.scene.requestRender();
   };
 
-  // ---- map: AOIs coloured by last result, border line, candidate tiles
+  // ---- map: border lines (own layer, so editing tiles never redraws or hides them)
+  useEffect(() => {
+    if (!viewer || !line.show || (clean && !line.inClean)) return;
+    const ds = new Cesium.CustomDataSource('monitor-lines');
+    const lc = Cesium.Color.fromCssColorString(line.color);
+    const lineMat = () => (line.dashed ? new Cesium.PolylineDashMaterialProperty({ color: lc, dashLength: 12 }) : new Cesium.PolylineOutlineMaterialProperty({ color: lc, outlineColor: Cesium.Color.BLACK.withAlpha(0.55), outlineWidth: 1 }));
+    [...extentLines, ...borderLinesState].forEach((l) =>
+      ds.entities.add({ polyline: { positions: l.map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: line.width + (line.dashed ? 0 : 2), material: lineMat(), clampToGround: false } }),
+    );
+    void viewer.dataSources.add(ds);
+    viewer.scene.requestRender();
+    return () => {
+      if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
+    };
+  }, [viewer, borderLinesState, extentLines, clean, line]);
+
+  // ---- map: AOIs coloured by last result, candidate tiles
   useEffect(() => {
     if (!viewer) return;
     const ds = new Cesium.CustomDataSource('monitor');
-    const lc = Cesium.Color.fromCssColorString(line.color);
-    const lineMat = () => (line.dashed ? new Cesium.PolylineDashMaterialProperty({ color: lc, dashLength: 12 }) : new Cesium.PolylineOutlineMaterialProperty({ color: lc, outlineColor: Cesium.Color.BLACK.withAlpha(0.55), outlineWidth: 1 }));
-    const boundary = () =>
-      (line.show ? [...extentLines, ...borderLinesState] : []).forEach((l) =>
-        ds.entities.add({ polyline: { positions: l.map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: line.width + (line.dashed ? 0 : 2), material: lineMat(), clampToGround: false } }),
-      );
+    // the old layer stays a moment so tiles do not blink while the new shapes are built
+    const drop = () => setTimeout(() => {
+      if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
+    }, 400);
     if (clean) {
-      if (line.inClean) boundary();
       // only a thin outline of the selected area, nothing filled
       const a = aois.find((x) => x.id === selId);
       if (a && outline && a.id !== edit?.id)
         ds.entities.add({ polyline: { positions: a.geometry.coordinates[0].map(([x, y]) => Cesium.Cartesian3.fromDegrees(x, y)), width: 1.5, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.WHITE.withAlpha(0.9), dashLength: 12 }) } });
       void viewer.dataSources.add(ds);
       viewer.scene.requestRender();
-      return () => {
-        if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
-      };
+      return drop;
     }
-    boundary();
+    const amber = Cesium.Color.fromCssColorString('#d5aa69');
     tiles.forEach((tl) => {
       const on = picked.has(tl.id);
       ds.entities.add({
         id: `tile:${tl.id}`,
-        polygon: { hierarchy: Cesium.Cartesian3.fromDegreesArray(tl.geometry.coordinates[0].flat()), material: Cesium.Color.fromCssColorString(on ? '#d5aa69' : '#ffffff').withAlpha(on ? 0.35 : 0.08), outline: true, outlineColor: Cesium.Color.fromCssColorString(on ? '#d5aa69' : '#ffffff'), height: 0 },
+        polygon: { hierarchy: Cesium.Cartesian3.fromDegreesArray(tl.geometry.coordinates[0].flat()), material: (on ? amber : Cesium.Color.WHITE).withAlpha(on ? 0.35 : 0.08), outline: true, outlineColor: on ? amber : Cesium.Color.WHITE, height: 0 },
       });
     });
+    // corner handles on selected tiles: drag one to resize that tile
+    if (picked.size && picked.size <= 30)
+      tiles.filter((t) => picked.has(t.id)).forEach((t) => {
+        const [w, s0, e, n] = bboxOf(t.geometry);
+        (Object.entries({ nw: [w, n], ne: [e, n], se: [e, s0], sw: [w, s0] }) as [string, [number, number]][]).forEach(([k, [x, y]]) =>
+          ds.entities.add({ id: `tc:${t.id}:${k}`, position: Cesium.Cartesian3.fromDegrees(x, y), point: { pixelSize: 11, color: Cesium.Color.WHITE, outlineColor: amber, outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY } }),
+        );
+      });
     aois.forEach((a, i) => {
       if (a.id === edit?.id) return;
       const st = statusOf(lastRunOf(a.id, runs));
@@ -346,10 +446,9 @@ export function MonitorWatch() {
       });
     });
     void viewer.dataSources.add(ds);
-    return () => {
-      if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
-    };
-  }, [viewer, aois, runs, selId, tiles, picked, borderLinesState, extentLines, edit?.id, clean, outline, line]);
+    viewer.scene.requestRender();
+    return drop;
+  }, [viewer, aois, runs, selId, tiles, picked, edit?.id, clean, outline]);
 
   // ---- the base map's own borders/place names (Esri reference layer, added asynchronously)
   useEffect(() => {
@@ -520,7 +619,7 @@ export function MonitorWatch() {
   // click: toggle a candidate tile or select an AOI
   // plain click = only that tile (click it again to clear), Shift/Ctrl + click = add or remove
   // Shift + drag on the map = select every tile inside the box; drag a tile = move the selected tiles
-  const tileDrag = useRef<{ mode: 'move' | 'box'; p0: [number, number]; px0: [number, number]; ids: string[]; cur: [number, number]; started: boolean; add: boolean } | null>(null);
+  const tileDrag = useRef<{ mode: 'move' | 'box' | 'resize'; p0: [number, number]; px0: [number, number]; ids: string[]; cur: [number, number]; started: boolean; add: boolean; k?: string; b0?: BB } | null>(null);
   const justDragged = useRef(false);
   useEffect(() => {
     if (!viewer) return;
@@ -543,6 +642,12 @@ export function MonitorWatch() {
       if (editRef.current) return;
       if (justDragged.current) { justDragged.current = false; return; }
       const id: string | undefined = viewer.scene.pick(e.position)?.id?.id;
+      if (placingRef.current) {
+        const p = ll(e.position);
+        if (p) addTileRef.current(p);
+        setPlacing(false);
+        return;
+      }
       if (!id) return;
       if (id.startsWith('tile:')) {
         const k = id.slice(5);
@@ -560,8 +665,18 @@ export function MonitorWatch() {
       if (editRef.current || !tilesRef.current.length) return;
       const p0 = ll(e.position);
       if (!p0) return;
-      const k = tileAt(e.position);
       const px0: [number, number] = [e.position.x, e.position.y];
+      // a corner handle of a selected tile: resize that tile
+      const corner = (viewer.scene.drillPick(e.position, 6) as any[]).map((x) => x?.id?.id as string | undefined).find((x) => x?.startsWith('tc:'));
+      if (corner) {
+        const [, id, ck] = corner.split(':');
+        const t = tilesRef.current.find((x) => x.id === id);
+        if (!t) return;
+        tileDrag.current = { mode: 'resize', p0, px0, ids: [id], cur: p0, started: false, add: false, k: ck, b0: bboxOf(t.geometry) };
+        viewer.scene.screenSpaceCameraController.enableInputs = false;
+        return;
+      }
+      const k = tileAt(e.position);
       if (k) {
         const sel = pickedRef.current.has(k) ? [...pickedRef.current] : [k];
         tileDrag.current = { mode: 'move', p0, px0, ids: sel, cur: p0, started: false, add: multi };
@@ -590,16 +705,19 @@ export function MonitorWatch() {
       if (!d.started) return;
       justDragged.current = true;
       setTimeout(() => (justDragged.current = false), 50);
+      const cur = tedRef.current;
+      const add = (id: string, dd: BB) => {
+        const o = cur.edits[id] ?? [0, 0, 0, 0];
+        return [o[0] + dd[0], o[1] + dd[1], o[2] + dd[2], o[3] + dd[3]] as BB;
+      };
       if (d.mode === 'move') {
         const dx = d.cur[0] - d.p0[0], dy = d.cur[1] - d.p0[1];
-        setTileMoves((m) => {
-          const n = { ...m };
-          d.ids.forEach((id) => {
-            const o = n[id] ?? [0, 0];
-            n[id] = [o[0] + dx, o[1] + dy];
-          });
-          return n;
-        });
+        const edits = { ...cur.edits };
+        d.ids.forEach((id) => (edits[id] = add(id, [dx, dy, dx, dy])));
+        commitRef.current({ ...cur, edits });
+      } else if (d.mode === 'resize') {
+        const nb = resized(d), b0 = d.b0!;
+        commitRef.current({ ...cur, edits: { ...cur.edits, [d.ids[0]]: add(d.ids[0], [nb[0] - b0[0], nb[1] - b0[1], nb[2] - b0[2], nb[3] - b0[3]]) } });
       } else {
         const [w, e2] = [Math.min(d.p0[0], d.cur[0]), Math.max(d.p0[0], d.cur[0])];
         const [s2, n2] = [Math.min(d.p0[1], d.cur[1]), Math.max(d.p0[1], d.cur[1])];
@@ -608,6 +726,23 @@ export function MonitorWatch() {
       }
       viewer.scene.requestRender();
     });
+    const resized = (d: NonNullable<typeof tileDrag.current>): BB => {
+      const dx = d.cur[0] - d.p0[0], dy = d.cur[1] - d.p0[1];
+      let [w, s0, ee, n] = d.b0!;
+      const MIN = 0.005; // ~500 m
+      if (d.k!.includes('w')) w = Math.min(w + dx, ee - MIN);
+      if (d.k!.includes('e')) ee = Math.max(ee + dx, w + MIN);
+      if (d.k!.includes('s')) s0 = Math.min(s0 + dy, n - MIN);
+      if (d.k!.includes('n')) n = Math.max(n + dy, s0 + MIN);
+      return [w, s0, ee, n];
+    };
+    // double-click on an empty spot of the map: add a tile there
+    on(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK, (e) => {
+      if (editRef.current || !tilesRef.current.length) return;
+      if (viewer.scene.pick(e.position)?.id) return;
+      const p = ll(e.position);
+      if (p) addTileRef.current(p);
+    });
     // live preview while dragging (outline of the moved tiles / the selection box)
     const ds = new Cesium.CustomDataSource('tile-drag');
     const amber = Cesium.Color.fromCssColorString('#d5aa69');
@@ -615,7 +750,11 @@ export function MonitorWatch() {
       polyline: {
         positions: new Cesium.CallbackProperty(() => {
           const d = tileDrag.current;
-          if (!d?.started || d.mode !== 'box') return [];
+          if (!d?.started || d.mode === 'move') return [];
+          if (d.mode === 'resize') {
+            const [w, s0, ee, n] = resized(d);
+            return Cesium.Cartesian3.fromDegreesArray([w, s0, ee, s0, ee, n, w, n, w, s0]);
+          }
           const [x0, y0] = d.p0, [x1, y1] = d.cur;
           return Cesium.Cartesian3.fromDegreesArray([x0, y0, x1, y0, x1, y1, x0, y1, x0, y0]);
         }, false) as any,
@@ -789,8 +928,13 @@ export function MonitorWatch() {
             shift={tileShift}
             setShift={setTileShift}
             onGenerate={showBorderTiles}
-            moved={Object.keys(tileMoves).length}
-            onResetMoves={() => setTileMoves({})}
+            moved={Object.keys(ted.edits).length + ted.extras.length + ted.removed.length}
+            onResetMoves={() => commitTed(NO_TED)}
+            canUndo={histN > 0}
+            onUndo={undoTed}
+            placing={placing}
+            onPlace={() => setPlacing((v) => !v)}
+            onRemove={removePicked}
             onAdd={(list, region, purpose, freq, prefix, sat) => {
               const now = Date.now();
               const added = list.map((t, i) => ({ ...aoiFromPolygon(`${prefix} ${t.id}`, t.geometry, region, purpose, freq, sat), id: `aoi_${now.toString(36)}_${i}` }));
@@ -1126,10 +1270,15 @@ function AddPanel({ viewer, onAdd, onDone }: { viewer: Cesium.Viewer | null; onA
 // ---------------------------------------------------------------- border tiles
 
 function BorderPanel({
-  viewer, tiles, picked, setPicked, nb, setNb, shift, setShift, onGenerate, onAdd, moved = 0, onResetMoves,
+  viewer, tiles, picked, setPicked, nb, setNb, shift, setShift, onGenerate, onAdd, moved = 0, onResetMoves, canUndo, onUndo, placing, onPlace, onRemove,
 }: {
   moved?: number;
   onResetMoves?: () => void;
+  canUndo?: boolean;
+  onUndo?: () => void;
+  placing?: boolean;
+  onPlace?: () => void;
+  onRemove?: () => void;
   viewer: Cesium.Viewer | null;
   tiles: Tile[];
   picked: Set<string>;
@@ -1200,13 +1349,15 @@ function BorderPanel({
             <li>• {L('คลิกช่อง = เลือกช่องนั้น · Shift/Ctrl + คลิก = เลือกเพิ่มหรือเอาออก', 'Click a tile = select it · Shift/Ctrl + click = add or remove')}</li>
             <li>• {L('กด Shift ค้างแล้วลากบนแผนที่ = ลากคลุมเลือกหลายช่อง', 'Hold Shift and drag on the map = box-select tiles')}</li>
             <li>• {L('ลากช่องที่เลือก = ย้ายทุกช่องที่เลือกไปพร้อมกัน', 'Drag a selected tile = move all selected tiles together')}</li>
+            <li>• {L('ลากจุดขาวที่มุมช่องที่เลือก = ขยาย/ย่อช่องนั้น', 'Drag a white corner of a selected tile = resize it')}</li>
+            <li>• {L('ดับเบิลคลิกที่ว่างบนแผนที่ = เพิ่มช่องใหม่ · Delete = ลบช่องที่เลือก · Ctrl+Z = ย้อนกลับ', 'Double-click an empty spot = add a tile · Delete = remove selected · Ctrl+Z = undo')}</li>
           </ul>
-          {moved > 0 && (
-            <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-cyan-200">
-              <span>{L(`ย้ายเองแล้ว ${moved} ช่อง`, `${moved} tile(s) moved by hand`)}</span>
-              <Button variant="ghost" className="!px-2 !py-0.5 text-[10px]" onClick={onResetMoves}>{L('คืนตำแหน่งเดิม', 'Reset positions')}</Button>
-            </div>
-          )}
+          <div className="mt-1 flex flex-wrap gap-1">
+            <Button variant={placing ? 'active' : 'ghost'} className="!px-2 !py-0.5 text-[10px]" onClick={onPlace}>{placing ? L('คลิกบนแผนที่เพื่อวางช่อง… (Esc ยกเลิก)', 'Click the map to place… (Esc cancels)') : L('+ เพิ่มช่อง', '+ Add tile')}</Button>
+            <Button variant="ghost" className="!px-2 !py-0.5 text-[10px]" disabled={!picked.size} onClick={onRemove}>{L(`ลบช่องที่เลือก (${picked.size})`, `Remove selected (${picked.size})`)}</Button>
+            <Button variant="ghost" className="!px-2 !py-0.5 text-[10px]" disabled={!canUndo} onClick={onUndo}>↶ {L('ย้อนกลับ', 'Undo')}</Button>
+            {moved > 0 && <Button variant="ghost" className="!px-2 !py-0.5 text-[10px]" onClick={onResetMoves}>{L(`คืนทั้งหมด (แก้ไว้ ${moved})`, `Reset all (${moved} edits)`)}</Button>}
+          </div>
           <TileShift shift={shift} setShift={setShift} nbTh={meta.th} nbEn={meta.en} />
           <div className="mt-1 flex flex-wrap gap-1">
             <Button onClick={() => setPicked(new Set(tiles.map((t) => t.id)))}>{L('เลือกทั้งหมด', 'Select all')}</Button>
