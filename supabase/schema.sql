@@ -130,3 +130,10 @@ create policy "read own audit" on public.audit_logs for select using (user_id = 
 
 -- Make yourself admin after first sign-in:
 -- update public.profiles set role = 'admin' where display_name = 'you@example.com';
+
+-- explicit grants (needed when "Automatically expose new tables" is off; harmless otherwise).
+-- Row Level Security above still limits every signed-in user to their own rows.
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant all on all tables in schema public to service_role;
+grant usage, select on all sequences in schema public to authenticated, service_role;

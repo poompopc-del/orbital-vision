@@ -108,3 +108,10 @@ create policy "mark own alerts read" on public.watch_alerts for update using (us
 -- Public read so images show inside alert emails; paths are random ids, not listable by visitors.
 insert into storage.buckets (id, name, public) values ('watch', 'watch', true)
   on conflict (id) do update set public = true;
+
+-- explicit grants (needed when "Automatically expose new tables" is off; harmless otherwise).
+-- Row Level Security above still limits every signed-in user to their own rows.
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant all on all tables in schema public to service_role;
+grant usage, select on all sequences in schema public to authenticated, service_role;
