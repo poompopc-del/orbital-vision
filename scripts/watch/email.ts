@@ -8,6 +8,8 @@ export interface HorizonResult {
   images: Record<string, string>;
   /** the images as data URLs (kept in memory for this run, so the email can carry them inline) */
   raw?: Record<string, string>;
+  /** database id of this comparison (for links back to the website) */
+  id?: string;
 }
 
 const H_TH: Record<HorizonResult['horizon'], string> = { latest: 'ล่าสุด (เทียบภาพที่ใช้ได้ก่อนหน้า)', week: '1 สัปดาห์', month: '1 เดือน', year: '1 ปี' };
@@ -65,6 +67,8 @@ export function alertEmail(o: AlertItem): string {
 
 function section(o: AlertItem): string {
   const latest = primary(o);
+  const show = (h: HorizonResult['horizon']) => `${o.areaUrl}${o.areaUrl.includes('?') ? '&' : '?'}${latest.id ? `run=${latest.id}&` : ''}hz=${h}&view=swipe`;
+  const at = (lat: number, lon: number) => `${o.areaUrl}${o.areaUrl.includes('?') ? '&' : '?'}${latest.id ? `run=${latest.id}&` : ''}pt=${lat.toFixed(5)},${lon.toFixed(5)}`;
   const r = latest.run;
   const lines = narrative(r, 'th');
   const purpose = PURPOSES.find((p) => p.id === o.purpose)?.labelTh ?? o.purpose;
@@ -72,7 +76,7 @@ function section(o: AlertItem): string {
   const img = (src: string | undefined, cap: string) =>
     src ? `<td style="padding:4px;vertical-align:top;width:33%"><img src="${src}" alt="${esc(cap)}" style="width:100%;border:1px solid #343b3f;display:block"><div style="font-size:12px;color:#939d9a;margin-top:4px">${esc(cap)}</div></td>` : '';
   const spots = (r.hotspots ?? []).slice(0, 8).map((h) =>
-    `<tr><td style="padding:4px 8px">${h.n}</td><td style="padding:4px 8px;font-family:monospace">${h.lat.toFixed(5)}, ${h.lon.toFixed(5)}</td><td style="padding:4px 8px;text-align:right">${hotspotKm2(h).toFixed(3)} ตร.กม. (${rai(hotspotKm2(h))} ไร่)</td><td style="padding:4px 8px"><a href="https://www.google.com/maps?q=${h.lat},${h.lon}" style="color:#91a58d">แผนที่</a></td></tr>`).join('');
+    `<tr><td style="padding:4px 8px">${h.n}</td><td style="padding:4px 8px;font-family:monospace">${h.lat.toFixed(5)}, ${h.lon.toFixed(5)}</td><td style="padding:4px 8px;text-align:right">${hotspotKm2(h).toFixed(3)} ตร.กม. (${rai(hotspotKm2(h))} ไร่)</td><td style="padding:4px 8px;white-space:nowrap"><a href="${at(h.lat, h.lon)}" style="color:#91a58d">ดูในเว็บ</a> · <a href="https://www.google.com/maps?q=${h.lat},${h.lon}" style="color:#939d9a">Google Maps</a></td></tr>`).join('');
   const horizons = o.results.map((x) => {
     const rr = x.run;
     const ok = rr.status === 'ok';
@@ -80,7 +84,8 @@ function section(o: AlertItem): string {
       <td style="padding:4px 8px">${H_TH[x.horizon]}</td>
       <td style="padding:4px 8px;font-family:monospace">${d10(rr.A?.datetime)} → ${d10(rr.B?.datetime)}</td>
       <td style="padding:4px 8px;color:${ok ? LV_COLOR[rr.level ?? 'none'] : '#939d9a'}">${ok ? LV_TH[rr.level ?? 'none'] : 'ข้อมูลไม่พอ'}</td>
-      <td style="padding:4px 8px;text-align:right">${ok && rr.stats ? `${rr.stats.interestKm2.toFixed(3)} ตร.กม.` : '—'}</td></tr>`;
+      <td style="padding:4px 8px;text-align:right">${ok && rr.stats ? `${rr.stats.interestKm2.toFixed(3)} ตร.กม.` : '—'}</td>
+      <td style="padding:4px 8px;text-align:right">${ok ? `<a href="${show(x.horizon)}" style="display:inline-block;padding:3px 10px;text-decoration:none;font-weight:600;${rr.level === 'significant' ? 'background:#d0705f;color:#141719' : 'border:1px solid #91a58d;color:#91a58d'}">แสดง</a>` : ''}</td></tr>`;
   }).join('');
   return `<h1 style="font-size:20px;margin:6px 0 2px;color:#fff">${esc(o.areaName)}</h1>
   <div style="font-size:13px;color:#939d9a">${esc(region)} · ${esc(purpose)}</div>
@@ -94,5 +99,7 @@ function section(o: AlertItem): string {
   ${spots ? `<h2 style="font-size:15px;margin:18px 0 6px">จุดที่ตรวจพบ</h2><table style="width:100%;border-collapse:collapse;font-size:13px;background:#1b2023">${spots}</table>` : ''}
   <h2 style="font-size:15px;margin:18px 0 6px">เทียบย้อนหลัง</h2>
   <table style="width:100%;border-collapse:collapse;font-size:13px;background:#1b2023">${horizons}</table>
-  <p style="margin:18px 0"><a href="${o.areaUrl}" style="display:inline-block;background:#91a58d;color:#141719;padding:10px 16px;text-decoration:none;font-weight:600">เปิดในเว็บ / พิมพ์รายงาน PDF</a></p>`;
+  <p style="margin:18px 0"><a href="${show(latest.horizon)}" style="display:inline-block;background:#91a58d;color:#141719;padding:10px 16px;text-decoration:none;font-weight:600">ดูภาพก่อน–หลังบนแผนที่</a>
+  <a href="${o.areaUrl}" style="display:inline-block;margin-left:8px;border:1px solid #91a58d;color:#91a58d;padding:9px 14px;text-decoration:none">เปิดพื้นที่ / พิมพ์รายงาน PDF</a></p>
+  <p style="font-size:12px;color:#939d9a;margin-top:-8px">“แสดง” จะเปิดเว็บ ซูมไปที่พื้นที่ และเปิดการเลื่อนเทียบภาพก่อน/หลัง (กด “A ก่อน” / “B หลัง” เพื่อสลับดูทีละภาพ)</p>`;
 }

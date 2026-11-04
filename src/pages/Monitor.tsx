@@ -183,7 +183,20 @@ export function MonitorWatch() {
   // boxes still to be checked by the user after "add along border" (one at a time)
   const [adjustQ, setAdjustQ] = useState<string[]>([]);
   const [params] = useSearchParams();
+  // link from an alert email: ?area=<id>&run=<id>&hz=week&view=swipe&bbox=w,s,e,n&pt=lat,lon
   const deepArea = params.get('area');
+  const deep = useMemo(() => {
+    const num = (k: string) => (params.get(k) ?? '').split(',').map(Number).filter((x) => Number.isFinite(x));
+    const hz = params.get('hz');
+    return {
+      run: params.get('run'),
+      hz: (hz === 'week' || hz === 'month' || hz === 'year' ? hz : 'latest') as 'latest' | 'week' | 'month' | 'year',
+      swipe: params.get('view') === 'swipe',
+      bbox: num('bbox').length === 4 ? (num('bbox') as [number, number, number, number]) : null,
+      pt: num('pt').length === 2 ? (num('pt') as [number, number]) : null,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null);
   const [selId, setSelId] = useState<string | null>(null);
   const [panel, setPanel] = useState<'list' | 'add' | 'border' | 'import'>('list');
@@ -454,14 +467,26 @@ export function MonitorWatch() {
   }, [viewer]);
   // link from an alert email: open that area
   const deepDone = useRef(false);
+  const deepFlown = useRef(false);
   useEffect(() => {
-    if (deepDone.current || !deepArea || !viewer) return;
+    if (!viewer || deepDone.current) return;
+    // zoom first (works even before the list has loaded, or for an area this account does not have)
+    if (!deepFlown.current && (deep.pt || deep.bbox)) {
+      deepFlown.current = true;
+      // the extent bar sets its own view when the page opens: fly after it
+      setTimeout(() => {
+        if (viewer.isDestroyed()) return;
+        if (deep.pt) viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(deep.pt[1], deep.pt[0], 2500), duration: 1.2 });
+        else if (deep.bbox) viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(...deep.bbox), duration: 1.2 });
+      }, 1200);
+    }
+    if (!deepArea) return;
     const a = aois.find((x) => x.id === deepArea);
     if (!a) return;
     deepDone.current = true;
     setPanel('list');
     setSelId(a.id);
-    flyToPolygon(viewer, a.geometry);
+    if (!deep.pt && !deep.bbox) setTimeout(() => !viewer.isDestroyed() && flyToPolygon(viewer, a.geometry), 1200);
   }, [deepArea, aois, viewer]);
   const nudge = (b: BB) => {
     live.current = b;
@@ -1082,7 +1107,7 @@ export function MonitorWatch() {
             onSet={nudge}
           />
         )}
-        {sel && panel === 'list' && !edit && <AoiDetail aoi={sel} baseline={baseline} onRun={(b) => runList([sel], b)} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
+        {sel && panel === 'list' && !edit && <AoiDetail key={sel.id} init={sel.id === deepArea ? deep : undefined} aoi={sel} baseline={baseline} onRun={(b) => runList([sel], b)} onEdit={() => startEdit(sel)} busy={!!busy} lang={lang} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
         {sel && panel === 'list' && !edit && <ComparePanel key={sel.id} aoi={sel} onRun={(r) => addRun(r)} onSwipe={toggleSwipe} swipeOn={!!swipe} />}
       </aside>
       <div ref={mapRef} className="relative min-h-[360px] flex-1">
@@ -1665,7 +1690,7 @@ function EditPanel({ b, orig, onSave, onCancel, onSet }: { b: BB; orig: BB; onSa
   );
 }
 
-function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn }: { aoi: MonitorAoi; baseline: Baseline; onRun: (b?: Baseline) => void; onEdit: () => void; busy: boolean; lang: 'th' | 'en'; onSwipe: (A: ImageryItem, B: ImageryItem) => void; swipeOn: boolean }) {
+function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn, init }: { init?: { run: string | null; hz: 'latest' | 'week' | 'month' | 'year'; swipe: boolean }; aoi: MonitorAoi; baseline: Baseline; onRun: (b?: Baseline) => void; onEdit: () => void; busy: boolean; lang: 'th' | 'en'; onSwipe: (A: ImageryItem, B: ImageryItem) => void; swipeOn: boolean }) {
   const L = useL();
   const { unit } = useQc();
   const [swErr, setSwErr] = useState('');
@@ -1678,11 +1703,19 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn 
   };
   const { runs, setAois, removeRun, cloud } = useMonitor();
   const mine = runs.filter((r) => r.aoiId === aoi.id);
-  const [runId, setRunId] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(init?.run ?? null);
   // server results: the same new scene compared over several time spans
-  const [hz, setHz] = useState<'latest' | 'week' | 'month' | 'year'>('latest');
+  const [hz, setHz] = useState<'latest' | 'week' | 'month' | 'year'>(init?.hz ?? 'latest');
   const baseRun = mine.find((r) => r.id === runId) ?? mine[0];
   const run = hz !== 'latest' && baseRun?.horizons?.[hz] ? baseRun.horizons[hz]! : baseRun;
+  // opened from "show" in an alert email: start the before/after swipe on the map once the result is here
+  const autoSwiped = useRef(false);
+  useEffect(() => {
+    if (!init?.swipe || autoSwiped.current || !run || run.status !== 'ok' || (init.run && baseRun?.id !== init.run)) return;
+    autoSwiped.current = true;
+    void swipeRun(run);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run?.id]);
   const cl = aoi as MonitorAoi & { notifyLevel?: 'significant' | 'minor' | 'any'; notifyEmail?: string | null; lastCheckedAt?: string | null; lastSceneAt?: string | null };
   const [img, setImg] = useState<{ before: string | null; after: string | null; change: string | null }>({ before: null, after: null, change: null });
   const [showChange, setShowChange] = useState(true);

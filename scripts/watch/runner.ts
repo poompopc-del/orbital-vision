@@ -321,7 +321,10 @@ class AreaJob {
       return;
     }
     const to = this.a.notify_email || (await this.store.emailOf(this.a.user_id));
-    const areaUrl = APP_URL ? `${APP_URL}/imagery?tab=watch&area=${this.a.id}` : '#';
+    const ring = this.a.geometry.coordinates[0];
+    const xs = ring.map((c) => c[0]), ys = ring.map((c) => c[1]);
+    const bbox = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)].map((v) => v.toFixed(5)).join(',');
+    const areaUrl = APP_URL ? `${APP_URL}/imagery?tab=watch&area=${this.a.id}&bbox=${bbox}` : '#';
     // emails go out once at the end of the run: one message per recipient listing every area that changed
     PENDING.push({
       to, store: this.store,
