@@ -157,6 +157,7 @@ function along(pts: [number, number][], cum: number[], d: number, win: number) {
  */
 export function tilesAlong(lines: [number, number][][], sizeKm: number, prefix: string, opts: TileOpts = {}): Tile[] {
   const out: Tile[] = [];
+  const allPts: [number, number][] = [];
   const shift = Math.max(-1, Math.min(1, opts.shift ?? 0)) * 0.85;
   const half = sizeKm / 2;
   // a densified point counts as covered only with a margin of one step, so the line between
@@ -176,6 +177,7 @@ export function tilesAlong(lines: [number, number][][], sizeKm: number, prefix: 
       const n = Math.max(1, Math.ceil(dist(a, b) / step));
       for (let k = 1; k <= n; k++) pts.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n]);
     }
+    pts.forEach((q) => allPts.push(q));
     const cum = [0];
     for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
     for (let i = 0; i < pts.length; i++) {
@@ -183,9 +185,11 @@ export function tilesAlong(lines: [number, number][][], sizeKm: number, prefix: 
       let covered = false;
       for (let k = out.length - 1; k >= 0; k--) if (inTile(out[k], q)) { covered = true; break; } // newest first: almost always the hit
       if (covered) continue;
-      // centre ahead of the uncovered point so the tile covers as much of the line as possible
+      // try several centres ahead of the uncovered point and keep the one that covers the longest
+      // unbroken stretch of the line from here (fewer, less overlapping tiles on a winding border)
       let placed: Tile | null = null;
-      for (const ahead of [0.85 * half, 0.5 * half, 0]) {
+      let best = -1;
+      for (const ahead of [1.4, 1.2, 1.0, 0.85, 0.7, 0.5, 0.25, 0].map((f) => f * half)) {
         const { p, a, b } = along(pts, cum, cum[i] + ahead, half);
         let c: [number, number] = p;
         if (shift) {
@@ -204,13 +208,39 @@ export function tilesAlong(lines: [number, number][][], sizeKm: number, prefix: 
           c = [p[0] + (nx * shift * half) / kx, p[1] + (ny * shift * half) / KM_LAT];
         }
         const t = square(c, sizeKm, prefix, out.length + 1);
-        if (inTile(t, q)) { placed = t; break; }
+        if (!inTile(t, q)) continue;
+        let run = 1;
+        while (i + run < pts.length && inTile(t, pts[i + run])) run++;
+        if (run > best) { best = run; placed = t; }
       }
       // last resort: centre on the uncovered point itself (always covers it)
       out.push(placed ?? square(q, sizeKm, prefix, out.length + 1));
     }
   }
-  return out;
+  return prune(out, allPts, inTile, sizeKm, prefix);
+}
+
+/** Drop tiles whose part of the line is fully covered by other tiles (fewest-points first), then renumber. */
+function prune(tiles: Tile[], pts: [number, number][], inTile: (t: Tile, q: [number, number]) => boolean, sizeKm: number, prefix: string): Tile[] {
+  const cover = tiles.map((t) => {
+    const r = t.geometry.coordinates[0];
+    const idx: number[] = [];
+    pts.forEach((q, i) => {
+      if (q[0] >= r[0][0] && q[0] <= r[1][0] && q[1] >= r[0][1] && q[1] <= r[2][1] && inTile(t, q)) idx.push(i);
+    });
+    return idx;
+  });
+  const count = new Int32Array(pts.length);
+  cover.forEach((idx) => idx.forEach((i) => count[i]++));
+  const keep = tiles.map(() => true);
+  const order = tiles.map((_, i) => i).sort((a, b) => cover[a].length - cover[b].length);
+  for (const k of order) {
+    if (cover[k].every((i) => count[i] >= 2)) {
+      keep[k] = false;
+      cover[k].forEach((i) => count[i]--);
+    }
+  }
+  return tiles.filter((_, i) => keep[i]).map((t, i) => square(t.center, sizeKm, prefix, i + 1));
 }
 
 export function square(c: [number, number], sizeKm: number, prefix: string, n: number): Tile {
