@@ -264,7 +264,7 @@ table{border-collapse:collapse;width:100%}
 .legend .muted{opacity:.75}
 .lim{margin:0;padding-left:5mm;font-size:9pt;line-height:1.45}
 .bar-top{position:sticky;top:0;z-index:5;background:#1b2023;color:#fff;padding:8px 14px;font:14px 'Sarabun',sans-serif;display:flex;gap:12px;align-items:center}
-.bar-top button{background:#91a58d;border:0;border-radius:2px;padding:6px 14px;font-weight:700;cursor:pointer}
+.bar-top button{background:#2fc4b2;border:0;border-radius:2px;padding:6px 14px;font-weight:700;cursor:pointer}
 </style></head><body>
 <div class="bar-top"><button onclick="window.print()">${L('บันทึกเป็น PDF / พิมพ์', 'Save as PDF / Print')}</button><span>${L('เลือกปลายทาง “บันทึกเป็น PDF” · ขนาดหน้า 16:9 · เปิด “กราฟิกพื้นหลัง”', 'Choose “Save as PDF” · 16:9 pages · enable “Background graphics”')}</span></div>
 ${pages.join('\n')}

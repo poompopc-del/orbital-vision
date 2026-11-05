@@ -7,11 +7,15 @@ const ls = (o: any = {}) => ({ ...s2(o), id: 'ls', collection: 'landsat-c2-l2', 
 const s1 = (o: any = {}) => ({ id: 's1', collection: 'sentinel-1-rtc', gsd: '10 m (RTC γ⁰)', cloudCover: null, coveragePct: 100, datetime: '2026-10-01T11:00:00Z', raw: { properties: {} }, ...o }) as any;
 const clear = { cloudPct: 2, shadowPct: 1, noDataPct: 0 };
 
-test('default thresholds: scene cloud 20%', () => assert.equal(QC_DEFAULT.maxSceneCloud, 20));
+// v2 of the QC settings: whole-scene cloud is only a skip threshold (90%); the measured AOI cloud decides
+test('default thresholds: scene cloud skip at 90%', () => assert.equal(QC_DEFAULT.maxSceneCloud, 90));
 
 test('scene cloud above the limit fails, at the limit passes', () => {
-  assert.equal(checkScene(s2({ cloudCover: 21 }), clear, QC_DEFAULT).ok, false);
-  assert.equal(checkScene(s2({ cloudCover: 20 }), clear, QC_DEFAULT).ok, true);
+  // scene cloud only screens scenes whose AOI cloud is not measured yet (aoi = null)
+  const q = { ...QC_DEFAULT, maxSceneCloud: 20 };
+  assert.equal(checkScene(s2({ cloudCover: 21 }), null, q).ok, false);
+  assert.equal(checkScene(s2({ cloudCover: 21 }), null, q).pending, false);
+  assert.equal(checkScene(s2({ cloudCover: 20 }), null, q).pending, true);
 });
 
 test('AOI cloud is judged separately from scene cloud', () => {

@@ -74,6 +74,7 @@ export async function fetchRaster(
   grid: Grid,
   signal?: AbortSignal,
   onProgress?: (done: number, total: number) => void,
+  opts: { noNodata?: boolean } = {},
 ): Promise<Raster> {
   const cv = document.createElement('canvas');
   cv.width = grid.width;
@@ -87,7 +88,7 @@ export async function fetchRaster(
   for (let j = 0; j < grid.ny; j++)
     for (let i = 0; i < grid.nx; i++) {
       jobs.push(
-        loadImage(greyTileUrl(item, expression, range, grid.z, grid.x0 + i, grid.y0 + j), signal).then((img) => {
+        loadImage(greyTileUrl(item, expression, range, grid.z, grid.x0 + i, grid.y0 + j, opts), signal).then((img) => {
           if (img) {
             ctx.drawImage(img, i * 256, j * 256);
             got++;
@@ -187,7 +188,23 @@ export function classify(
   }
   const colour = new Map(defs.map((d) => [d.id, d.rgba]));
   const hatch = new Set(defs.filter((d) => d.hatch).map((d) => d.id));
-  // re-project rows to linear latitude so the image drapes correctly with a lat/lon rectangle
+  const url = drapeImage(g, (p) => {
+    const c = classes[p];
+    if (c === 0) return null;
+    return colour.get(c) ?? (c === 255 ? ([128, 128, 128, 110] as const) : null);
+  }, (p) => hatch.has(classes[p]));
+  return { grid: g, classes, areasKm2: areas, validKm2: valid, noDataKm2: nodata, aoiKm2: aoiA, imageUrl: url, pngUrl: url };
+}
+
+/**
+ * Paint a per-pixel colour function into a PNG re-projected to linear latitude (so it drapes correctly on
+ * a lat/lon rectangle). `hatch(p)` draws the pixel as diagonal stripes (uncertain states never look solid).
+ */
+export function drapeImage(
+  g: Grid,
+  colorAt: (p: number) => readonly [number, number, number, number] | null | undefined,
+  hatch?: (p: number) => boolean,
+): string {
   const out = document.createElement('canvas');
   out.width = g.width;
   out.height = g.height;
@@ -198,11 +215,10 @@ export function classify(
     const lat = g.north - ((row + 0.5) / g.height) * (g.north - g.south);
     const srcRow = Math.min(g.height - 1, Math.max(0, Math.floor((mercY(lat) - g.y0) * 256)));
     for (let col = 0; col < g.width; col++) {
-      const c = classes[srcRow * g.width + col];
-      if (c === 0) continue;
-      const rgba = colour.get(c) ?? (c === 255 ? ([128, 128, 128, 110] as const) : undefined);
-      if (!rgba) continue;
-      if (hatch.has(c) && (row + col) % 8 >= 3) continue; // stripes: uncertain areas never look like a change colour
+      const p = srcRow * g.width + col;
+      const rgba = colorAt(p);
+      if (!rgba || !rgba[3]) continue;
+      if (hatch?.(p) && (row + col) % 8 >= 3) continue;
       const q = (row * g.width + col) * 4;
       img.data[q] = rgba[0];
       img.data[q + 1] = rgba[1];
@@ -211,8 +227,7 @@ export function classify(
     }
   }
   octx.putImageData(img, 0, 0);
-  const url = out.toDataURL('image/png');
-  return { grid: g, classes, areasKm2: areas, validKm2: valid, noDataKm2: nodata, aoiKm2: aoiA, imageUrl: url, pngUrl: url };
+  return out.toDataURL('image/png');
 }
 
 /** Collect the AOI-pixel values of a raster for a histogram. */

@@ -14,8 +14,8 @@ body,
 
 body {
   margin: 0;
-  background: #141719;
-  color: #e6e9e7;
+  background: #111417;
+  color: #e3e7e9;
   font-family: 'IBM Plex Sans', 'IBM Plex Sans Thai', Inter, system-ui, sans-serif;
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
@@ -27,9 +27,76 @@ body {
   }
   .scroll-thin {
     scrollbar-width: thin;
-    scrollbar-color: #3d4549 transparent;
+    scrollbar-color: #3a4249 transparent;
+  }
+  /* floating map chrome: subtle glass, used only over the map canvas */
+  .ov-float {
+    @apply rounded-md border border-white/[0.07] bg-ink-950/80 shadow-float;
+    backdrop-filter: blur(10px) saturate(1.2);
+    -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  }
+  .ov-tool {
+    @apply flex h-8 w-8 items-center justify-center rounded text-slate-300 transition-colors duration-150 hover:bg-white/[0.06] hover:text-white focus-visible:outline focus-visible:outline-1 focus-visible:outline-cyan-400;
+  }
+  .ov-tool[aria-pressed='true'] {
+    @apply bg-cyan-400/15 text-cyan-300 shadow-glow;
   }
 }
+
+/* ---------------------------------------------------------------- motion
+   Short, purposeful, compositor-only (opacity / transform). Nothing animates the Cesium canvas.
+   All of it is switched off for prefers-reduced-motion. */
+:root {
+  --ov-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --ov-fast: 140ms;
+  --ov-mid: 220ms;
+}
+@keyframes ov-fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes ov-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ov-slide-in { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
+@keyframes ov-slide-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes ov-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes ov-shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+@keyframes ov-scan { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+@keyframes ov-pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(47, 196, 178, 0.45); } 70% { box-shadow: 0 0 0 7px rgba(47, 196, 178, 0); } 100% { box-shadow: 0 0 0 0 rgba(47, 196, 178, 0); } }
+@keyframes ov-orbit { to { transform: rotate(360deg); } }
+
+.ov-page { animation: ov-fade var(--ov-mid) var(--ov-ease) both; }
+.ov-enter { animation: ov-fade-up var(--ov-mid) var(--ov-ease) both; }
+.ov-flyout { animation: ov-slide-in var(--ov-mid) var(--ov-ease) both; }
+.ov-sheet { animation: ov-slide-up var(--ov-mid) var(--ov-ease) both; }
+.ov-grow-x { transform-origin: left center; animation: ov-grow-x 480ms var(--ov-ease) both; }
+.ov-skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.09) 50%, rgba(255,255,255,0.04) 75%);
+  background-size: 200% 100%;
+  animation: ov-shimmer 1.4s linear infinite;
+  border-radius: 3px;
+}
+/* scanning bar under long-running searches / reads */
+.ov-progress { position: relative; overflow: hidden; }
+.ov-progress::after {
+  content: '';
+  position: absolute; left: 0; bottom: -1px; height: 1px; width: 40%;
+  background: linear-gradient(90deg, transparent, #2fc4b2, transparent);
+  animation: ov-scan 1.3s var(--ov-ease) infinite;
+}
+.ov-pulse { animation: ov-pulse-ring 2.4s ease-out infinite; }
+.ov-orbit { animation: ov-orbit 14s linear infinite; transform-origin: 50% 50%; transform-box: fill-box; }
+.ov-collapse { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--ov-mid) var(--ov-ease), opacity var(--ov-mid) var(--ov-ease); }
+.ov-collapse[data-open='false'] { grid-template-rows: 0fr; opacity: 0; }
+.ov-collapse > * { min-height: 0; overflow: hidden; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .ov-progress::after, .ov-skeleton, .ov-pulse, .ov-orbit { animation: none !important; }
+}
+
+:focus-visible { outline: 1px solid #2fc4b2; outline-offset: 1px; }
 
 /* --- Cesium widget restyle (keep attribution visible, just quieter) --- */
 .cesium-viewer,
@@ -44,17 +111,17 @@ body {
   bottom: 2px !important;
 }
 .cesium-viewer-timelineContainer {
-  background: rgba(27, 32, 35, 0.96) !important;
-  border-top: 1px solid #343b3f;
+  background: rgba(17, 20, 23, 0.96) !important;
+  border-top: 1px solid #2c3339;
 }
 .cesium-timeline-main {
   border: none !important;
 }
 .cesium-timeline-bar {
-  background: linear-gradient(#23292d, #1b2023) !important;
+  background: #191d21 !important;
 }
 .cesium-timeline-ticLabel {
-  color: #939d9a !important;
+  color: #8b969c !important;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
 }
@@ -78,11 +145,11 @@ body {
 .cesium-animation-themeSwooshHover { color: #e4c38f; }
 
 input[type='range'] {
-  accent-color: #91a58d;
+  accent-color: #2fc4b2;
 }
 
 /* thin, quiet scrollbars everywhere (WebKit) */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: #3a4246; border-radius: 4px; border: 2px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-track { background: transparent; }
-::selection { background: rgba(213, 170, 105, 0.35); }
+::selection { background: rgba(47, 196, 178, 0.3); }

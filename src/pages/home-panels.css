@@ -34,7 +34,7 @@
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 10px;
   letter-spacing: 0.32em;
-  color: #91a58d;
+  color: #2fc4b2;
   text-transform: uppercase;
 }
 .ovp__title {
@@ -85,7 +85,7 @@
     z-index 0s 1.3s;
 }
 .ovp__el:focus-visible {
-  box-shadow: 0 0 0 2px #91a58d;
+  box-shadow: 0 0 0 2px #2fc4b2;
 }
 
 .ovp__overflow {
@@ -170,7 +170,7 @@
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 9px;
   letter-spacing: 0.24em;
-  color: #b7c6b3;
+  color: #7fe3d6;
   border: 1px solid rgba(183, 198, 179, 0.35);
   border-radius: 2px;
   padding: 3px 7px;
@@ -205,7 +205,7 @@
   margin-top: 2px;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 10px;
-  color: #b7c6b3;
+  color: #7fe3d6;
 }
 .ovp__el:hover .ovp__place,
 .ovp.s--el-active .ovp__place {
@@ -221,14 +221,14 @@
   opacity: 0;
   transition: opacity 0.3s, inset 0.4s var(--ease);
   background:
-    linear-gradient(#91a58d, #91a58d) top left / 18px 1.5px,
-    linear-gradient(#91a58d, #91a58d) top left / 1.5px 18px,
-    linear-gradient(#91a58d, #91a58d) top right / 18px 1.5px,
-    linear-gradient(#91a58d, #91a58d) top right / 1.5px 18px,
-    linear-gradient(#91a58d, #91a58d) bottom left / 18px 1.5px,
-    linear-gradient(#91a58d, #91a58d) bottom left / 1.5px 18px,
-    linear-gradient(#91a58d, #91a58d) bottom right / 18px 1.5px,
-    linear-gradient(#91a58d, #91a58d) bottom right / 1.5px 18px;
+    linear-gradient(#2fc4b2, #2fc4b2) top left / 18px 1.5px,
+    linear-gradient(#2fc4b2, #2fc4b2) top left / 1.5px 18px,
+    linear-gradient(#2fc4b2, #2fc4b2) top right / 18px 1.5px,
+    linear-gradient(#2fc4b2, #2fc4b2) top right / 1.5px 18px,
+    linear-gradient(#2fc4b2, #2fc4b2) bottom left / 18px 1.5px,
+    linear-gradient(#2fc4b2, #2fc4b2) bottom left / 1.5px 18px,
+    linear-gradient(#2fc4b2, #2fc4b2) bottom right / 18px 1.5px,
+    linear-gradient(#2fc4b2, #2fc4b2) bottom right / 1.5px 18px;
   background-repeat: no-repeat;
 }
 .ovp__el:hover .ovp__frame,
@@ -398,8 +398,8 @@
   transition: border-color 0.2s, background 0.2s, color 0.2s;
 }
 .ovp__mode:hover {
-  border-color: rgba(145, 165, 141, 0.7);
-  background: rgba(145, 165, 141, 0.1);
+  border-color: rgba(47,196,178, 0.7);
+  background: rgba(47,196,178, 0.1);
   color: #fff;
 }
 .ovp__open {
@@ -413,11 +413,11 @@
   font-size: 14px;
   font-weight: 600;
   color: #141719;
-  background: #91a58d;
+  background: #2fc4b2;
   transition: background 0.2s, gap 0.3s;
 }
 .ovp__open:hover {
-  background: #b7c6b3;
+  background: #7fe3d6;
   gap: 16px;
 }
 .ovp__credit {
@@ -476,7 +476,7 @@
 }
 .ovp__close:hover::before,
 .ovp__close:hover::after {
-  background: #91a58d;
+  background: #2fc4b2;
 }
 
 /* ---------- footer strip ---------- */
@@ -504,7 +504,7 @@
   transition: border-color 0.2s, color 0.2s;
 }
 .ovp__tool:hover {
-  border-color: rgba(145, 165, 141, 0.6);
+  border-color: rgba(47,196,178, 0.6);
   color: #fff;
 }
 .ovp__note {

@@ -1,9 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import { t } from '../../i18n';
-import { Badge, Button, Notice } from '../ui';
+import { Button, Notice, cx } from '../ui';
+import { tl } from '../../lib/classify/i18n';
 import { BASEMAPS, OVERLAYS, type BasemapId, type OverlayId } from '../../lib/basemaps';
 import { Cesium } from '../../lib/cesium';
-import { useGis } from './GisContext';
+import { useGis, type LayerEntry } from './GisContext';
+
+type Cat = 'imagery' | 'spectral' | 'landcover' | 'change' | 'water' | 'terrain' | 'vector' | 'imported';
+const CATS: { id: Cat; en: string; th: string }[] = [
+  { id: 'imagery', en: 'Satellite imagery', th: 'ภาพถ่ายดาวเทียม' },
+  { id: 'spectral', en: 'Spectral indices', th: 'ดัชนีเชิงสเปกตรัม' },
+  { id: 'landcover', en: 'Land cover', th: 'สิ่งปกคลุมดิน' },
+  { id: 'change', en: 'Change detection', th: 'การเปลี่ยนแปลง' },
+  { id: 'water', en: 'Flood & water', th: 'น้ำท่วมและแหล่งน้ำ' },
+  { id: 'terrain', en: 'Terrain & hydrology', th: 'ภูมิประเทศและอุทกวิทยา' },
+  { id: 'vector', en: 'Vector layers', th: 'ชั้นข้อมูลเวกเตอร์' },
+  { id: 'imported', en: 'Imported data', th: 'ข้อมูลที่นำเข้า' },
+];
+export function layerCategory(id: string, group: string): Cat {
+  if (id.startsWith('geojson-')) return 'imported';
+  if (id.startsWith('lc-')) return 'landcover';
+  if (id.startsWith('spectral')) return 'spectral';
+  if (id.startsWith('change') || id.startsWith('swipe-')) return 'change';
+  if (id.startsWith('flood') || id === 'osm-waterways') return 'water';
+  if (id === 'hydro' || id.startsWith('terrain') || id === 'dams') return 'terrain';
+  if (id === 'latest' || id.startsWith('query-scene') || id.startsWith('scene')) return 'imagery';
+  return group === 'vector' ? 'vector' : 'imagery';
+}
 
 export default function LayersPanel({ basemap, setBasemap }: { basemap: BasemapId; setBasemap: (b: BasemapId) => void }) {
   const g = useGis();
@@ -90,30 +113,68 @@ export default function LayersPanel({ basemap, setBasemap }: { basemap: BasemapI
         </div>
         {err && <Notice tone="bad">{err}</Notice>}
         {g.layers.length === 0 && <p className="text-[11px] text-muted">{t('Analysis results, imported GeoJSON and derived layers appear here.')}</p>}
-        <ul className="space-y-1">
-          {[...g.layers].reverse().map((l) => (
-            <li key={l.id} className="rounded border border-line px-2 py-1.5">
-              <div className="flex items-center gap-1.5">
-                <input type="checkbox" checked={l.show} onChange={(e) => g.setLayer(l.id, { show: e.target.checked })} />
-                <span className="min-w-0 flex-1 truncate text-xs text-slate-200" title={l.name}>{l.name}</span>
-                <Badge>{t(l.group)}</Badge>
-                {l.layer && (
-                  <>
-                    <button title={t('Move up')} onClick={() => g.moveLayer(l.id, 1)} className="text-muted hover:text-white">▲</button>
-                    <button title={t('Move down')} onClick={() => g.moveLayer(l.id, -1)} className="text-muted hover:text-white">▼</button>
-                  </>
-                )}
-                <button title={t('Remove')} onClick={() => g.removeLayer(l.id)} className="text-muted hover:text-bad">✕</button>
+        {CATS.map((cat) => {
+          const items = [...g.layers].reverse().filter((l) => layerCategory(l.id, l.group) === cat.id);
+          if (!items.length) return null;
+          return (
+            <div key={cat.id} className="mb-2">
+              <div className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-muted">
+                <span>{tl(cat.en, cat.th)}</span>
+                <span className="font-mono">{items.length}</span>
               </div>
-              {l.meta && <div className="mt-0.5 truncate font-mono text-[10px] text-muted" title={l.meta}>{l.meta}</div>}
-              {l.layer && (
-                <input type="range" min={0.05} max={1} step={0.05} value={l.alpha} onChange={(e) => g.setLayer(l.id, { alpha: +e.target.value })} className="mt-1 w-full" />
-              )}
-            </li>
-          ))}
-        </ul>
+              <ul className="space-y-1">
+                {items.map((l) => <LayerRow key={l.id} l={l} />)}
+              </ul>
+            </div>
+          );
+        })}
       </div>
     </div>
+  );
+}
+
+function LayerRow({ l }: { l: LayerEntry }) {
+  const g = useGis();
+  const [info, setInfo] = useState(false);
+  const [ask, setAsk] = useState(false);
+  return (
+    <li className={cx('rounded border border-line px-2 py-1.5 transition-opacity duration-200', !l.show && 'opacity-60')}>
+      <div className="flex items-center gap-1.5">
+        <input type="checkbox" checked={l.show} onChange={(e) => g.setLayer(l.id, { show: e.target.checked })} aria-label={tl('Show layer', 'แสดงชั้นข้อมูล')} />
+        <span className="min-w-0 flex-1 truncate text-xs text-slate-200" title={l.name}>{l.name}</span>
+        <button title={tl('Layer information and legend', 'ข้อมูลและคำอธิบายสัญลักษณ์ของชั้นข้อมูล')} aria-expanded={info} onClick={() => setInfo(!info)} className={cx('px-0.5 text-[11px] hover:text-white', info ? 'text-cyan-300' : 'text-muted')}>ⓘ</button>
+        {l.layer && (
+          <>
+            <button title={t('Move up')} onClick={() => g.moveLayer(l.id, 1)} className="text-muted hover:text-white">▲</button>
+            <button title={t('Move down')} onClick={() => g.moveLayer(l.id, -1)} className="text-muted hover:text-white">▼</button>
+          </>
+        )}
+        <button title={t('Remove')} onClick={() => setAsk(true)} className="text-muted hover:text-bad">✕</button>
+      </div>
+      {ask && (
+        <div className="ov-enter mt-1 flex items-center gap-1.5 text-[11px]">
+          <span className="flex-1 text-warn">{tl('Remove this layer from the map?', 'ลบชั้นข้อมูลนี้ออกจากแผนที่?')}</span>
+          <Button variant="danger" onClick={() => g.removeLayer(l.id)}>{tl('Remove', 'ลบ')}</Button>
+          <Button onClick={() => setAsk(false)}>{tl('Keep', 'เก็บไว้')}</Button>
+        </div>
+      )}
+      {l.layer && (
+        <div className="mt-1 flex items-center gap-2">
+          <input type="range" min={0.05} max={1} step={0.05} value={l.alpha} onChange={(e) => g.setLayer(l.id, { alpha: +e.target.value })} className="w-full" aria-label={tl('Opacity', 'ความทึบ')} />
+          <span className="w-8 text-right font-mono text-[10px] text-muted">{Math.round(l.alpha * 100)}%</span>
+        </div>
+      )}
+      <div className="ov-collapse" data-open={info}>
+        <div>
+          {l.meta && <div className="mt-1 break-words font-mono text-[10px] text-muted">{l.meta}</div>}
+          {l.legend?.items?.map((it) => (
+            <div key={it.label} className="flex items-center gap-1.5 text-[10px] text-slate-300"><span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: it.color }} />{it.label}</div>
+          ))}
+          {l.legend?.ramp && <div className="mt-1 h-2 rounded" style={{ background: l.legend.ramp }} />}
+          {l.legend?.note && <div className="mt-0.5 text-[10px] leading-snug text-muted">{l.legend.note}</div>}
+        </div>
+      </div>
+    </li>
   );
 }
 

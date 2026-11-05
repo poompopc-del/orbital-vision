@@ -72,6 +72,8 @@ const PANELS: Panel[] = [
 ];
 
 const MORE = [
+  { to: '/gis?tab=map&panel=landcover', icon: '▦', title: 'Land-cover classification' },
+  { to: '/imagery?tab=watch', icon: '◎', title: 'Add an area to the watchlist' },
   { to: '/track?tab=live', icon: '🌍', title: 'Live satellite positions' },
   { to: '/track?tab=imaging', icon: '📡', title: 'Imaging swaths now' },
   { to: '/request?tab=new', icon: '📋', title: 'Request a new image' },

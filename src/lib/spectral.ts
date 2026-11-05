@@ -271,8 +271,9 @@ export function maskTileUrl(item: ImageryItem, expression: string, threshold: nu
 }
 
 /** Grey-scale (single band) tile of an expression, for pixel-level comparison in the browser. */
-export function greyTileUrl(item: ImageryItem, expression: string, range: [number, number], z: number, x: number, y: number) {
-  return `${PC_DATA}/item/tiles/WebMercatorQuad/${z}/${x}/${y}@1x.png?${base(item)}&expression=${encodeURIComponent(expression)}&asset_as_band=true&rescale=${range[0]},${range[1]}${nodataParam(item)}${extraFor(item)}`;
+export function greyTileUrl(item: ImageryItem, expression: string, range: [number, number], z: number, x: number, y: number, opts: { noNodata?: boolean } = {}) {
+  // noNodata: for layers whose normal value is 0 (e.g. Landsat QA_RADSAT), where nodata=0 would hide valid pixels
+  return `${PC_DATA}/item/tiles/WebMercatorQuad/${z}/${x}/${y}@1x.png?${base(item)}&expression=${encodeURIComponent(expression)}&asset_as_band=true&rescale=${range[0]},${range[1]}${opts.noNodata ? '' : nodataParam(item)}${extraFor(item)}`;
 }
 
 // ---------------------------------------------------------------- statistics

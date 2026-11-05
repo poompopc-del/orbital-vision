@@ -1,3 +1,4 @@
+import { fmtLocal } from '../lib/format';
 import { useSearchParams } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { create } from 'zustand';
@@ -1115,6 +1116,7 @@ export function MonitorWatch() {
           />
         )}
 
+        {panel === 'list' && <OpsSummary />}
         {panel === 'list' && (
           <WatchList
             selId={selId}
@@ -1347,6 +1349,43 @@ function CloudBar() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Operations summary for the watchlist: counts from the latest saved result of each area only — nothing
+ * is estimated. "Needs review" = latest check could not conclude, failed, or found change with low confidence.
+ */
+function OpsSummary() {
+  const L = useL();
+  const { aois, runs } = useMonitor();
+  const latest = new Map<string, MonitorRun>();
+  for (const r of runs) {
+    const cur = latest.get(r.aoiId);
+    if (!cur || r.at > cur.at) latest.set(r.aoiId, r);
+  }
+  const ls = aois.map((a) => latest.get(a.id)).filter(Boolean) as MonitorRun[];
+  const changed = ls.filter((r) => r.status === 'ok' && r.level === 'significant').length;
+  const review = ls.filter((r) => r.status !== 'ok' || (r.level !== 'none' && r.confidence === 'low')).length;
+  const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString();
+  const fresh = ls.filter((r) => r.B?.datetime && r.B.datetime >= weekAgo).length;
+  const never = aois.length - ls.length;
+  const last = ls.reduce((m, r) => (r.at > m ? r.at : m), '');
+  const card = (k: string, v: number | string, sub: string, tone?: 'warn' | 'bad' | 'cyan') => (
+    <div className="min-w-0 rounded-md border border-line bg-navy-900 px-2.5 py-2">
+      <div className="truncate text-[10px] uppercase tracking-[0.1em] text-muted">{k}</div>
+      <div className={`font-mono text-lg leading-tight ${tone === 'warn' ? 'text-warn' : tone === 'bad' ? 'text-bad' : tone === 'cyan' ? 'text-cyan-300' : 'text-slate-100'}`}>{v}</div>
+      <div className="truncate text-[10px] text-muted">{sub}</div>
+    </div>
+  );
+  if (!aois.length) return null;
+  return (
+    <div className="ov-enter grid grid-cols-2 gap-1.5">
+      {card(L('พื้นที่เฝ้าระวัง', 'Watched areas'), aois.length, never ? L(`ยังไม่เคยตรวจ ${never}`, `${never} never checked`) : L('ตรวจแล้วทุกพื้นที่', 'all checked'), 'cyan')}
+      {card(L('พบการเปลี่ยนแปลง', 'Change found'), changed, L('ผลล่าสุดระดับชัดเจน', 'latest result: significant'), changed ? 'bad' : undefined)}
+      {card(L('ภาพใหม่ 7 วัน', 'New imagery (7 days)'), fresh, L('ภาพ “หลัง” ของผลล่าสุด', '“after” image of latest result'))}
+      {card(L('ต้องตรวจสอบเพิ่ม', 'Needs review'), review, last ? `${L('ตรวจล่าสุด', 'last check')} ${fmtLocal(last)}` : L('ยังไม่มีผลตรวจ', 'no results yet'), review ? 'warn' : undefined)}
     </div>
   );
 }
@@ -1956,7 +1995,7 @@ function Trend({ series, unit }: { series: MonitorRun[]; unit: AreaUnit }) {
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
         <line x1={P} x2={W - 8} y1={H - 16} y2={H - 16} stroke="rgba(148,178,214,0.25)" />
         <text x={2} y={y(hi) + 3} fontSize="9" fill="#939d9a">{hi.toFixed(unit === 'rai' ? 0 : 2)}</text>
-        <path d={series.map((_, i) => `${i ? 'L' : 'M'}${x(i)},${y(vs[i])}`).join(' ')} fill="none" stroke="#91a58d" strokeWidth={1.8} />
+        <path d={series.map((_, i) => `${i ? 'L' : 'M'}${x(i)},${y(vs[i])}`).join(' ')} fill="none" stroke="#2fc4b2" strokeWidth={1.8} />
         {series.map((r, i) => (
           <g key={r.id}>
             <circle cx={x(i)} cy={y(vs[i])} r={3} fill={LEVEL_COLOR[r.level ?? 'none']}><title>{`${r.B?.datetime.slice(0, 10)}: ${vs[i].toFixed(unit === 'rai' ? 1 : 3)} ${uTh}`}</title></circle>

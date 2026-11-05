@@ -22,7 +22,8 @@ export default function Section({ tabs }: { tabs: SectionTab[] }) {
             key={x.id}
             title={x.hint ? t(x.hint) : undefined}
             onClick={() => setParams({ tab: x.id })}
-            className={cx('whitespace-nowrap rounded px-3 py-1.5 text-xs', cur.id === x.id ? 'bg-cyan-400/15 text-cyan-300' : 'text-muted hover:text-white')}
+            aria-current={cur.id === x.id ? 'page' : undefined}
+            className={cx('whitespace-nowrap rounded px-3 py-1.5 text-xs transition-colors duration-150', cur.id === x.id ? 'bg-cyan-400/15 text-cyan-300' : 'text-muted hover:bg-white/[0.04] hover:text-white')}
           >
             {t(x.label)}
           </button>

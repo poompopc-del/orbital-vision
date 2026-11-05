@@ -2,13 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../i18n';
 import GlobeHost from '../components/GlobeHost';
 import AoiPicker from '../components/AoiPicker';
-import { Badge, Button, cx } from '../components/ui';
+import { Button, cx } from '../components/ui';
 import { Cesium, drawOnGlobe, showAoi } from '../lib/cesium';
 import { LayerController, type BasemapId } from '../lib/basemaps';
 import { lineLengthKm, polygonAreaKm2, areaKm2 } from '../lib/geo';
 import { bounds } from '../lib/aoiEdit';
 const boundsArr = (g: GeoJSON.Polygon) => { const b = bounds(g); return [b.west, b.south, b.east, b.north]; };
 import { fmtLocal, fmtNum } from '../lib/format';
+import { fmtArea } from '../lib/area';
+import { isTh } from '../lib/classify/i18n';
 import { useWorkspace } from '../store';
 import type { ImageryItem } from '../lib/stac';
 import { GisCtx, type GisApi, type LayerEntry, type LegendSpec, type MapTool, type ReportSection } from '../components/gis/GisContext';
@@ -19,33 +21,52 @@ import SpectralPanel from '../components/gis/SpectralPanel';
 import FloodPanel from '../components/gis/FloodPanel';
 import ChangePanel from '../components/gis/ChangePanel';
 import TerrainPanel from '../components/gis/TerrainPanel';
+import LandCoverPanel from '../components/gis/LandCoverPanel';
+import MapStatus from '../components/gis/MapStatus';
+import { tl } from '../lib/classify/i18n';
 import { sceneLabel } from '../components/gis/sceneLayer';
 import AutoScenes from '../components/gis/AutoScenes';
 import TaskWizard, { type TaskId } from '../components/gis/TaskWizard';
 import { useSearchParams } from 'react-router-dom';
 
-type Tab = 'start' | 'layers' | 'aoi' | 'dams' | 'imagery' | 'spectral' | 'flood' | 'change' | 'terrain';
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'start', label: 'Start' },
-  { id: 'layers', label: 'Layers' },
-  { id: 'aoi', label: 'AOI' },
-  { id: 'dams', label: 'Dams' },
-  { id: 'imagery', label: 'Imagery' },
-  { id: 'spectral', label: 'Spectral' },
-  { id: 'flood', label: 'Flood' },
-  { id: 'change', label: 'Change' },
-  { id: 'terrain', label: 'Terrain' },
+type ToolTab = 'imagery' | 'spectral' | 'landcover' | 'flood' | 'change' | 'terrain' | 'dams';
+type Tab = 'start' | 'layers' | 'aoi' | 'analysis' | ToolTab;
+/** Top-level sections of the side panel; individual analysis tools live under “Analysis”. */
+const SECTIONS: { id: Tab; label: string; th: string }[] = [
+  { id: 'start', label: 'Start', th: 'เริ่มต้น' },
+  { id: 'layers', label: 'Layers', th: 'ชั้นข้อมูล' },
+  { id: 'aoi', label: 'AOI', th: 'พื้นที่ AOI' },
+  { id: 'analysis', label: 'Analysis', th: 'วิเคราะห์' },
+];
+/** Progressive disclosure: pick a kind of analysis first, then only its tools are shown. */
+const ANALYSES: { id: ToolTab; label: string; th: string; desc: string; descTh: string; icon: string }[] = [
+  { id: 'spectral', label: 'Spectral indices', th: 'ดัชนีเชิงสเปกตรัม', desc: 'Vegetation, water, burn, urban & soil indices; band composites', descTh: 'ดัชนีพืช น้ำ การเผาไหม้ เมืองและดิน · ภาพผสมแบนด์', icon: 'M4 20c4-12 12-12 16 0M4 20h16' },
+  { id: 'landcover', label: 'Land cover', th: 'จำแนกสิ่งปกคลุมดิน', desc: 'Multi-index classification with confidence, QA masks, accuracy', descTh: 'จำแนกด้วยหลายดัชนี พร้อมความเชื่อมั่น หน้ากากคุณภาพ และความถูกต้อง', icon: 'M3 3h8v8H3zM13 3h8v8h-8zM3 13h8v8H3zM13 13h8v8h-8z' },
+  { id: 'change', label: 'Change detection', th: 'ตรวจจับการเปลี่ยนแปลง', desc: 'Index difference, dNBR, radar or land-cover class change', descTh: 'ผลต่างดัชนี dNBR เรดาร์ หรือการเปลี่ยนประเภทสิ่งปกคลุมดิน', icon: 'M4 7h13l-3-3M20 17H7l3 3' },
+  { id: 'flood', label: 'Flood & water', th: 'น้ำท่วมและแหล่งน้ำ', desc: 'Water mapping and possible flood, optical or radar', descTh: 'แผนที่แหล่งน้ำและพื้นที่ที่อาจมีน้ำท่วม จากภาพออปติคัลหรือเรดาร์', icon: 'M12 3s6 7 6 11a6 6 0 01-12 0c0-4 6-11 6-11z' },
+  { id: 'terrain', label: 'Terrain & hydrology', th: 'ภูมิประเทศและอุทกวิทยา', desc: 'Elevation, slope, hillshade, watershed from a pour point', descTh: 'ความสูง ความลาดชัน แสงเงา และลุ่มน้ำจากจุดระบายน้ำ', icon: 'M2 20l7-12 4 6 3-4 6 10z' },
+  { id: 'dams', label: 'Dams & reservoirs', th: 'เขื่อนและอ่างเก็บน้ำ', desc: 'Storage from the Royal Irrigation Department', descTh: 'ปริมาณน้ำในเขื่อนจากกรมชลประทาน', icon: 'M3 20h18M5 20V9l7-5 7 5v11M9 20v-6h6v6' },
+  { id: 'imagery', label: 'Identify imagery', th: 'ตรวจภาพที่จุด', desc: 'Click the map to list scenes covering that point', descTh: 'คลิกแผนที่เพื่อดูภาพที่ครอบคลุมจุดนั้น', icon: 'M11 4a7 7 0 100 14 7 7 0 000-14zM21 21l-4.5-4.5' },
+];
+const PANEL_PARAM: Record<string, Tab> = { spectral: 'spectral', landcover: 'landcover', change: 'change', flood: 'flood', terrain: 'terrain', dams: 'dams', imagery: 'imagery', layers: 'layers', aoi: 'aoi', analysis: 'analysis' };
+
+const TOOLS: { id: MapTool | 'draw-rect'; label: string; th: string; icon: string }[] = [
+  { id: 'pan', label: 'Pan / select', th: 'เลื่อน / เลือก', icon: 'M5 3l14 7-6 2-2 6z' },
+  { id: 'draw-rect', label: 'Draw AOI rectangle', th: 'วาดกรอบพื้นที่ AOI', icon: 'M4 4h4M12 4h4M20 4v4M20 12v4M20 20h-4M12 20H8M4 20v-4M4 12V8' },
+  { id: 'query', label: 'Identify imagery at a point', th: 'ตรวจภาพที่จุด', icon: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 11v5M12 8v.01' },
+  { id: 'measure-line', label: 'Measure distance', th: 'วัดระยะทาง', icon: 'M3 17L17 3l4 4L7 21zM7 13l2 2M10 10l2 2M13 7l2 2' },
+  { id: 'measure-area', label: 'Measure area', th: 'วัดพื้นที่', icon: 'M5 19l2-13 11 2 2 9z' },
+  { id: 'elevation', label: 'Elevation at a point', th: 'ความสูงที่จุด', icon: 'M2 20l7-12 4 6 3-4 6 10z' },
+  { id: 'pour', label: 'Pour point (watershed)', th: 'จุดระบายน้ำ (ลุ่มน้ำ)', icon: 'M12 3s6 7 6 11a6 6 0 01-12 0c0-4 6-11 6-11z' },
 ];
 
-const TOOLS: { id: MapTool | 'draw-rect'; label: string; icon: string }[] = [
-  { id: 'pan', label: 'Select / pan', icon: '✋' },
-  { id: 'draw-rect', label: 'Draw AOI rectangle', icon: '▭' },
-  { id: 'query', label: 'Identify imagery at a point', icon: '🔎' },
-  { id: 'elevation', label: 'Elevation at a point', icon: '⛰' },
-  { id: 'pour', label: 'Pour point (watershed)', icon: '💧' },
-  { id: 'measure-line', label: 'Measure distance', icon: '📏' },
-  { id: 'measure-area', label: 'Measure area', icon: '⬚' },
-];
+function Ico({ d }: { d: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d={d} />
+    </svg>
+  );
+}
 
 export default function GisWorkspace() {
   const { aoi, setAoi } = useWorkspace();
@@ -54,11 +75,19 @@ export default function GisWorkspace() {
   const [basemap, setBasemap] = useState<BasemapId>('hybrid');
   const [params] = useSearchParams();
   const taskParam = params.get('task') as TaskId | null;
-  const [tab, setTab] = useState<Tab>(taskParam === 'dams' ? 'dams' : 'start');
+  const panelParam = params.get('panel');
+  const [tab, setTab] = useState<Tab>(taskParam === 'dams' ? 'dams' : PANEL_PARAM[panelParam ?? ''] ?? 'start');
   useEffect(() => {
     if (taskParam === 'dams') setTab('dams');
     else if (taskParam) setTab('start');
   }, [taskParam]);
+  useEffect(() => {
+    const p = PANEL_PARAM[panelParam ?? ''];
+    if (p) {
+      setTab(p);
+      setOpen(true);
+    }
+  }, [panelParam]);
   const [open, setOpen] = useState(true);
   const [tool, setTool] = useState<MapTool>('pan');
   const [layers, setLayers] = useState<LayerEntry[]>([]);
@@ -232,7 +261,7 @@ export default function GisWorkspace() {
       setTool('pan');
       if (!pts) return;
       viewer.entities.add({ id: 'gis-measure', polyline: { positions: Cesium.Cartesian3.fromDegreesArray(pts.flat()), width: 2.5, material: Cesium.Color.fromCssColorString('#f5b84b'), clampToGround: true } });
-      setMeasure(id === 'measure-line' ? `${fmtNum(lineLengthKm(pts), 3)} km` : `${fmtNum(polygonAreaKm2(pts.slice(0, -1)), 3)} km²`);
+      setMeasure(id === 'measure-line' ? `${fmtNum(lineLengthKm(pts), 3)} ${tl('km', 'กม.')}` : fmtArea(polygonAreaKm2(pts.slice(0, -1)), 'km2', isTh()));
     }
   };
 
@@ -306,114 +335,146 @@ ${report.map((s) => `<h2>${esc(s.title)}</h2><ul>${s.lines.map((x) => `<li>${esc
 
   const swipeOn = layers.some((l) => l.id === 'swipe-a');
 
+  const inTool = ANALYSES.some((x) => x.id === tab);
+  const curAnalysis = ANALYSES.find((x) => x.id === tab);
+  const sectionOf = (x: Tab): Tab => (ANALYSES.some((a) => a.id === x) ? 'analysis' : x);
+
   return (
     <GisCtx.Provider value={api}>
-      <div className="relative flex h-full">
-        {/* toolbar */}
-        <div className="z-20 flex w-11 shrink-0 flex-col items-center gap-1 border-r border-line bg-ink-950 py-2">
-          {TOOLS.map((tl) => (
-            <button
-              key={tl.id}
-              title={t(tl.label)}
-              onClick={() => chooseTool(tl.id)}
-              className={cx('flex h-8 w-8 items-center justify-center rounded text-sm', tool === tl.id ? 'bg-cyan-400/15 text-cyan-300 shadow-glow' : 'text-slate-300 hover:bg-navy-800')}
-            >
-              {tl.icon}
-            </button>
-          ))}
-          <button
-            title={t('Quick NDVI for AOI')}
-            onClick={() => {
-              setTab('spectral');
-              setOpen(true);
-              actions.current.ndvi?.();
-            }}
-            className="flex h-8 w-8 items-center justify-center rounded text-sm text-slate-300 hover:bg-navy-800"
-          >
-            🌿
-          </button>
-          <div className="relative">
-            <button
-              title={t('Reset map to the original view')}
-              onClick={() => setConfirmReset(!confirmReset)}
-              className={cx('flex h-8 w-8 items-center justify-center rounded text-base', confirmReset ? 'bg-warn/20 text-warn' : 'text-slate-300 hover:bg-navy-800')}
-            >
-              ↺
-            </button>
-            {confirmReset && (
-              <div className="absolute left-10 top-0 z-50 w-56 space-y-1.5 rounded border border-line bg-navy-850 p-2.5 shadow-xl">
-                <div className="text-xs font-semibold text-white">{t('Reset map')}</div>
-                <p className="text-[10px] leading-snug text-muted">{t('Removes all analysis results, imported layers, measurements and terrain shading, and returns to the Hybrid basemap.')}</p>
-                <Button variant="primary" className="w-full" onClick={() => { resetMap(false); setConfirmReset(false); }}>{t('Clear results (keep AOI)')}</Button>
-                <Button variant="danger" className="w-full" onClick={() => { resetMap(true); setConfirmReset(false); }}>{t('Clear everything incl. AOI')}</Button>
-                <Button className="w-full" onClick={() => setConfirmReset(false)}>{t('Cancel')}</Button>
-              </div>
-            )}
-          </div>
-          <div className="my-1 h-px w-6 bg-line" />
-          <button title={open ? t('Hide panel') : t('Show panel')} onClick={() => setOpen(!open)} className="flex h-8 w-8 items-center justify-center rounded text-slate-300 hover:bg-navy-800">
-            {open ? '⟨' : '⟩'}
-          </button>
-        </div>
-
-        {/* side panel */}
-        <aside className={cx('z-10 flex w-[360px] shrink-0 flex-col border-r border-line bg-ink-900', !open && 'hidden')}>
-          <div className="border-b border-line p-2.5">
-            <div className="flex items-center justify-between">
-              <div>
+      <div className="relative flex h-full overflow-hidden">
+        {/* side panel (slides; the map keeps the rest of the screen) */}
+        <aside
+          aria-hidden={!open}
+          className={cx(
+            'absolute inset-y-0 left-0 z-20 flex w-[min(360px,100%)] shrink-0 flex-col border-r border-line bg-ink-900 transition-[transform,margin] duration-200 ease-out md:relative',
+            open ? 'translate-x-0' : '-translate-x-full md:-ml-[360px]',
+          )}
+        >
+          <div className="border-b border-line px-3 pb-2 pt-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
                 <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-cyan-400">GIS · {t('Workspace')}</div>
-                <h1 className="text-sm font-semibold text-white">{t('Hydrology & imagery analysis')}</h1>
+                <h1 className="truncate text-sm font-semibold text-white">{curAnalysis ? tl(curAnalysis.label, curAnalysis.th) : t('Hydrology & imagery analysis')}</h1>
               </div>
-              <Button onClick={exportReport}>{t('Report')}</Button>
+              <div className="flex shrink-0 gap-1">
+                <Button onClick={exportReport} title={tl('Download an HTML report of the map, layers and results', 'ดาวน์โหลดรายงาน HTML ของแผนที่ ชั้นข้อมูล และผลวิเคราะห์')}>{t('Report')}</Button>
+                <button className="ov-tool md:hidden" onClick={() => setOpen(false)} aria-label={t('Hide panel')}>✕</button>
+              </div>
             </div>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {TABS.map((x) => (
-                <button key={x.id} onClick={() => setTab(x.id)} className={cx('rounded px-2 py-1 text-[11px]', tab === x.id ? 'bg-cyan-400/15 text-cyan-300' : 'text-muted hover:text-white')}>
-                  {t(x.label)}
-                </button>
-              ))}
+            <div className="mt-2 grid grid-cols-4 gap-0.5 rounded bg-ink-950 p-0.5" role="tablist">
+              {SECTIONS.map((x) => {
+                const on = sectionOf(tab) === x.id;
+                return (
+                  <button key={x.id} role="tab" aria-selected={on} onClick={() => setTab(x.id)} className={cx('rounded px-2 py-1 text-[11px] transition-colors duration-150', on ? 'bg-navy-800 text-cyan-300 shadow-panel' : 'text-muted hover:text-white')}>
+                    {tl(x.label, x.th)}
+                  </button>
+                );
+              })}
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3 scroll-thin">
-            <div className={tab === 'start' ? '' : 'hidden'}>
+            <div className={tab === 'start' ? 'ov-enter' : 'hidden'}>
               <TaskWizard initialTask={taskParam} goTab={(x) => setTab(x as Tab)} />
             </div>
-            {(tab === 'spectral' || tab === 'flood' || tab === 'change' || tab === 'imagery') && (
+            {tab === 'analysis' && (
+              <div className="ov-enter space-y-1.5">
+                <p className="text-[11px] text-muted">{tl('Choose the kind of analysis — only its tools are shown.', 'เลือกประเภทการวิเคราะห์ ระบบจะแสดงเฉพาะเครื่องมือที่เกี่ยวข้อง')}</p>
+                {ANALYSES.map((x) => (
+                  <button key={x.id} onClick={() => setTab(x.id)} className="group flex w-full items-start gap-2.5 rounded-md border border-line bg-navy-900 px-2.5 py-2 text-left transition-colors duration-150 hover:border-cyan-400/40 hover:bg-navy-850">
+                    <span className="mt-0.5 text-cyan-400"><Ico d={x.icon} /></span>
+                    <span className="min-w-0">
+                      <span className="block text-[13px] text-slate-100 group-hover:text-white">{tl(x.label, x.th)}</span>
+                      <span className="block text-[11px] leading-snug text-muted">{tl(x.desc, x.descTh)}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {inTool && (
+              <button onClick={() => setTab('analysis')} className="mb-2 flex items-center gap-1 text-[11px] text-muted transition-colors hover:text-cyan-300">
+                ← {tl('All analysis tools', 'เครื่องมือวิเคราะห์ทั้งหมด')}
+              </button>
+            )}
+            {(tab === 'spectral' || tab === 'flood' || tab === 'change' || tab === 'imagery' || tab === 'landcover') && (
               <details open className="mb-3 rounded border border-line p-2">
                 <summary className="label cursor-pointer">{t('Images used for analysis')}</summary>
                 <div className="mt-2"><AutoScenes /></div>
               </details>
             )}
-            <div className={tab === 'layers' ? '' : 'hidden'}><LayersPanel basemap={basemap} setBasemap={setBasemap} /></div>
-            <div className={tab === 'aoi' ? '' : 'hidden'}>
+            <div className={tab === 'layers' ? 'ov-enter' : 'hidden'}><LayersPanel basemap={basemap} setBasemap={setBasemap} /></div>
+            <div className={tab === 'aoi' ? 'ov-enter' : 'hidden'}>
               <AoiPicker viewer={viewer} />
               <p className="mt-2 text-[10px] text-muted">{t('The same AOI geometry is used by every tool and every page (Imagery Explorer, Coverage Planner, Pass view).')}</p>
             </div>
-            <div className={tab === 'dams' ? '' : 'hidden'}><DamsPanel /></div>
-            <div className={tab === 'imagery' ? '' : 'hidden'}><QueryPanel /></div>
-            <div className={tab === 'spectral' ? '' : 'hidden'}><SpectralPanel /></div>
-            <div className={tab === 'flood' ? '' : 'hidden'}><FloodPanel /></div>
-            <div className={tab === 'change' ? '' : 'hidden'}><ChangePanel /></div>
-            <div className={tab === 'terrain' ? '' : 'hidden'}><TerrainPanel /></div>
+            <div className={tab === 'dams' ? 'ov-enter' : 'hidden'}><DamsPanel /></div>
+            <div className={tab === 'imagery' ? 'ov-enter' : 'hidden'}><QueryPanel /></div>
+            <div className={tab === 'spectral' ? 'ov-enter' : 'hidden'}><SpectralPanel /></div>
+            <div className={tab === 'landcover' ? 'ov-enter' : 'hidden'}><LandCoverPanel /></div>
+            <div className={tab === 'flood' ? 'ov-enter' : 'hidden'}><FloodPanel /></div>
+            <div className={tab === 'change' ? 'ov-enter' : 'hidden'}><ChangePanel /></div>
+            <div className={tab === 'terrain' ? 'ov-enter' : 'hidden'}><TerrainPanel /></div>
           </div>
         </aside>
 
-        {/* map */}
+        {/* map canvas */}
         <div className="relative min-w-0 flex-1">
           <GlobeHost onReady={setViewer} options={{ baseLayers: false }} />
-          <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap gap-1.5">
-            <Badge tone="cyan">{t(TOOLS.find((x) => x.id === tool)?.label ?? '')}</Badge>
-            {aoi && <Badge>AOI {fmtNum(areaKm2(aoi.geometry), 2)} km²</Badge>}
-            {measure && <Badge tone="warn">{measure}</Badge>}
+
+          {/* floating toolbar */}
+          <div className="ov-float absolute left-3 top-3 z-10 flex flex-col gap-0.5 p-1" role="toolbar" aria-label={tl('Map tools', 'เครื่องมือแผนที่')} aria-orientation="vertical">
+            <button className="ov-tool" onClick={() => setOpen(!open)} title={open ? t('Hide panel') : t('Show panel')} aria-label={open ? t('Hide panel') : t('Show panel')} aria-pressed={open}>
+              <Ico d="M3 4h18v16H3zM9 4v16" />
+            </button>
+            <div className="mx-1.5 my-0.5 h-px bg-white/10" />
+            {TOOLS.map((tl0) => (
+              <button key={tl0.id} className="ov-tool" title={tl(tl0.label, tl0.th)} aria-label={tl(tl0.label, tl0.th)} aria-pressed={tool === tl0.id} onClick={() => chooseTool(tl0.id)}>
+                <Ico d={tl0.icon} />
+              </button>
+            ))}
+            <div className="mx-1.5 my-0.5 h-px bg-white/10" />
+            <button
+              className="ov-tool"
+              title={t('Quick NDVI for AOI')}
+              aria-label={t('Quick NDVI for AOI')}
+              onClick={() => {
+                setTab('spectral');
+                setOpen(true);
+                actions.current.ndvi?.();
+              }}
+            >
+              <Ico d="M5 19c0-8 6-14 15-14-1 9-6 15-14 15M5 19l7-7" />
+            </button>
+            <div className="relative">
+              <button className="ov-tool" title={t('Reset map to the original view')} aria-label={t('Reset map to the original view')} aria-pressed={confirmReset} onClick={() => setConfirmReset(!confirmReset)}>
+                <Ico d="M4 4v6h6M4.6 15a8 8 0 101.9-8.3L4 10" />
+              </button>
+              {confirmReset && (
+                <div className="ov-enter absolute left-10 top-0 z-50 w-60 space-y-1.5 rounded-md border border-line bg-navy-850 p-2.5 shadow-float">
+                  <div className="text-xs font-semibold text-white">{t('Reset map')}</div>
+                  <p className="text-[10px] leading-snug text-muted">{t('Removes all analysis results, imported layers, measurements and terrain shading, and returns to the Hybrid basemap.')}</p>
+                  <Button variant="primary" className="w-full" onClick={() => { resetMap(false); setConfirmReset(false); }}>{t('Clear results (keep AOI)')}</Button>
+                  <Button variant="danger" className="w-full" onClick={() => { resetMap(true); setConfirmReset(false); }}>{t('Clear everything incl. AOI')}</Button>
+                  <Button className="w-full" onClick={() => setConfirmReset(false)}>{t('Cancel')}</Button>
+                </div>
+              )}
+            </div>
           </div>
-          {cursor && <div className="pointer-events-none absolute bottom-2 left-3 z-10 rounded bg-ink-950/80 px-2 py-0.5 font-mono text-[10px] text-slate-300">{cursor.lat.toFixed(5)}, {cursor.lon.toFixed(5)}</div>}
-          <div className="absolute bottom-8 right-3 z-10">
+
+          {/* context chips */}
+          <div className="pointer-events-none absolute left-16 top-3 z-10 flex flex-wrap gap-1.5">
+            {tool !== 'pan' && <span className="ov-float ov-enter px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-cyan-300">{tl(TOOLS.find((x) => x.id === tool)?.label ?? '', TOOLS.find((x) => x.id === tool)?.th ?? '')}</span>}
+            {aoi && <span className="ov-float px-2 py-0.5 font-mono text-[10px] text-slate-200">AOI {fmtArea(areaKm2(aoi.geometry), 'km2', isTh())}</span>}
+            {measure && <span className="ov-float ov-enter px-2 py-0.5 font-mono text-[10px] text-warn">{measure}</span>}
+          </div>
+
+          <MapStatus viewer={viewer} cursor={cursor} layers={layers.filter((l) => l.show).length} />
+          <div className="absolute bottom-9 right-3 z-10">
             <LegendBox />
           </div>
           {swipeOn && (
             <>
               <div className="pointer-events-none absolute inset-y-0 z-10 w-px bg-white/80" style={{ left: `${split * 100}%` }} />
-              <input type="range" min={0} max={1} step={0.001} value={split} onChange={(e) => setSplit(+e.target.value)} className="absolute bottom-10 left-1/2 z-20 w-1/2 -translate-x-1/2" aria-label={t('Swipe divider')} />
+              <input type="range" min={0} max={1} step={0.001} value={split} onChange={(e) => setSplit(+e.target.value)} className="absolute bottom-12 left-1/2 z-20 w-1/2 -translate-x-1/2" aria-label={t('Swipe divider')} />
             </>
           )}
         </div>

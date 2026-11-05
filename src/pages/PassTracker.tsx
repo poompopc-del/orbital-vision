@@ -113,7 +113,7 @@ function SkyPlot({ pass }: { pass: VisiblePass }) {
       ))}
       <text x={104} y={100 - R * (2 / 3) - 2} fontSize="7" fill="#5c6878">30°</text>
       <text x={104} y={100 - R * (1 / 3) - 2} fontSize="7" fill="#5c6878">60°</text>
-      <path d={path} fill="none" stroke="#91a58d" strokeWidth={2} />
+      <path d={path} fill="none" stroke="#2fc4b2" strokeWidth={2} />
       <circle cx={ax} cy={ay} r={3.5} fill="#4fd18b" />
       <circle cx={tx} cy={ty} r={3.5} fill="#fff" />
     </svg>

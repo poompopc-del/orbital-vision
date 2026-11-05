@@ -1,5 +1,10 @@
 // Thai strings for the GIS workspace (merged into TH in i18n.ts)
 export const TH_GIS: Record<string, string> = {
+  'Land-cover classification': 'จำแนกสิ่งปกคลุมดิน',
+  'Add an area to the watchlist': 'เพิ่มพื้นที่เฝ้าระวัง',
+  'Pan / select': 'เลื่อน / เลือก',
+  'A lower threshold detects more change but also more noise. For class-based change choose “Land-cover class change”.': 'ค่าเกณฑ์ต่ำจะพบการเปลี่ยนแปลงมากขึ้น แต่สัญญาณรบกวนก็มากขึ้นด้วย · ถ้าต้องการดูการเปลี่ยนประเภทสิ่งปกคลุมดิน ให้เลือก “การเปลี่ยนประเภทสิ่งปกคลุมดิน”',
+  'Land-cover class change (multi-index, with uncertainty)': 'การเปลี่ยนประเภทสิ่งปกคลุมดิน (หลายดัชนี พร้อมระดับความไม่แน่นอน)',
   '(current ÷ maximum × 100)': '(ปัจจุบัน ÷ ความจุสูงสุด × 100)',
   '2nd / 98th percentile': 'เปอร์เซ็นไทล์ที่ 2 / 98',
   '2–98 % stretch (AOI)': 'ยืดค่า 2–98 % (ใน AOI)',

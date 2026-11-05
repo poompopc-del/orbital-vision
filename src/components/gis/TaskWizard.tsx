@@ -81,7 +81,7 @@ export default function TaskWizard({ initialTask, goTab }: { initialTask?: TaskI
         g.setSceneB(after);
         push({ label: t('Mapping water'), state: 'ok', detail: t('Results are in the Flood tab') });
         goTab('flood');
-        g.runAction('flood', { pre: before, post: after, method: radar ? 'sar' : 'mndwi' });
+        g.runAction('flood', { pre: before, post: after, method: radar ? 'sar2' : 'multi' });
       } else if (task === 'vegetation') {
         const s = await pick(t('Finding the clearest Sentinel-2 image'), 'sentinel-2-l2a', from, to);
         if (!s) return;

@@ -12,8 +12,16 @@ import { useGis } from './GisContext';
 import { imageProvider, pcProvider, sceneLabel } from './sceneLayer';
 import ResultDownloads from './ResultDownloads';
 import { compareWarnings } from './compareChecks';
+import { drapeImage } from '../../lib/change';
+import { fetchStack, stackSensor } from '../../lib/classify/fetchStack';
+import { classifyStack } from '../../lib/classify/run';
+import { classChange, compatibility, sameSeasonWindow, CC, CC_INFO } from '../../lib/classify/classChange';
+import { polygonMask, rowAreasKm2 } from '../../lib/classify/grid';
+import { area as fmtA, isTh, nameOf, tl } from '../../lib/classify/i18n';
+import { gsdMeters } from '../../lib/qc';
+import { qaValid } from '../../lib/classify/types';
 
-type Kind = 'ndvi' | 'ndwi' | 'mndwi' | 'ndbi' | 'dnbr' | 'sar' | 'general';
+type Kind = 'ndvi' | 'ndwi' | 'mndwi' | 'ndbi' | 'dnbr' | 'sar' | 'general' | 'landcover';
 
 const defaultThr = (k: Kind) => (k === 'sar' ? 3 : k === 'general' ? 0.05 : 0.15);
 
@@ -25,7 +33,10 @@ const KINDS: { id: Kind; label: string }[] = [
   { id: 'dnbr', label: 'dNBR burn severity' },
   { id: 'sar', label: 'SAR VV backscatter change (dB)' },
   { id: 'general', label: 'General brightness difference' },
+  { id: 'landcover', label: 'Land-cover class change (multi-index, with uncertainty)' },
 ];
+const CC_SHOWN = [CC.VegLoss, CC.VegGain, CC.PossibleFlood, CC.WaterLoss, CC.BuiltGain, CC.BareGain, CC.Uncertain, CC.NoChange];
+const geomKey = (it: ImageryItem) => { const p = it.raw?.properties ?? {}; return String(p['s2:mgrs_tile'] ?? (p['landsat:wrs_path'] != null ? `${p['landsat:wrs_path']}/${p['landsat:wrs_row']}` : p['sat:relative_orbit'] ?? '')) || undefined; };
 
 // Key & Benson (2006), FIREMON landscape assessment — dNBR severity classes (unitless, ×1 scale)
 const DNBR_CLASSES = [
@@ -48,6 +59,7 @@ export default function ChangePanel() {
   const [err, setErr] = useState('');
   const [res, setRes] = useState<Classified | null>(null);
   const [swipe, setSwipe] = useState(false);
+  const [ccInfo, setCcInfo] = useState<{ warnings: string[]; validShare: number; season: boolean } | null>(null);
   const [series, setSeries] = useState<{ date: string; value: number; id: string; clear: boolean }[] | null>(null);
   const abort = useRef<AbortController | null>(null);
   const A = g.sceneA, B = g.sceneB;
@@ -73,6 +85,7 @@ export default function ChangePanel() {
   const check = (it: ImageryItem | null, kind: Kind = kindState): string | null => {
     if (!it) return t('Select scenes A (before) and B (after)');
     const k = sensorOf(it);
+    if (kind === 'landcover') return stackSensor(it) ? null : tl('Class change needs Sentinel-2, Landsat 8/9 or Sentinel-1 RTC scenes', 'การเปลี่ยนประเภทต้องใช้ภาพ Sentinel-2, Landsat 8/9 หรือ Sentinel-1 RTC');
     if (kind === 'sar') return k === 's1' ? null : t('SAR change needs Sentinel-1 RTC scenes');
     if (k !== 's2' && k !== 'landsat') return t('Optical change needs Sentinel-2 or Landsat scenes');
     if (kind !== 'general') {
@@ -100,6 +113,17 @@ export default function ChangePanel() {
     abort.current = ac;
     setErr('');
     setRes(null);
+    setCcInfo(null);
+    if (kind === 'landcover') {
+      try {
+        await runClassChange(A, B, ac);
+      } catch (e2: any) {
+        if (e2.name !== 'AbortError') setErr(e2.message);
+      } finally {
+        setBusy('');
+      }
+      return;
+    }
     try {
       const grid = gridFor(aoi.geometry);
       const read = async (it: ImageryItem, lbl: string) => {
@@ -158,6 +182,68 @@ export default function ChangePanel() {
     } finally {
       setBusy('');
     }
+  };
+
+
+  /** Change between two land-cover maps: only confident, QC-passed pixels count; the rest is uncertain / not checkable. */
+  const runClassChange = async (A: ImageryItem, B: ImageryItem, ac: AbortController) => {
+    if (!aoi) return;
+    const grid = gridFor(aoi.geometry, 768, 16);
+    const mask = polygonMask(grid, aoi.geometry);
+    const rowA = rowAreasKm2(grid);
+    const sa = await fetchStack(A, grid, ac.signal, (n, d, tot) => setBusy(`${t('Reading')} A: ${n} (${d}/${tot})`));
+    const sb = await fetchStack(B, grid, ac.signal, (n, d, tot) => setBusy(`${t('Reading')} B: ${n} (${d}/${tot})`));
+    setBusy(t('Classifying…'));
+    const la = classifyStack(sa, { mask }), lb = classifyStack(sb, { mask });
+    let aoiKm2 = 0, va = 0, vb = 0;
+    for (let p = 0; p < mask.length; p++) {
+      if (!mask[p]) continue;
+      const a = rowA[Math.floor(p / grid.width)];
+      aoiKm2 += a;
+      if (qaValid(la.qa[p])) va += a;
+      if (qaValid(lb.qa[p])) vb += a;
+    }
+    const comp = compatibility(
+      { sensor: sa.sensor, gsdM: gsdMeters(A), date: A.datetime, geometryKey: geomKey(A) },
+      { sensor: sb.sensor, gsdM: gsdMeters(B), date: B.datetime, geometryKey: geomKey(B) },
+      aoiKm2 ? va / aoiKm2 : 0, aoiKm2 ? vb / aoiKm2 : 0, 0.6, isTh() ? 'th' : 'en',
+    );
+    const season = !sameSeasonWindow(A.datetime, B.datetime);
+    setCcInfo({ warnings: comp.warnings, validShare: comp.validShare, season });
+    if (!comp.ok) throw new Error(`${tl('Not comparable', 'เปรียบเทียบไม่ได้')}: ${comp.blocking.join(' · ')}`);
+    const classes = classChange({ cls: la.refined.cls, level: la.refined.level, qa: la.qa }, { cls: lb.refined.cls, level: lb.refined.level, qa: lb.qa }, { differentSeason: season, mask });
+    const areas: Record<number, number> = {};
+    let valid = 0, noData = 0;
+    for (let p = 0; p < classes.length; p++) {
+      if (!mask[p]) continue;
+      const a = rowA[Math.floor(p / grid.width)];
+      if (classes[p] === CC.NotCheckable) { noData += a; continue; }
+      valid += a;
+      areas[classes[p]] = (areas[classes[p]] ?? 0) + a;
+    }
+    const url = drapeImage(grid, (p) => (mask[p] ? CC_INFO[classes[p] as CC]?.rgba ?? null : null), (p) => !!CC_INFO[classes[p] as CC]?.hatch);
+    const out: Classified = { grid, classes, areasKm2: areas, validKm2: valid, noDataKm2: noData, aoiKm2, imageUrl: url, pngUrl: url };
+    const legendItems = [...CC_SHOWN.filter((c) => c !== CC.NoChange), CC.NotCheckable].map((c) => ({ color: `rgba(${CC_INFO[c].rgba.slice(0, 3).join(',')},${(CC_INFO[c].rgba[3] / 255).toFixed(2)})`, label: nameOf(CC_INFO[c]) }));
+    const prov = await imageProvider(url, grid.west, grid.south, grid.east, grid.north);
+    g.putImagery('change', `${t('Change')} · ${tl('land-cover classes', 'ประเภทสิ่งปกคลุมดิน')}`, prov, {
+      meta: `${sceneLabel(A)} → ${sceneLabel(B)}`,
+      legend: { items: legendItems, note: tl('Provisional rule-based classes on both dates. Change is counted only where both dates are at least medium confidence; seasonal crop / water changes between seasons are shown as uncertain.', 'จำแนกด้วยกฎแบบเบื้องต้นทั้งสองวัน · นับเป็นการเปลี่ยนแปลงเฉพาะพิกเซลที่ทั้งสองวันมีความเชื่อมั่นอย่างน้อยระดับปานกลาง · การเปลี่ยนของพืชไร่หรือน้ำตามฤดูกาลระหว่างต่างฤดูแสดงเป็น “ไม่แน่นอน”') },
+    });
+    setRes(out);
+    setResMeta({ A, B, kind: 'landcover', thr: 0, legend: legendItems });
+    g.putReport({
+      id: 'change',
+      title: 'Change detection — land-cover class change (provisional)',
+      lines: [
+        `Before (A): ${A.id} (${A.datetime}) · After (B): ${B.id} (${B.datetime})`,
+        `Classification: ${la.methodLabel} on both dates (provisional, not validated)`,
+        `Usable in both images: ${(comp.validShare * 100).toFixed(0)}% of the AOI`,
+        season ? 'Different seasons: agricultural / seasonal-water changes downgraded to uncertain' : 'Same season window (±45 days)',
+        ...CC_SHOWN.map((c) => `${CC_INFO[c].en}: ${(areas[c] ?? 0).toFixed(3)} km² (${((areas[c] ?? 0) * 625).toFixed(1)} rai)`),
+        `Not checkable (cloud / shadow / no data): ${noData.toFixed(3)} km²`,
+        ...comp.warnings,
+      ],
+    });
   };
 
   const runRef = useRef(run);
@@ -225,12 +311,13 @@ export default function ChangePanel() {
       <Select value={kind} onChange={(e) => { const k = e.target.value as Kind; setKind(k); setThr(k === 'sar' ? 3 : k === 'general' ? 0.05 : 0.15); }}>
         {KINDS.map((k) => <option key={k.id} value={k.id}>{t(k.label)}</option>)}
       </Select>
-      {kind !== 'dnbr' && (
+      {kind === 'landcover' && <p className="text-[10px] leading-snug text-muted">{tl('Classifies both images with the multi-index rules (QA-masked), then compares classes. Separates vegetation, water, built-up and bare-soil change; anything not clear-cut is “uncertain change”. This is separate from the index-difference methods above.', 'จำแนกภาพทั้งสองด้วยกฎหลายดัชนี (ตัดพิกเซลที่ไม่ผ่านการตรวจคุณภาพ) แล้วเทียบประเภท · แยกการเปลี่ยนแปลงของพืชพรรณ น้ำ สิ่งปลูกสร้าง และดินเปล่า · กรณีที่ไม่ชัดเจนแสดงเป็น “การเปลี่ยนแปลงไม่แน่นอน” · แยกจากวิธีหาผลต่างของดัชนีด้านบน')}</p>}
+      {kind !== 'dnbr' && kind !== 'landcover' && (
         <Field label={kind === 'sar' ? t('Change threshold (dB)') : t('Change threshold |Δ|')}>
           <Input type="number" step={kind === 'sar' ? 0.5 : 0.01} value={thr} onChange={(e) => setThr(Math.abs(+e.target.value))} />
         </Field>
       )}
-      <p className="text-[10px] text-muted">{t('A lower threshold detects more change but also more noise. Land-cover classification change is not available (needs a classifier).')}</p>
+      <p className="text-[10px] text-muted">{t('A lower threshold detects more change but also more noise. For class-based change choose “Land-cover class change”.')}</p>
       {warn.length > 0 && <Notice tone="warn">{warn.map((w) => <div key={w}>• {t(w)}</div>)}</Notice>}
       <div className="flex flex-wrap gap-1.5">
         <Button variant="primary" onClick={() => run()} disabled={!aoi || !A || !B || !!busy}>{t('Detect change')}</Button>
@@ -241,10 +328,16 @@ export default function ChangePanel() {
       {swipe && <p className="text-[10px] text-cyan-300">{t('Drag the swipe slider at the bottom of the map.')}</p>}
       {busy && <div className="flex items-center gap-2 text-xs text-muted"><Spinner /> {busy}</div>}
       {err && <Notice tone="bad">{err}</Notice>}
+      {ccInfo && ccInfo.warnings.length > 0 && <Notice tone="warn">{ccInfo.warnings.map((w) => <div key={w}>• {w}</div>)}</Notice>}
+      {res && res.validKm2 < 0.6 * res.aoiKm2 && (
+        <Notice tone="warn">{tl('Less than 60% of the AOI could be compared (cloud, shadow or no data). Do not read the remaining area as “no change”.', 'เปรียบเทียบได้น้อยกว่า 60% ของ AOI (เมฆ เงา หรือไม่มีข้อมูล) · ห้ามตีความพื้นที่ที่เหลือว่า “ไม่เปลี่ยนแปลง”')}</Notice>
+      )}
       {res && (
-        <div className="rounded border border-line p-2">
+        <div className="ov-enter rounded border border-line p-2">
           <dl>
-            {kind === 'dnbr'
+            {resMeta?.kind === 'landcover'
+              ? CC_SHOWN.map((c) => <KV key={c} k={nameOf(CC_INFO[c])} v={`${fmtA(res.areasKm2[c] ?? 0)} · ${fmtNum((100 * (res.areasKm2[c] ?? 0)) / Math.max(res.aoiKm2, 1e-9), 1)} %`} mono />)
+              : kind === 'dnbr'
               ? DNBR_CLASSES.slice(1).map((c) => <KV key={c.id} k={t(c.label)} v={`${fmtNum(res.areasKm2[c.id] ?? 0, 3)} km²`} mono />)
               : (
                 <>
@@ -253,8 +346,8 @@ export default function ChangePanel() {
                   <KV k={t('No significant change')} v={`${fmtNum(res.areasKm2[3] ?? 0, 3)} km²`} mono />
                 </>
               )}
-            <KV k={t('No data / cloud')} v={`${fmtNum(res.noDataKm2, 3)} km²`} mono />
-            <KV k={t('Valid area')} v={`${fmtNum(res.validKm2, 3)} / ${fmtNum(res.aoiKm2, 3)} km²`} mono />
+            <KV k={t('No data / cloud')} v={fmtA(res.noDataKm2)} mono />
+            <KV k={t('Valid area')} v={`${fmtA(res.validKm2)} / ${fmtA(res.aoiKm2)}`} mono />
           </dl>
           <div className="mt-2 flex flex-wrap gap-1">
             <Button onClick={() => downloadJson('change-summary.geojson', { type: 'Feature', geometry: aoi!.geometry, properties: { kind, threshold: kind === 'dnbr' ? 'Key & Benson 2006' : thr, before: A?.id, after: B?.id, areasKm2: res.areasKm2, noDataKm2: res.noDataKm2, validKm2: res.validKm2, rasterBounds: [res.grid.west, res.grid.south, res.grid.east, res.grid.north] } })}>
@@ -269,7 +362,9 @@ export default function ChangePanel() {
               result={res}
               legend={resMeta.legend}
               summaryLines={[
-                resMeta.kind === 'dnbr'
+                resMeta.kind === 'landcover'
+                  ? CC_SHOWN.filter((c) => c !== CC.NoChange && (res.areasKm2[c] ?? 0) > 0).map((c) => `${nameOf(CC_INFO[c])}: ${fmtA(res.areasKm2[c] ?? 0)}`).join(' · ')
+                  : resMeta.kind === 'dnbr'
                   ? DNBR_CLASSES.slice(1).map((c) => `${t(c.label)}: ${fmtNum(res.areasKm2[c.id] ?? 0, 2)} km²`).join(' · ')
                   : `${t('Increase')}: ${fmtNum(res.areasKm2[1] ?? 0, 2)} km² · ${t('Decrease')}: ${fmtNum(res.areasKm2[2] ?? 0, 2)} km² (|Δ| ≥ ${resMeta.thr})`,
                 `${t('No data / cloud')}: ${fmtNum(res.noDataKm2, 2)} km²`,
@@ -303,8 +398,8 @@ function SeriesChart({ series, label }: { series: { date: string; value: number;
         <line x1={P} x2={W - 6} y1={H - 14} y2={H - 14} stroke="rgba(148,178,214,0.2)" />
         <text x={2} y={y(hi) + 3} fontSize="8" fill="#939d9a">{hi.toFixed(2)}</text>
         <text x={2} y={y(lo) + 3} fontSize="8" fill="#939d9a">{lo.toFixed(2)}</text>
-        <path d={path} fill="none" stroke="#91a58d" strokeWidth={1.8} />
-        {series.map((s, i) => <circle key={s.id} cx={x(ts[i])} cy={y(s.value)} r={2.6} fill={s.clear ? '#91a58d' : '#d5aa69'}><title>{`${s.date}: ${s.value.toFixed(3)}`}</title></circle>)}
+        <path d={path} fill="none" stroke="#2fc4b2" strokeWidth={1.8} />
+        {series.map((s, i) => <circle key={s.id} cx={x(ts[i])} cy={y(s.value)} r={2.6} fill={s.clear ? '#2fc4b2' : '#d5aa69'}><title>{`${s.date}: ${s.value.toFixed(3)}`}</title></circle>)}
         <text x={P} y={H - 2} fontSize="8" fill="#939d9a">{series[0].date}</text>
         <text x={W - 6} y={H - 2} fontSize="8" fill="#939d9a" textAnchor="end">{series[series.length - 1].date}</text>
       </svg>
