@@ -242,13 +242,16 @@ export function ScenePicker({
   const pick = async (it: ImageryItem) => {
     if (familyOf(it) === 'optical' && cl[it.id] === undefined) await measure([it]);
     setBusy('');
-    if (slot === 'A') {
-      setA(it);
-      setSlot('B');
+    const nA = slot === 'A' ? it : A, nB = slot === 'A' ? B : it;
+    // the earlier image is always "before" (A), whichever order the dots were clicked in
+    if (nA && nB && nA.datetime > nB.datetime) {
+      setA(nB);
+      setB(nA);
     } else {
-      setB(it);
-      setSlot('A');
+      setA(nA);
+      setB(nB);
     }
+    setSlot(slot === 'A' ? 'B' : 'A');
   };
 
   const pair = A && B ? checkPair(A, B, qc) : null;
