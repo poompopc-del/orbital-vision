@@ -8,6 +8,8 @@
 //  • every number comes from pixels actually read; every run records its scenes and method
 //  • confidence is derived from cloud-free coverage, scene geometry and time gap, and is shown
 import { classify, cellAreaKm2, cellLonLat, fetchRaster, gridFor, type ClassDef, type Classified, type Raster } from './change';
+import { detectLinear } from './linear';
+import { getRefPoints, nearestRef, nearText, type Near } from './refpoints';
 import { pickBestScene } from './autoscene';
 import { aoiStatistics, indexExpression, indexSummary, INDICES, refl, S2_CLEAR_EXPR, sarDbExpression, sensorOf } from './spectral';
 import { renderScene } from './export';
@@ -20,7 +22,7 @@ const areaKm2 = (g: GeoJSON.Polygon) => geometryAreaKm2(g);
 
 // ---------------------------------------------------------------- types
 
-export type Purpose = 'clearing' | 'construction' | 'water' | 'fire' | 'general';
+export type Purpose = 'clearing' | 'track' | 'construction' | 'water' | 'fire' | 'general';
 export type Region = 'TH-KH' | 'TH-MY' | 'TH-MM' | 'TH-LA' | 'TH' | 'OTHER';
 /** Which satellite a watch area uses: 'optical' = Sentinel-2 (kept for older saved areas). */
 export type SensorMode = 'auto' | 'optical' | 'landsat' | 'optical-any' | 'sar';
@@ -77,6 +79,8 @@ export interface Hotspot {
   shape?: 'linear' | 'patch';
   /** length of the long axis, km */
   lengthKm?: number;
+  /** nearest imported reference point (boundary pillar, hill, pass…) within 15 km, at the time of the run */
+  near?: Near;
 }
 export const hotspotKm2 = (h: Hotspot) => h.areaKm2 ?? h.areaHa / 100;
 
@@ -155,6 +159,7 @@ export interface MonitorRun {
 
 export const PURPOSES: { id: Purpose; label: string; labelTh: string; hint: string; hintTh: string }[] = [
   { id: 'clearing', label: 'Forest clearing / encroachment', labelTh: 'บุกรุก / ถางป่า', hint: 'NDVI drop on previously vegetated land (optical) or VH backscatter drop (radar)', hintTh: 'NDVI ลดลงในพื้นที่ที่เคยมีพืชปกคลุม (ออปติคัล) หรือค่าสะท้อนกลับ VH ลดลง (เรดาร์)' },
+  { id: 'track', label: 'New tracks / roads through forest (narrow)', labelTh: 'แนวทาง / ถนนใหม่ในป่า (แนวแคบ)', hint: 'Sentinel-2 only: finds narrow lines of NDVI loss (tracks 4–10 m wide) by averaging along the line — catches what per-pixel thresholds miss', hintTh: 'ใช้ Sentinel-2 เท่านั้น: หาแนว NDVI ลดลงที่แคบกว่าพิกเซล (ทางกว้าง 4–10 ม.) โดยเฉลี่ยค่าตามแนวเส้น — เห็นทางที่วิธีรายพิกเซลมองไม่เห็น' },
   { id: 'construction', label: 'New roads / structures / bare ground', labelTh: 'ถนน สิ่งปลูกสร้าง ดินเปิดใหม่', hint: 'NDVI down + NDBI up (optical) or strong VV increase (radar)', hintTh: 'NDVI ลดลงและ NDBI เพิ่มขึ้น (ออปติคัล) หรือค่า VV เพิ่มขึ้นมาก (เรดาร์)' },
   { id: 'water', label: 'Flood / water extent', labelTh: 'น้ำท่วม / แหล่งน้ำ', hint: 'MNDWI (optical) or low VV backscatter (radar)', hintTh: 'MNDWI (ออปติคัล) หรือค่าสะท้อนกลับ VV ต่ำ (เรดาร์)' },
   { id: 'fire', label: 'Burned area / wildfire', labelTh: 'ไฟป่า / พื้นที่เผาไหม้', hint: 'dNBR (optical only)', hintTh: 'dNBR (ออปติคัลเท่านั้น)' },
@@ -299,6 +304,8 @@ interface Method {
   fn: (a: number[], b: number[]) => number;
   legend: LegendItem[];
   interest: number[];
+  /** classified by the line detector (src/lib/linear.ts) on input 0 instead of fn pixel by pixel */
+  linear?: boolean;
 }
 
 const idx = (id: string) => (it: ImageryItem) => ({ expr: indexExpression(it, INDICES.find((i) => i.id === id)!), range: [-1, 1] as [number, number] });
@@ -318,6 +325,15 @@ function methodFor(p: Purpose, sensor: 'optical' | 'sar'): Method | null {
             { id: 2, label: 'Vegetation gain', labelTh: 'พืชพรรณเพิ่มขึ้น', color: rgba('#22c55e') },
           ],
           interest: [1],
+        };
+      case 'track':
+        return {
+          sensor, text: 'Sentinel-2 NDVI, line detector: drop averaged along 150 m segments at 12 orientations, minus parallel segments 30 m to each side (ridge, not edge); threshold from the scene\'s own response (median + 4.5·MAD, ≥ 0.04); pieces ≥ 150 m long and thin; only on tree/shrub cover (ESA WorldCover 2021). Cloud/shadow masked with SCL. Tracks under closed canopy or narrower than ~4 m are not visible at 10 m.',
+          inputs: (it) => [idx('ndvi')(it)],
+          fn: () => 3,
+          legend: [{ id: 1, label: 'New narrow line of vegetation loss (possible track / road / cut line)', labelTh: 'แนวพืชพรรณหายแบบแคบ (อาจเป็นทาง ถนน หรือแนวตัดใหม่)', color: '#f43f5e' }],
+          interest: [1],
+          linear: true,
         };
       case 'construction':
         return {
@@ -409,7 +425,7 @@ const RAD: StacCollectionId = 'sentinel-1-rtc';
 
 
 // ---- ESA WorldCover 2021 (10 m) land-cover mask, read through the Planetary Computer data API
-const WC_ALLOW: Partial<Record<Purpose, number[]>> = { clearing: [10, 20] }; // tree cover, shrubland
+const WC_ALLOW: Partial<Record<Purpose, number[]>> = { clearing: [10, 20], track: [10, 20] }; // tree cover, shrubland
 const WC_DENY: Partial<Record<Purpose, number[]>> = { construction: [40, 50] }; // cropland, built-up
 
 async function worldCoverItem(aoi: GeoJSON.Polygon, signal?: AbortSignal): Promise<ImageryItem | null> {
@@ -761,6 +777,20 @@ export async function compareScenes(
       { id: SHADOW, label: 'Cloud shadow', rgba: [120, 90, 200, 170], hatch: true },
       { id: NODATA, label: 'No data', rgba: [90, 90, 90, 150], hatch: true },
     ];
+    // ---- narrow lines: run the line detector on NDVI with everything not analysable blanked out
+    let lineMask: Uint8Array | null = null;
+    if (m.linear) {
+      progress('ตรวจหาแนวทางแคบ (เฉลี่ยตามแนวเส้น 12 ทิศ)…');
+      const blank = (vals: Raster, other: Raster, state: Raster | null, otherState: Raster | null) =>
+        Float32Array.from(vals.values, (v, p) => (cloudD[p] || shadowD[p] || st(state, p) === 0 || st(otherState, p) === 0 || Number.isNaN(other.values[p]) ? NaN : v));
+      const na = blank(ra.vals[0], rb.vals[0], ra.state, rb.state), nb = blank(rb.vals[0], ra.vals[0], rb.state, ra.state);
+      // the tile grid is finer than Sentinel-2 (z15 ≈ 4.6 m): detect at ≈ 10 m, then map back
+      const f = Math.max(1, Math.round(10 / mPx));
+      const w2 = Math.ceil(W / f), h2 = Math.ceil(H / f);
+      const lin = detectLinear(blockMean(na, W, H, f), blockMean(nb, W, H, f), w2, h2, { pixelM: mPx * f });
+      lineMask = new Uint8Array(NP);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) lineMask[y * W + x] = lin.mask[((y / f) | 0) * w2 + ((x / f) | 0)];
+    }
     const res: Classified = classify(aoi, idxR, idxR, (pa) => {
       const p = pa as number;
       const sa = st(ra.state, p), sb = st(rb.state, p);
@@ -772,7 +802,7 @@ export async function compareScenes(
         va.push(ra.vals[k].values[p]);
         vb.push(rb.vals[k].values[p]);
       }
-      const c = m.fn(va, vb);
+      const c = lineMask ? (lineMask[p] ? 1 : 3) : m.fn(va, vb);
       if (lc && m.interest.includes(c) && !(lc[p] > 1.5)) return 3;
       return c;
     }, defs);
@@ -786,7 +816,16 @@ export async function compareScenes(
     const validFrac = validKm2 / Math.max(res.aoiKm2, 1e-12);
 
     const pixKm2 = Math.max(gsdMeters(A), gsdMeters(B)) ** 2 / 1e6;
-    const { list: hotspots, totalKm2 } = findHotspots(res, m.interest, Math.max(sensor === 'sar' ? 0.005 : 0.002, 20 * pixKm2));
+    const found = findHotspots(res, m.interest, m.linear ? 10 * pixKm2 : Math.max(sensor === 'sar' ? 0.005 : 0.002, 20 * pixKm2));
+    const totalKm2 = found.totalKm2;
+    // where each detection is, relative to the user's imported reference points (none on the server checker)
+    const refs = await getRefPoints().catch(() => []);
+    const withNear = (h: Hotspot): Hotspot => { const nr = refs.length ? nearestRef(h.lon, h.lat, refs) : null; return nr ? { ...h, near: nr } : h; };
+    // the line detector only keeps long thin pieces: report them as lines, longest first, whatever their exact moments
+    const hotspots = (m.linear
+      ? [...found.list].sort((x, y) => (y.lengthKm ?? 0) - (x.lengthKm ?? 0)).map((h, i) => ({ ...h, n: i + 1, shape: 'linear' as const }))
+      : found.list
+    ).map(withNear);
     const quality = comparisonQuality({
       validFrac,
       aoiCloudA: clA ? (clA.cloudPct + clA.shadowPct) / 100 : null,
@@ -825,7 +864,11 @@ export async function compareScenes(
       return { ...common, status: 'insufficient', reason: `พื้นที่ใช้วิเคราะห์ได้ ${(validFrac * 100).toFixed(0)}% ต่ำกว่าเกณฑ์ ${qc.minValidPct}% (เมฆ ${fmtArea(cloudKm2)}, เงาเมฆ ${fmtArea(shadowKm2)}, ไม่มีข้อมูล ${fmtArea(missKm2)}) — เลือกภาพวันอื่น` };
 
     const sigKm2 = Math.max(0.02, 0.01 * validKm2);
-    const level: Level = totalKm2 >= sigKm2 ? 'significant' : totalKm2 >= 0.003 ? 'minor' : 'none';
+    // lines are judged by length (their 10 m footprint says little about the track itself): ≥ 0.5 km significant
+    const lineKm = hotspots.reduce((t, h) => t + (h.lengthKm ?? 0), 0);
+    const level: Level = m.linear
+      ? (lineKm >= 0.5 ? 'significant' : hotspots.length ? 'minor' : 'none')
+      : totalKm2 >= sigKm2 ? 'significant' : totalKm2 >= 0.003 ? 'minor' : 'none';
     // classification confidence (separate from image quality)
     const notes: string[] = [];
     let score = quality.score >= 75 ? 3 : quality.score >= 50 ? 2 : 1;
@@ -833,6 +876,7 @@ export async function compareScenes(
     if (sensor === 'sar') { notes.push('สัญญาณเรดาร์เปลี่ยนได้จากความชื้นดิน พืชผล ฝน หรือความหยาบผิว ไม่ใช่เฉพาะการเปลี่ยนแปลงจริง'); score = Math.min(score, 2); }
     if (A.collection !== B.collection) { notes.push('เทียบข้ามเซนเซอร์'); score = Math.min(score, 2); }
     if (lcNote) { notes.push(lcNote); score = Math.max(1, score - 1); }
+    if (m.linear && hotspots.length) notes.push('แนวแคบตรวจจากค่าเฉลี่ยตามแนวเส้น ควรเปิดดูภาพก่อน–หลังยืนยันด้วยตา (แนวกันไฟ ทางเดิมที่โล่งขึ้นตามฤดู หรือขอบเงาเมฆ อาจให้ผลคล้ายกัน)');
     pair.notes.forEach((x) => notes.push(x));
     const confidence = score >= 3 ? 'high' : score === 2 ? 'medium' : 'low';
     return { ...common, status: 'ok', hotspots, level, confidence, confidenceNotes: notes };
@@ -868,6 +912,22 @@ function dilate(m: Uint8Array, W: number, H: number, r: number): Uint8Array {
   if (r <= 0) return m;
   const s = boxSum(Float32Array.from(m), W, H, r);
   return Uint8Array.from(s, (x) => (x > 0.5 ? 1 : 0));
+}
+/** NaN-aware mean over f×f blocks (f = 1 returns the input). */
+function blockMean(v: Float32Array, W: number, H: number, f: number): Float32Array {
+  if (f <= 1) return v;
+  const w = Math.ceil(W / f), h = Math.ceil(H / f);
+  const s = new Float32Array(w * h), n = new Uint16Array(w * h);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const a = v[y * W + x];
+      if (Number.isNaN(a)) continue;
+      const q = ((y / f) | 0) * w + ((x / f) | 0);
+      s[q] += a;
+      n[q]++;
+    }
+  // a block counts only when at least half of it is analysable
+  return Float32Array.from(s, (t, q) => (n[q] >= (f * f) / 2 ? t / n[q] : NaN));
 }
 /** Haze-optimised transform (Zhang et al. 2002): blue − 0.5·red − 0.08. Rises with haze / thin cloud but
  *  hardly moves when vegetation turns into bare soil, so it separates the two. */
@@ -951,16 +1011,20 @@ export function narrative(r: MonitorRun, lang: 'th' | 'en', unit: AreaUnit = 'km
   const lines: string[] = [];
   const label = r.legend?.find((l) => r.interest?.includes(l.id));
   const what = th ? label?.labelTh ?? 'การเปลี่ยนแปลง' : label?.label ?? 'change';
-  if (r.level === 'none') lines.push(th ? `ไม่พบการเปลี่ยนแปลงที่เกินเกณฑ์ในส่วนที่ตรวจสอบได้` : `No change above the threshold in the part that could be checked.`);
-  else lines.push(th ? `พบ${what} รวม ${A(s.interestKm2)} ${r.hotspots?.length ?? 0} จุด` : `${what}: ${A(s.interestKm2)} in ${r.hotspots?.length ?? 0} patch(es).`);
   const lin = (r.hotspots ?? []).filter((h) => h.shape === 'linear');
-  if (lin.length && r.level !== 'none') {
-    const km = lin.reduce((t, h) => t + (h.lengthKm ?? 0), 0);
+  const linKm = lin.reduce((t, h) => t + (h.lengthKm ?? 0), 0);
+  if (r.level === 'none') lines.push(th ? `ไม่พบการเปลี่ยนแปลงที่เกินเกณฑ์ในส่วนที่ตรวจสอบได้` : `No change above the threshold in the part that could be checked.`);
+  else if (r.purpose === 'track') lines.push(th ? `พบ${what} ${lin.length} แนว ยาวรวมราว ${fmt(linKm, 1)} กม.` : `${what}: ${lin.length} line(s), ≈ ${fmt(linKm, 1)} km in total.`);
+  else lines.push(th ? `พบ${what} รวม ${A(s.interestKm2)} ${r.hotspots?.length ?? 0} จุด` : `${what}: ${A(s.interestKm2)} in ${r.hotspots?.length ?? 0} patch(es).`);
+  if (lin.length && r.level !== 'none' && r.purpose !== 'track') {
+    const km = linKm;
     lines.push(th ? `ในนี้ ${lin.length} จุดเป็นแนวยาว (รวมราว ${fmt(km, 1)} กม.) — ลักษณะแบบถนน ทางตัดใหม่ หรือแนวถางป่า · ที่เหลือเป็นผืน (ลานดิน ที่โล่ง หรือสิ่งปลูกสร้าง)` : `${lin.length} of them are long and thin (≈ ${fmt(km, 1)} km in total) — the shape of a road, new track or cut line · the rest are patches (yards, clearings or structures).`);
   }
   if (r.confirmedBy && r.level !== 'none') lines.push(th ? `ยืนยันแล้ว: พบในภาพ ${r.confirmedBy.first.slice(0, 10)} และยังอยู่ในภาพ ${r.confirmedBy.second.slice(0, 10)} (ไม่ใช่เมฆหรือหมอกชั่วคราว)` : `Confirmed: seen on ${r.confirmedBy.first.slice(0, 10)} and still there on ${r.confirmedBy.second.slice(0, 10)} (not passing cloud or haze).`);
   const big = r.hotspots?.[0];
-  if (big && r.level !== 'none') lines.push(th ? `จุดใหญ่ที่สุด ${A(hotspotKm2(big))} ที่พิกัด ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}` : `Largest patch ${A(hotspotKm2(big))} at ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}.`);
+  const at = (h: Hotspot) => (h.near ? (th ? ` (${nearText(h.near, true)})` : ` (${nearText(h.near, false)})`) : '');
+  if (big && r.level !== 'none' && r.purpose === 'track') lines.push(th ? `แนวยาวที่สุดราว ${fmt(big.lengthKm ?? 0, 2)} กม. กลางแนวที่พิกัด ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}${at(big)}` : `Longest line ≈ ${fmt(big.lengthKm ?? 0, 2)} km, centred at ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}${at(big)}.`);
+  else if (big && r.level !== 'none') lines.push(th ? `จุดใหญ่ที่สุด ${A(hotspotKm2(big))} ที่พิกัด ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}${at(big)}` : `Largest patch ${A(hotspotKm2(big))} at ${big.lat.toFixed(4)}, ${big.lon.toFixed(4)}${at(big)}.`);
   const sa = SENSOR_TH[r.A?.collection ?? ''] ?? r.A?.label, sb = SENSOR_TH[r.B?.collection ?? ''] ?? r.B?.label;
   const sens = sa === sb ? sa : `${sa} / ${sb}`;
   const vs = r.baseline && r.baseline !== 'previous' ? (th ? ` · เทียบกับ${baselineLabel(r.baseline, true)}` : ` · vs ${baselineLabel(r.baseline, false).toLowerCase()}`) : '';
