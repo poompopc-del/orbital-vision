@@ -83,9 +83,9 @@ export default function ImageryFlow() {
   // area changed: show it, reset the picked images and the results drawn for the old area
   useEffect(() => {
     if (!viewer || viewer.isDestroyed()) return;
-    showAoi(viewer, aoi?.geometry ?? null, 'flow-aoi');
+    showAoi(viewer, aoi?.geometry ?? null, 'flow-aoi', aoi?.center);
     viewer.scene.requestRender();
-  }, [viewer, aoi?.geometry]);
+  }, [viewer, aoi?.geometry, aoi?.center?.join(',')]);
   useEffect(() => {
     setPick(null);
     setModeS(null); // the chosen mode (wanted) is kept and reopened for the new area
@@ -450,7 +450,7 @@ function ModeBody({ mode, pick, watch, onWatch, addRun, onMode }: { mode: Mode; 
       <p className="text-[10px] text-muted">{(() => { const pp = PURPOSES.find((p) => p.id === purpose); return pp ? L(pp.hintTh, pp.hint) : null; })()}</p>
       {!pick.pairOk && (
         <Notice tone="warn">
-          {pick.pair && !pick.pair.ok ? pick.pair.reasons.join(' · ') : L('ภาพที่เลือกยังไม่ผ่านเกณฑ์คุณภาพ (เมฆ/ยังไม่ได้วัดเมฆ) · เลือกจุดสีเขียวในขั้นที่ 2 เพื่อให้ผลเชื่อถือได้', 'A selected image does not pass the quality thresholds yet (cloud / not measured) — pick green dots in step 2')}
+          {pick.pair && !pick.pair.ok ? pick.pair.reasons.join(' · ') : L('ภาพที่เลือกมีเมฆในกรอบเกินเกณฑ์ (หรือยังไม่ได้วัดเมฆ) · ยังวิเคราะห์ได้ แต่ตรวจเฉพาะส่วนที่โปร่ง และความเชื่อมั่นจะลดลง · ถ้าเรื่องที่สนใจอยู่ส่วนเดียวของกรอบ ย่อกรอบให้เหลือแค่ตรงนั้นในขั้นที่ 1 จะได้ผลดีกว่า', 'A selected image is cloudier than the thresholds in the area (or not measured yet) · it can still be analysed, on the clear part only and with lower confidence · if what matters is in one part of the box, shrink the box to it in step 1')}
         </Notice>
       )}
       <div className="flex gap-1.5">

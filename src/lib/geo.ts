@@ -1,7 +1,8 @@
 import * as turf from '@turf/turf';
 import { bumpQuota } from './quotas';
 
-export type Aoi = { name: string; geometry: GeoJSON.Polygon; source: 'drawn' | 'search' | 'coordinates' | 'import' };
+/** `center`: the point the user gave (typed coordinates, POI click, imported point) — marked on the map, and the box can be resized around it. */
+export type Aoi = { name: string; geometry: GeoJSON.Polygon; source: 'drawn' | 'search' | 'coordinates' | 'import'; center?: [number, number] };
 
 export function bboxPolygon(w: number, s: number, e: number, n: number): GeoJSON.Polygon {
   return { type: 'Polygon', coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] };

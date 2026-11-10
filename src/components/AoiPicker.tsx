@@ -13,6 +13,10 @@ const PINS_KEY = 'ov.aoi.pins.v1';
 const PINS_HIDDEN_KEY = 'ov.aoi.pins.hidden.v1';
 const PIN_COLOR = Cesium.Color.fromCssColorString('#d5aa69');
 
+/** Box side for a single point (typed coordinates, POI click) and the sizes offered to resize it, km. */
+const POINT_BOX_KM = 5;
+const BOX_SIZES = [1, 2, 3, 5, 10, 20];
+
 export default function AoiPicker({ viewer, compact, onMany }: { viewer?: Cesium.Viewer | null; compact?: boolean; /** offered when a file holds several places */ onMany?: (places: ImportedPlace[]) => void }) {
   const { aoi, setAoi } = useWorkspace();
   const [q, setQ] = useState('');
@@ -105,8 +109,8 @@ export default function AoiPicker({ viewer, compact, onMany }: { viewer?: Cesium
     if (!aoi) setEditing(false);
   }, [aoi]);
 
-  const apply = (geometry: GeoJSON.Polygon, name: string, source: 'drawn' | 'search' | 'coordinates' | 'import') => {
-    setAoi({ geometry, name, source });
+  const apply = (geometry: GeoJSON.Polygon, name: string, source: 'drawn' | 'search' | 'coordinates' | 'import', center?: [number, number]) => {
+    setAoi(center ? { geometry, name, source, center } : { geometry, name, source });
     if (viewer && !viewer.isDestroyed()) flyToPolygon(viewer, geometry);
     void logAudit('aoi.set', { name, source, areaKm2: Math.round(areaKm2(geometry)) });
   };
@@ -129,8 +133,8 @@ export default function AoiPicker({ viewer, compact, onMany }: { viewer?: Cesium
   const pick = (h: GeocodeHit) => {
     setHits([]);
     const isPoint = !h.bbox || (h.bbox[2] - h.bbox[0] < 0.01 && h.bbox[3] - h.bbox[1] < 0.01);
-    const geom = isPoint ? pointAoi(h.lon, h.lat, 10) : bboxPolygon(...(h.bbox as [number, number, number, number]));
-    apply(geom, h.label.split(',').slice(0, 2).join(','), isPoint && !h.bbox ? 'coordinates' : 'search');
+    const geom = isPoint ? pointAoi(h.lon, h.lat, POINT_BOX_KM) : bboxPolygon(...(h.bbox as [number, number, number, number]));
+    apply(geom, h.label.split(',').slice(0, 2).join(','), isPoint && !h.bbox ? 'coordinates' : 'search', isPoint ? [h.lon, h.lat] : undefined);
   };
 
   const startDraw = async (mode: DrawMode) => {
@@ -142,13 +146,13 @@ export default function AoiPicker({ viewer, compact, onMany }: { viewer?: Cesium
     const pts = await d.promise;
     setDrawing(null);
     if (!pts) return;
-    if (mode === 'point') apply(pointAoi(pts[0][0], pts[0][1], 10), `POI ${pts[0][1].toFixed(4)}, ${pts[0][0].toFixed(4)}`, 'drawn');
+    if (mode === 'point') apply(pointAoi(pts[0][0], pts[0][1], POINT_BOX_KM), `POI ${pts[0][1].toFixed(4)}, ${pts[0][0].toFixed(4)}`, 'drawn', [pts[0][0], pts[0][1]]);
     else apply({ type: 'Polygon', coordinates: [pts] }, mode === 'rectangle' ? 'Drawn rectangle' : 'Drawn polygon', 'drawn');
   };
 
   const usePlace = async (p: ImportedPlace) => {
     const { placePolygon } = await import('../lib/coordImport');
-    apply(placePolygon(p, 2), p.name, 'import');
+    apply(placePolygon(p, 2), p.name, 'import', p.kind === 'point' ? [p.lon, p.lat] : undefined);
   };
   const onFile = async (f?: File) => {
     if (!f) return;
@@ -253,6 +257,22 @@ export default function AoiPicker({ viewer, compact, onMany }: { viewer?: Cesium
               <span>W {b.west.toFixed(5)}°</span>
               <span>E {b.east.toFixed(5)}°</span>
             </div>
+            {aoi.center && (
+              <div className="mt-1.5 rounded border border-white/10 px-1.5 py-1">
+                <div className="flex items-center gap-1 font-mono text-[10px] text-slate-200"><span className="text-bad">●</span>{aoi.center[1].toFixed(5)}, {aoi.center[0].toFixed(5)}</div>
+                <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+                  <span className="text-muted">{t('Box around the point')}</span>
+                  {BOX_SIZES.map((k) => {
+                    const cur = Math.abs(Math.sqrt(km2) - k) < 0.05 * k;
+                    return (
+                      <button key={k} onClick={() => apply(pointAoi(aoi.center![0], aoi.center![1], k), aoi.name, aoi.source, aoi.center)} className={cx('rounded border px-1.5 py-0.5', cur ? 'border-cyan-400 bg-cyan-400/15 text-white' : 'border-line hover:border-cyan-400/50')}>
+                        {k} {t('km')}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             {km2 > 20000 && <p className="mt-1 text-[10px] text-warn">{t('Large AOI — some analyses limit the area (statistics are resampled; hydrology needs ≤ 2,500 km²).')}</p>}
             <div className="mt-1.5 flex flex-wrap gap-1">
               {viewer && <Button variant={editing ? 'active' : 'ghost'} onClick={() => setEditing(!editing)}>{editing ? t('Done editing') : t('Edit shape')}</Button>}
