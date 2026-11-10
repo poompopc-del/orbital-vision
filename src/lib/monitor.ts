@@ -638,6 +638,10 @@ export async function runMonitor(a: MonitorAoi, periodDays: number, progress: Ru
 }
 
 const CLOUD = 250, SHADOW = 251, NODATA = 255;
+/** Manual comparisons (someone picked the two images) still give a result on the clear part of the
+ *  area when an image is cloudier than the thresholds, down to this share of the area analysable.
+ *  Automatic checks keep the strict thresholds: they send alerts unattended. */
+export const MANUAL_MIN_VALID_PCT = 25;
 
 /** Compare two given scenes over the AOI with quality control. Used by the automatic check and by manual comparison. */
 export async function compareScenes(
@@ -661,6 +665,8 @@ export async function compareScenes(
   };
   const aoi = a.geometry;
   const sensor: 'optical' | 'sar' = familyOf(B);
+  const manual = base.mode !== 'auto';
+  let cloudyNote = '';
   const metaOf = (it: ImageryItem, cl: AoiCloud | null | undefined): SceneMeta => {
     const p = it.raw?.properties ?? {};
     return {
@@ -681,11 +687,10 @@ export async function compareScenes(
       if (!clA) clA = await measureAoiCloud(A, aoi, signal).catch(() => null);
       if (!clB) clB = await measureAoiCloud(B, aoi, signal).catch(() => null);
       const fails = [['ก่อน', A, clA], ['หลัง', B, clB]].map(([lbl, it, cl]) => ({ lbl, chk: checkScene(it as ImageryItem, cl as AoiCloud | null, qc) })).filter((x) => !x.chk.ok);
-      if (fails.length)
-        return {
-          ...base, A: metaOf(A, clA), B: metaOf(B, clB), pairNotes: pair.notes,
-          reason: fails.map((x) => `ภาพ${x.lbl}: ${x.chk.pending ? 'วัดเมฆใน AOI ไม่ได้' : x.chk.reasons.join(', ')}`).join(' · '),
-        };
+      const why = fails.map((x) => `ภาพ${x.lbl}: ${x.chk.pending ? 'วัดเมฆใน AOI ไม่ได้' : x.chk.reasons.join(', ')}`).join(' · ');
+      // cloud is masked pixel by pixel below, so a manual comparison goes on with the clear part
+      if (fails.length && !manual) return { ...base, A: metaOf(A, clA), B: metaOf(B, clB), pairNotes: pair.notes, reason: why };
+      if (fails.length) cloudyNote = why;
     }
 
     // ---- read pixels + per-pixel state
@@ -860,8 +865,10 @@ export async function compareScenes(
       overlayBounds: { west: res.grid.west, south: res.grid.south, east: res.grid.east, north: res.grid.north },
     };
     // not enough analysable area → report the breakdown, but no change conclusion
-    if (validFrac * 100 < qc.minValidPct)
-      return { ...common, status: 'insufficient', reason: `พื้นที่ใช้วิเคราะห์ได้ ${(validFrac * 100).toFixed(0)}% ต่ำกว่าเกณฑ์ ${qc.minValidPct}% (เมฆ ${fmtArea(cloudKm2)}, เงาเมฆ ${fmtArea(shadowKm2)}, ไม่มีข้อมูล ${fmtArea(missKm2)}) — เลือกภาพวันอื่น` };
+    const minValid = manual ? Math.min(qc.minValidPct, MANUAL_MIN_VALID_PCT) : qc.minValidPct;
+    const partial = validFrac * 100 < qc.minValidPct;
+    if (validFrac * 100 < minValid)
+      return { ...common, status: 'insufficient', reason: `พื้นที่ใช้วิเคราะห์ได้ ${(validFrac * 100).toFixed(0)}% ต่ำกว่าเกณฑ์ ${minValid}% (เมฆ ${fmtArea(cloudKm2)}, เงาเมฆ ${fmtArea(shadowKm2)}, ไม่มีข้อมูล ${fmtArea(missKm2)}) — เลือกภาพวันอื่น` };
 
     const sigKm2 = Math.max(0.02, 0.01 * validKm2);
     // lines are judged by length (their 10 m footprint says little about the track itself): ≥ 0.5 km significant
@@ -876,6 +883,10 @@ export async function compareScenes(
     if (sensor === 'sar') { notes.push('สัญญาณเรดาร์เปลี่ยนได้จากความชื้นดิน พืชผล ฝน หรือความหยาบผิว ไม่ใช่เฉพาะการเปลี่ยนแปลงจริง'); score = Math.min(score, 2); }
     if (A.collection !== B.collection) { notes.push('เทียบข้ามเซนเซอร์'); score = Math.min(score, 2); }
     if (lcNote) { notes.push(lcNote); score = Math.max(1, score - 1); }
+    if (partial || cloudyNote) {
+      notes.push(`ตรวจได้เพียง ${(validFrac * 100).toFixed(0)}% ของกรอบ (เกณฑ์ปกติ ${qc.minValidPct}%) — ส่วนที่มีเมฆ/เงาเมฆไม่ได้ตรวจ ผลจึงครอบคลุมเฉพาะส่วนที่โปร่ง${cloudyNote ? ` · ${cloudyNote}` : ''}`);
+      score = Math.min(score, 2);
+    }
     if (m.linear && hotspots.length) notes.push('แนวแคบตรวจจากค่าเฉลี่ยตามแนวเส้น ควรเปิดดูภาพก่อน–หลังยืนยันด้วยตา (แนวกันไฟ ทางเดิมที่โล่งขึ้นตามฤดู หรือขอบเงาเมฆ อาจให้ผลคล้ายกัน)');
     pair.notes.forEach((x) => notes.push(x));
     const confidence = score >= 3 ? 'high' : score === 2 ? 'medium' : 'low';

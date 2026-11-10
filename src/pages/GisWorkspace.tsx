@@ -91,7 +91,7 @@ export default function GisWorkspace() {
     if (controller) void controller.setBasemap(basemap);
   }, [controller, basemap]);
   useEffect(() => {
-    if (viewer) showAoi(viewer, aoi?.geometry ?? null, 'gis-aoi');
+    if (viewer) showAoi(viewer, aoi?.geometry ?? null, 'gis-aoi', aoi?.center);
   }, [viewer, aoi]);
   useEffect(() => {
     if (viewer) viewer.scene.splitPosition = split;

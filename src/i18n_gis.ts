@@ -80,6 +80,8 @@ export const TH_GIS: Record<string, string> = {
   'Draw a rectangle AOI to compute statistics.': 'วาดกรอบ AOI เพื่อคำนวณสถิติ',
   'Drawn rectangle': 'กรอบที่วาด',
   'Edit shape': 'แก้ไขรูปร่าง',
+  'Box around the point': 'ขนาดกรอบรอบจุด',
+  km: 'กม.',
   'Elevation at a point': 'ความสูง ณ จุด',
   'Esri World Boundaries and Places — countries, provinces (admin-1) and places. District / sub-district boundaries are not in this source: import a GeoJSON for those.': 'Esri World Boundaries and Places มีขอบเขตประเทศ จังหวัด และชื่อสถานที่ แต่ไม่มีขอบเขตอำเภอ/ตำบล · ถ้าต้องการ ให้นำเข้าไฟล์ GeoJSON',
   'Esri World Street Map': 'Esri World Street Map',

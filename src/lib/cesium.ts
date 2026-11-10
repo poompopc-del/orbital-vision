@@ -114,12 +114,24 @@ export function flyToPolygon(viewer: Cesium.Viewer, g: GeoJSON.Polygon) {
 }
 
 /** Draw / replace the AOI entity on a viewer. */
-export function showAoi(viewer: Cesium.Viewer, g: GeoJSON.Polygon | null, id = 'ov-aoi') {
-  const prev = viewer.entities.getById(id);
-  if (prev) viewer.entities.remove(prev);
-  const prevLine = viewer.entities.getById(`${id}-line`);
-  if (prevLine) viewer.entities.remove(prevLine);
+export function showAoi(viewer: Cesium.Viewer, g: GeoJSON.Polygon | null, id = 'ov-aoi', center?: [number, number] | null) {
+  for (const k of [id, `${id}-line`, `${id}-pin`]) {
+    const prev = viewer.entities.getById(k);
+    if (prev) viewer.entities.remove(prev);
+  }
   if (!g) return;
+  // the point the user typed or clicked: a pin with its coordinates, so it is clear where it is inside the box
+  if (center) {
+    viewer.entities.add({
+      id: `${id}-pin`,
+      position: Cesium.Cartesian3.fromDegrees(center[0], center[1]),
+      point: { pixelSize: 11, color: Cesium.Color.fromCssColorString('#ef4444'), outlineColor: Cesium.Color.WHITE, outlineWidth: 2.5, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: {
+        text: `${center[1].toFixed(5)}, ${center[0].toFixed(5)}`, font: '600 12px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -18), disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+  }
   const flat = g.coordinates[0].flatMap((c) => [c[0], c[1]]);
   viewer.entities.add({
     id,

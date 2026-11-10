@@ -24,6 +24,7 @@ import SpectralPanel from '../components/gis/SpectralPanel';
 import FloodPanel from '../components/gis/FloodPanel';
 import SceneDownload from '../components/gis/SceneDownload';
 import { imageProvider } from '../components/gis/sceneLayer';
+import { outlineDataUrl } from '../lib/outline';
 import { useMonitor } from './Monitor';
 
 const useL = () => {
@@ -82,9 +83,9 @@ export default function ImageryFlow() {
   // area changed: show it, reset the picked images and the results drawn for the old area
   useEffect(() => {
     if (!viewer || viewer.isDestroyed()) return;
-    showAoi(viewer, aoi?.geometry ?? null, 'flow-aoi');
+    showAoi(viewer, aoi?.geometry ?? null, 'flow-aoi', aoi?.center);
     viewer.scene.requestRender();
-  }, [viewer, aoi?.geometry]);
+  }, [viewer, aoi?.geometry, aoi?.center?.join(',')]);
   useEffect(() => {
     setPick(null);
     setModeS(null); // the chosen mode (wanted) is kept and reopened for the new area
@@ -210,7 +211,7 @@ export default function ImageryFlow() {
               })}
             </div>
             {mode && (() => {
-              const others = g.layers.filter((l) => l.show && modeOfLayer(l) && modeOfLayer(l) !== mode && !(mode === 'ndvi' || mode === 'ndbi' ? modeOfLayer(l) === 'ndvi' || modeOfLayer(l) === 'ndbi' : false));
+              const others = g.layers.filter((l) => l.show && modeOfLayer(l) && modeOfLayer(l) !== mode && !(mode === 'ndvi' || mode === 'ndbi' ? modeOfLayer(l) === 'ndvi' || modeOfLayer(l) === 'ndbi' : false) && !(mode === 'view' && modeOfLayer(l) === 'change'));
               if (!others.length) return null;
               return (
                 <div className="mt-2 flex items-center gap-2 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[10px] text-warn">
@@ -220,7 +221,7 @@ export default function ImageryFlow() {
                 </div>
               );
             })()}
-            {mode && <div className="mt-3 border-t border-line pt-3">{aoi && pick && <ModeBody mode={mode} pick={pick} watch={watch} onWatch={(a) => { setAois((l) => [...l, a]); setWatchId(a.id); }} addRun={addRun} />}</div>}
+            {mode && <div className="mt-3 border-t border-line pt-3">{aoi && pick && <ModeBody mode={mode} pick={pick} watch={watch} onWatch={(a) => { setAois((l) => [...l, a]); setWatchId(a.id); }} addRun={addRun} onMode={setMode} />}</div>}
           </Step>
         </aside>
 
@@ -231,7 +232,7 @@ export default function ImageryFlow() {
               » {L('แผงควบคุม', 'Panel')}
             </button>
           )}
-          {viewing && A && B && <SwipeView viewer={viewer} A={A} B={B} containerRef={mapRef} onClose={() => setMode(null)} />}
+          {viewing && A && B && <SwipeView viewer={viewer} A={A} B={B} containerRef={mapRef} onClose={() => setMode(null)} g={g} />}
           {!viewing && <OnMap g={g} />}
           {!aoi && (
             <div className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-md border border-line bg-ink-950/85 px-3 py-1.5 text-xs text-slate-200">
@@ -259,14 +260,14 @@ function StartHint({ mode }: { mode: Mode }) {
 
 const MODES = (L: (a: string, b: string) => string): { id: Mode; icon: string; label: string; desc: string }[] => [
   { id: 'change', icon: '🔍', label: L('ตรวจจับการเปลี่ยนแปลง', 'Change detection'), desc: L('ถางป่า สิ่งปลูกสร้าง น้ำ ไฟ · ได้พื้นที่ (ไร่/ตร.กม.) และพิกัดจุดที่เปลี่ยน', 'Clearing, construction, water, fire — areas in rai/km² and patch locations') },
-  { id: 'view', icon: '◐', label: L('เลื่อนเทียบ / สลับภาพ', 'Swipe / blink'), desc: L('ดูภาพ A กับ B ด้วยตาบนแผนที่ที่ไม่มีอะไรบัง', 'Inspect A and B visually on a clean map') },
+  { id: 'view', icon: '◐', label: L('เลื่อนเทียบ / สลับภาพ', 'Swipe / blink'), desc: L('ดูภาพ A กับ B ด้วยตา · เปิด/ปิดผลตรวจจับซ้อนบนภาพได้', 'Inspect A and B visually · toggle the change result over them') },
   { id: 'flood', icon: '🌊', label: L('น้ำท่วม', 'Flood'), desc: L('ขอบเขตน้ำจากภาพหลัง (และภาพก่อน) · เรดาร์มองทะลุเมฆ', 'Water extent from the after (and before) image — radar sees through cloud') },
   { id: 'ndvi', icon: '🌾', label: L('พืชพรรณ (NDVI)', 'Vegetation (NDVI)'), desc: L('ความเขียวและสุขภาพพืช พร้อมสถิติของพื้นที่ (และดัชนีอื่น)', 'Greenness / plant health with area statistics (and other indices)') },
   { id: 'ndbi', icon: '🏙', label: L('การขยายตัวของเมือง (NDBI)', 'Urban growth (NDBI)'), desc: L('พื้นที่สิ่งปลูกสร้าง · เลือกภาพที่ห่างกัน 1–2 ปี', 'Built-up surfaces — pick images 1–2 years apart') },
   { id: 'export', icon: '📷', label: L('ภาพ · รายงาน · เฝ้าระวัง', 'Images · report · watch'), desc: L('ดาวน์โหลดภาพ (GeoTIFF/PNG) ออกรายงาน หรือเพิ่มเข้าการตรวจอัตโนมัติ', 'Download images (GeoTIFF/PNG), make a report, or add to automatic checks') },
 ];
 
-function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: PickerCtx; watch: MonitorAoi | null; onWatch: (a: MonitorAoi) => void; addRun: (r: MonitorRun) => void }) {
+function ModeBody({ mode, pick, watch, onWatch, addRun, onMode }: { mode: Mode; pick: PickerCtx; watch: MonitorAoi | null; onWatch: (a: MonitorAoi) => void; addRun: (r: MonitorRun) => void; onMode: (m: Mode) => void }) {
   const L = useL();
   const lang = useLang((s) => s.lang);
   const { qc, unit } = useQc();
@@ -294,11 +295,37 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
       const b = run.overlayBounds!;
       const prov = await imageProvider(url, b.west, b.south, b.east, b.north);
       if (dead) return;
-      g.putImagery('change-result', L('ผลการเปลี่ยนแปลง', 'Change result'), prov, { alpha: 0.85, legend: { items: (run.legend ?? []).map((l) => ({ color: l.color, label: L(l.labelTh, l.label) })) }, meta: `${d10(run.A?.datetime)} → ${d10(run.B?.datetime)}` });
+      const meta = `${d10(run.A?.datetime)} → ${d10(run.B?.datetime)}`;
+      g.putImagery('change-result', L('ผลการเปลี่ยนแปลง', 'Change result'), prov, { alpha: 0.85, legend: { items: (run.legend ?? []).map((l) => ({ color: l.color, label: L(l.labelTh, l.label) })) }, meta });
+      // numbered spots (vector): what the result table lists, clickable / navigable in the swipe view
+      if (run.hotspots?.length) {
+        const ds = new Cesium.CustomDataSource('change-spots');
+        for (const h of run.hotspots) {
+          const col = Cesium.Color.fromCssColorString(run.legend?.find((x) => x.id === h.cls)?.color ?? '#ef4444');
+          ds.entities.add({
+            id: `spot-${h.n}`,
+            position: Cesium.Cartesian3.fromDegrees(h.lon, h.lat),
+            point: { pixelSize: 7, color: col, outlineColor: Cesium.Color.WHITE, outlineWidth: 1.5, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+            label: {
+              text: `${h.n}`, font: '600 12px sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -14), disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+            properties: { n: h.n, lengthKm: h.shape === 'linear' ? h.lengthKm ?? null : null, km2: h.areaKm2 ?? h.areaHa / 100 },
+          });
+        }
+        g.putDataSource('change-spots', L('หมายเลขจุดที่เปลี่ยน', 'Change spot numbers'), ds, { meta });
+      }
+      // outline version (kept hidden; the swipe view switches fill ↔ outline)
+      const edge = await outlineDataUrl(url).catch(() => null);
+      if (!edge || dead) return;
+      const eprov = await imageProvider(edge, b.west, b.south, b.east, b.north);
+      if (dead) return;
+      g.putImagery('change-outline', L('ขอบเขตการเปลี่ยนแปลง (เส้นขอบ)', 'Change outline'), eprov, { alpha: 1, meta });
+      g.setLayer('change-outline', { show: false });
     });
     return () => {
       dead = true;
-      g.removeLayer('change-result');
+      ['change-result', 'change-outline', 'change-spots'].forEach((id) => g.removeLayer(id));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run?.id]);
@@ -352,6 +379,9 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
         <ul className="list-disc pl-4 text-[10px] text-muted">
           <li>{L('ลากปุ่ม ◀▶ บนเส้นแบ่งเพื่อเลื่อนเทียบ', 'Drag ◀▶ on the split line')}</li>
           <li>{L('“กะพริบ” สลับภาพให้เอง จุดที่เปลี่ยนจะเห็นชัด', '“Blink” alternates the images so changes stand out')}</li>
+          <li>{run?.status === 'ok'
+            ? L('ผลตรวจจับการเปลี่ยนแปลงซ้อนอยู่บนภาพ · เปิด/ปิด สลับเติมสี/เส้นขอบ และกด ◀ ▶ ไล่ดูทีละจุดได้ที่แถบล่าง', 'The change result is drawn over the images · toggle it, switch fill/outline and step through spots with ◀ ▶ in the bottom bar')
+            : L('ทำ “ตรวจจับการเปลี่ยนแปลง” ก่อน ผลจะซ้อนบนภาพที่เลื่อนเทียบ และเปิด/ปิดได้', 'Run “Change detection” first and its result appears over the swipe, with a toggle')}</li>
         </ul>
         {pick.pair && !pick.pair.ok && <p className="text-[10px] text-warn">{pick.pair.reasons.join(' · ')} — {L('ใช้ดูด้วยตาได้ แต่ไม่ใช่การวิเคราะห์', 'fine for visual inspection, not an analysis')}</p>}
       </div>
@@ -420,7 +450,7 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
       <p className="text-[10px] text-muted">{(() => { const pp = PURPOSES.find((p) => p.id === purpose); return pp ? L(pp.hintTh, pp.hint) : null; })()}</p>
       {!pick.pairOk && (
         <Notice tone="warn">
-          {pick.pair && !pick.pair.ok ? pick.pair.reasons.join(' · ') : L('ภาพที่เลือกยังไม่ผ่านเกณฑ์คุณภาพ (เมฆ/ยังไม่ได้วัดเมฆ) · เลือกจุดสีเขียวในขั้นที่ 2 เพื่อให้ผลเชื่อถือได้', 'A selected image does not pass the quality thresholds yet (cloud / not measured) — pick green dots in step 2')}
+          {pick.pair && !pick.pair.ok ? pick.pair.reasons.join(' · ') : L('ภาพที่เลือกมีเมฆในกรอบเกินเกณฑ์ (หรือยังไม่ได้วัดเมฆ) · ยังวิเคราะห์ได้ แต่ตรวจเฉพาะส่วนที่โปร่ง และความเชื่อมั่นจะลดลง · ถ้าเรื่องที่สนใจอยู่ส่วนเดียวของกรอบ ย่อกรอบให้เหลือแค่ตรงนั้นในขั้นที่ 1 จะได้ผลดีกว่า', 'A selected image is cloudier than the thresholds in the area (or not measured yet) · it can still be analysed, on the clear part only and with lower confidence · if what matters is in one part of the box, shrink the box to it in step 1')}
         </Notice>
       )}
       <div className="flex gap-1.5">
@@ -432,6 +462,11 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
       {busy && <p className="text-[10px] text-cyan-300">{busy}</p>}
       {err && <p className="text-[10px] text-bad">{err}</p>}
       {run && <RunResult run={run} />}
+      {run?.status === 'ok' && (
+        <Button className="w-full" onClick={() => onMode('view')}>
+          ◐ {L('เลื่อนเทียบภาพ A/B พร้อมผลนี้', 'Swipe A/B with this result')}
+        </Button>
+      )}
       {run && (
         <Button variant="primary" className="w-full" onClick={report}>
           📄 {L('ออกรายงานผลนี้ (พิมพ์ / บันทึกเป็น PDF)', 'Create report (print / save as PDF)')}
@@ -446,7 +481,7 @@ function ModeBody({ mode, pick, watch, onWatch, addRun }: { mode: Mode; pick: Pi
 
 /** Which step-3 mode put a layer on the map. */
 function modeOfLayer(l: LayerEntry): Mode | null {
-  if (l.id === 'change-result') return 'change';
+  if (l.id.startsWith('change-')) return 'change';
   if (l.id === 'flood' || l.id.startsWith('flood')) return 'flood';
   if (l.id.startsWith('spectral')) return /^NDBI/i.test(l.name) ? 'ndbi' : 'ndvi';
   return null;
