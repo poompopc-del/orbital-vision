@@ -1,4 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
+import { nearText } from '../lib/refpoints';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { create } from 'zustand';
 import { useLang } from '../i18n';
@@ -1914,7 +1915,7 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn,
                   <thead className="text-muted"><tr><th className="px-1 text-left">#</th><th className="text-left">lat, lon</th><th className="pr-1 text-right">{L('ตร.กม.', 'km²')}</th><th className="pr-1 text-right">{L('ไร่', 'rai')}</th></tr></thead>
                   <tbody className="font-mono text-slate-200">
                     {run.hotspots.slice(0, 20).map((h) => (
-                      <tr key={h.n} className="border-t border-white/5"><td className="px-1">{h.n}</td><td>{h.lat.toFixed(5)}, {h.lon.toFixed(5)}</td><td className="pr-1 text-right">{hotspotKm2(h).toFixed(4)}</td><td className="pr-1 text-right">{km2ToRai(hotspotKm2(h)).toFixed(2)}</td></tr>
+                      <tr key={h.n} className="border-t border-white/5"><td className="px-1">{h.n}</td><td>{h.lat.toFixed(5)}, {h.lon.toFixed(5)}{(h.shape === 'linear' && h.lengthKm != null) || h.near ? <div className="font-sans text-[9px] text-muted">{h.shape === 'linear' && h.lengthKm != null ? L(`แนวยาว ~${h.lengthKm.toFixed(2)} กม.`, `line ~${h.lengthKm.toFixed(2)} km`) : ''}{h.shape === 'linear' && h.near ? ' · ' : ''}{h.near ? L(nearText(h.near, true), nearText(h.near, false)) : ''}</div> : null}</td><td className="pr-1 text-right">{hotspotKm2(h).toFixed(4)}</td><td className="pr-1 text-right">{km2ToRai(hotspotKm2(h)).toFixed(2)}</td></tr>
                     ))}
                   </tbody>
                 </table>

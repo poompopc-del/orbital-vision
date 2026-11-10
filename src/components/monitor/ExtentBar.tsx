@@ -10,6 +10,7 @@ import { clearBoundary, getBoundary, importBoundary, onBoundaryChange, type Cust
 import { bboxOfCoords, bboxOfGeometry, borderFocusRect, outsideShare, overviewRect, roughCentre, THAILAND_BBOX_FALLBACK, type BBox4 } from '../../lib/extent';
 import { cx } from '../ui';
 import { LINE_SWATCHES, useLineStyle } from '../../lib/lineStyle';
+import { RefPointsBox, RefPointsLayer } from './RefPoints';
 
 const useL = () => {
   const lang = useLang((s) => s.lang);
@@ -128,6 +129,7 @@ export default function ExtentBar({
 
   return (
     <div className="pointer-events-auto absolute right-3 top-3 z-10 w-[268px] rounded-md border border-line bg-ink-950/90 p-2 text-[11px] text-slate-200">
+      <RefPointsLayer viewer={viewer} />
       <div className="flex items-center gap-1">
         {([['overview', L('ภาพรวมประเทศไทย', 'Thailand overview')], ['border', L('เส้นชายแดน', 'Border line')], ['custom', L('พื้นที่เฝ้าระวัง', 'Watch area')]] as const).map(([k, t]) => (
           <button key={k} disabled={k === 'custom' && !customRect} onClick={() => { setMode(k); void apply(k); }} className={cx('flex-1 rounded border px-1 py-1 disabled:opacity-40', mode === k ? 'border-cyan-400 bg-cyan-400/15 text-white' : 'border-line hover:border-cyan-400/40')}>{t}</button>
@@ -138,7 +140,7 @@ export default function ExtentBar({
         <button onClick={() => setOpen(!open)} className="rounded border border-line px-2 py-1 hover:border-cyan-400/40" title={L('ตั้งค่า', 'Settings')}>{open ? '▴' : '▾'}</button>
       </div>
       {(open || mode === 'border') && (
-        <div className="mt-1.5 space-y-1.5 border-t border-line pt-1.5">
+        <div className="mt-1.5 max-h-[70vh] space-y-1.5 overflow-y-auto border-t border-line pt-1.5 scroll-thin">
           {mode === 'border' && (
             <>
               <div className="flex items-center gap-1">
@@ -185,6 +187,7 @@ export default function ExtentBar({
             <div className="text-[9px] text-muted">{L('Shapefile (.zip หรือเลือก .shp+.dbf+.prj พร้อมกัน), KML/KMZ, GeoJSON, GPX · แปลงระบบพิกัด UTM/Web Mercator ให้อัตโนมัติ', 'Shapefile (.zip or .shp+.dbf+.prj together), KML/KMZ, GeoJSON, GPX · UTM/Web Mercator converted automatically')}</div>
             {impErr && <div className="text-bad">{impErr}</div>}
           </div>
+          <RefPointsBox />
           <div className="rounded border border-line p-1.5 text-[10px]">
             <div className="mb-1 flex items-center justify-between">
               <span className="font-semibold">{L('สีและลักษณะเส้นเขตแดน', 'Boundary line style')}</span>

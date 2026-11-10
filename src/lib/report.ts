@@ -1,6 +1,7 @@
 // OPP-style landscape report (16:9 pages) built as a standalone HTML document that the browser
 // prints to PDF. Every number and sentence comes from stored monitoring runs; images are the
 // rendered scenes saved with each run; the basemap comes from Esri World Imagery (export API).
+import { nearText } from './refpoints';
 import { getImage, narrative, confTh, levelTh, hotspotKm2, PURPOSES, REGIONS, type MonitorAoi, type MonitorRun } from './monitor';
 import { centroid } from './geo';
 import { fmtArea, geometryAreaKm2, km2ToRai, type AreaUnit } from './area';
@@ -140,7 +141,7 @@ export async function buildReportHtml(inp: ReportInput): Promise<string> {
       const [x, y] = px(frame, h.lon, h.lat);
       return `<div class="hs" style="left:${x}%;top:${y}%">${h.n}</div>`;
     }).join('');
-    const hsRows = hs.slice(0, 6).map((h) => `<tr><td>${h.n}</td><td class="mono">${h.lat.toFixed(4)}, ${h.lon.toFixed(4)}</td><td class="r">${hotspotKm2(h).toFixed(4)}</td><td class="r">${f1(km2ToRai(hotspotKm2(h)), 2)}</td></tr>`).join('');
+    const hsRows = hs.slice(0, 6).map((h) => `<tr><td>${h.n}</td><td class="mono">${h.lat.toFixed(4)}, ${h.lon.toFixed(4)}${h.near ? `<br><span class="muted">${esc(L(nearText(h.near, true), nearText(h.near, false)))}</span>` : ''}</td><td class="r">${hotspotKm2(h).toFixed(4)}</td><td class="r">${f1(km2ToRai(hotspotKm2(h)), 2)}</td></tr>`).join('');
     const legend = (run?.legend ?? []).map((l) => `<span><i style="background:${l.color}"></i>${esc(th ? l.labelTh : l.label)}</span>`).join('');
     const [lx, ly] = px(loc, clon, clat);
     const sensorTxt = run?.sensor === 'sar' ? 'Sentinel-1 RTC (SAR)' : 'Sentinel-2 L2A';
