@@ -8,6 +8,7 @@ import { fmtArea, km2ToRai } from '../../lib/area';
 import { useQc } from '../../lib/qcStore';
 import { Badge, Notice } from '../ui';
 import ResultQuality from './ResultQuality';
+import { LabelChip, LabelEditor, useLabels, type LabelTarget } from './Labels';
 
 export function OverlayOnImage({ src, img, ov }: { src: string; img: { west: number; south: number; east: number; north: number }; ov: { west: number; south: number; east: number; north: number } }) {
   const w = img.east - img.west, h = img.north - img.south;
@@ -25,6 +26,13 @@ export default function RunResult({ run }: { run: MonitorRun }) {
   const { unit } = useQc();
   const [img, setImg] = useState<{ before: string | null; after: string | null; change: string | null }>({ before: null, after: null, change: null });
   const [showChange, setShowChange] = useState(true);
+  const labels = useLabels();
+  const [editing, setEditing] = useState<LabelTarget | null>(null);
+  const targetOf = (h: NonNullable<MonitorRun['hotspots']>[number]): LabelTarget => ({
+    ref: `${run.id}:${h.n}`, lon: h.lon, lat: h.lat, areaKm2: hotspotKm2(h), lengthKm: h.lengthKm ?? null, source: run.server ? 'watch' : 'change',
+    purpose: run.purpose, aoiName: run.aoiName, aScene: run.A?.id, bScene: run.B?.id, aDatetime: run.A?.datetime, bDatetime: run.B?.datetime,
+    features: { shape: h.shape ?? null, cls: h.cls ?? null, level: run.level ?? null, confidence: run.confidence ?? null, sensor: run.A?.collection ?? null },
+  });
   useEffect(() => {
     if (run.status !== 'ok') return setImg({ before: null, after: null, change: null });
     let dead = false;
@@ -73,15 +81,16 @@ export default function RunResult({ run }: { run: MonitorRun }) {
       {!!run.hotspots?.length && (
         <div className="max-h-40 overflow-y-auto rounded border border-line scroll-thin">
           <table className="w-full text-[10px]">
-            <thead className="text-muted"><tr><th className="px-1 text-left">#</th><th className="text-left">lat, lon</th><th className="pr-1 text-right">{L('ตร.กม.', 'km²')}</th><th className="pr-1 text-right">{L('ไร่', 'rai')}</th></tr></thead>
+            <thead className="text-muted"><tr><th className="px-1 text-left">#</th><th className="text-left">lat, lon</th><th className="pr-1 text-right">{L('ตร.กม.', 'km²')}</th><th className="pr-1 text-right">{L('ไร่', 'rai')}</th><th className="pr-1">{L('ป้าย', 'label')}</th></tr></thead>
             <tbody className="font-mono text-slate-200">
               {run.hotspots.slice(0, 20).map((h) => (
-                <tr key={h.n} className="border-t border-white/5"><td className="px-1">{h.n}</td><td>{h.lat.toFixed(5)}, {h.lon.toFixed(5)}{(h.shape === 'linear' && h.lengthKm != null) || h.near ? <div className="font-sans text-[9px] text-muted">{h.shape === 'linear' && h.lengthKm != null ? L(`แนวยาว ~${h.lengthKm.toFixed(2)} กม.`, `line ~${h.lengthKm.toFixed(2)} km`) : ''}{h.shape === 'linear' && h.near ? ' · ' : ''}{h.near ? L(nearText(h.near, true), nearText(h.near, false)) : ''}</div> : null}</td><td className="pr-1 text-right">{hotspotKm2(h).toFixed(4)}</td><td className="pr-1 text-right">{km2ToRai(hotspotKm2(h)).toFixed(2)}</td></tr>
+                <tr key={h.n} className="border-t border-white/5"><td className="px-1">{h.n}</td><td>{h.lat.toFixed(5)}, {h.lon.toFixed(5)}{(h.shape === 'linear' && h.lengthKm != null) || h.near ? <div className="font-sans text-[9px] text-muted">{h.shape === 'linear' && h.lengthKm != null ? L(`แนวยาว ~${h.lengthKm.toFixed(2)} กม.`, `line ~${h.lengthKm.toFixed(2)} km`) : ''}{h.shape === 'linear' && h.near ? ' · ' : ''}{h.near ? L(nearText(h.near, true), nearText(h.near, false)) : ''}</div> : null}</td><td className="pr-1 text-right">{hotspotKm2(h).toFixed(4)}</td><td className="pr-1 text-right">{km2ToRai(hotspotKm2(h)).toFixed(2)}</td><td className="pr-1 text-center"><LabelChip t={targetOf(h)} labels={labels} active={editing?.ref === `${run.id}:${h.n}`} onOpen={() => setEditing(editing?.ref === `${run.id}:${h.n}` ? null : targetOf(h))} /></td></tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+      {editing && <LabelEditor key={editing.ref} t={editing} labels={labels} onDone={() => setEditing(null)} />}
       <details className="text-[10px] text-muted">
         <summary className="cursor-pointer hover:text-white">{L('วิธีวิเคราะห์และคุณภาพผล', 'Method and quality')}</summary>
         <p className="mt-1">{run.method}</p>

@@ -14,6 +14,7 @@ import { GisCtx } from '../gis/GisContext';
 import { imageProvider, pcProvider } from '../gis/sceneLayer';
 import type { PickerCtx } from '../monitor/ComparePanel';
 import { Button, Spinner, cx } from '../ui';
+import { LabelChip, LabelEditor, useLabels, type LabelTarget } from '../monitor/Labels';
 
 const useL = () => {
   const lang = useLang((s) => s.lang);
@@ -52,6 +53,8 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
   const [sceneOn, setSceneOn] = useState(false);
   const [playing, setPlaying] = useState(false);
   const abort = useRef<AbortController | null>(null);
+  const labels = useLabels();
+  const [editing, setEditing] = useState<LabelTarget | null>(null);
 
   const optical: ImageryItem[] = useMemo(() => (pick.list ?? []).filter((x) => familyOf(x) === 'optical').sort((a, b) => a.datetime.localeCompare(b.datetime)), [pick.list]);
   const newest = optical[optical.length - 1];
@@ -239,7 +242,7 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
 
           {run.pieces.length > 0 && (
             <table className="w-full text-[10px]">
-              <thead className="text-muted"><tr><th className="text-left">#</th><th className="text-left">lat, lon</th><th>{L('ไร่', 'rai')}</th><th>{L('เริ่ม → ล่าสุด', 'first → last')}</th><th>{L('ทิศ', 'dir')}</th></tr></thead>
+              <thead className="text-muted"><tr><th className="text-left">#</th><th className="text-left">lat, lon</th><th>{L('ไร่', 'rai')}</th><th>{L('เริ่ม → ล่าสุด', 'first → last')}</th><th>{L('ทิศ', 'dir')}</th><th>{L('ป้าย', 'label')}</th></tr></thead>
               <tbody>
                 {run.pieces.slice(0, 15).map((p) => (
                   <tr key={p.n} className="border-t border-white/5">
@@ -248,11 +251,20 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
                     <td className="text-center">{rai(p.km2)}</td>
                     <td className="text-center"><span style={{ color: css(p.first, S) }}>■</span> {run.scenes[p.first].date.slice(5)} → <span style={{ color: css(p.last, S) }}>■</span> {run.scenes[p.last].date.slice(5)}{p.unconfirmed ? '*' : ''}</td>
                     <td className="text-center">{p.growth && p.growth.distM >= 30 ? `${L(p.growth.dirTh, p.growth.dirEn)} ${Math.round(p.growth.mPerMonth)} ${L('ม./ด.', 'm/mo')}` : '—'}</td>
+                    <td className="text-center">{(() => {
+                      const t: LabelTarget = {
+                        ref: `trend:${run.scenes[0].id}:${p.n}`, lon: p.lon, lat: p.lat, areaKm2: p.km2, lengthKm: p.lengthKm, source: 'trend', aoiName: aoi?.name,
+                        aScene: run.scenes[p.first].id, bScene: run.scenes[p.last].id, aDatetime: run.scenes[p.first].date, bDatetime: run.scenes[p.last].date,
+                        features: { scenes: run.scenes.length, unconfirmed: p.unconfirmed, bearingDeg: p.growth?.bearingDeg ?? null, mPerMonth: p.growth?.mPerMonth ?? null, ndviDrop: run.drop },
+                      };
+                      return <LabelChip t={t} labels={labels} active={editing?.ref === t.ref} onOpen={() => setEditing(editing?.ref === t.ref ? null : t)} />;
+                    })()}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
+          {editing && <LabelEditor key={editing.ref} t={editing} labels={labels} onDone={() => setEditing(null)} />}
           <p className="text-[9px] text-muted">{L('สีจาง / * = เห็นเฉพาะภาพล่าสุด ยังยืนยันไม่ได้จนกว่าจะมีภาพถัดไป · ผลเป็นการชี้เป้า ควรเปิดดูภาพจริงยืนยัน', 'Light colour / * = seen on the newest scene only, unconfirmed until the next one · results point where to look; confirm on the imagery')}</p>
         </div>
       )}

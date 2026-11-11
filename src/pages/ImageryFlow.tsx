@@ -26,6 +26,7 @@ import SceneDownload from '../components/gis/SceneDownload';
 import { imageProvider } from '../components/gis/sceneLayer';
 import { outlineDataUrl } from '../lib/outline';
 import TrendPanel from '../components/imagery/TrendPanel';
+import { LabelsPanel } from '../components/monitor/Labels';
 import { familyOf } from '../lib/qc';
 import { useMonitor } from './Monitor';
 
@@ -416,6 +417,10 @@ function ModeBody({ mode, pick, watch, onWatch, addRun, onMode }: { mode: Mode; 
         <div>
           <div className="label mb-1">{L('รายงาน', 'Report')}</div>
           {run ? <Button onClick={report}>{L('เปิดรายงาน (พิมพ์ / บันทึกเป็น PDF)', 'Open report (print / save as PDF)')}</Button> : <p className="text-[10px] text-muted">{L('ทำ “ตรวจจับการเปลี่ยนแปลง” ก่อน แล้วค่อยออกรายงาน', 'Run “Change detection” first, then make the report')}</p>}
+        </div>
+        <div>
+          <div className="label mb-1">{L('ฐานข้อมูลป้ายกำกับ', 'Label database')}</div>
+          <LabelsPanel />
         </div>
         <div>
           <div className="label mb-1">{L('เฝ้าระวังอัตโนมัติ', 'Automatic watch')}</div>
