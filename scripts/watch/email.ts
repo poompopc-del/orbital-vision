@@ -1,9 +1,9 @@
 // Alert email: a short report readable on a phone — what changed, where, the before / after /
-// change images, the week / month / year comparisons, and a link back to the website.
+// change images, the week / month / 3-month / 6-month / year comparisons, and a link back to the website.
 import { hotspotKm2, narrative, PURPOSES, REGIONS, type MonitorRun } from '../../src/lib/monitor';
 
 export interface HorizonResult {
-  horizon: 'confirmed' | 'latest' | 'week' | 'month' | 'year';
+  horizon: 'confirmed' | 'latest' | 'week' | 'month' | 'quarter' | 'half' | 'year';
   run: MonitorRun;
   images: Record<string, string>;
   /** the images as data URLs (kept in memory for this run, so the email can carry them inline) */
@@ -12,7 +12,7 @@ export interface HorizonResult {
   id?: string;
 }
 
-const H_TH: Record<HorizonResult['horizon'], string> = { confirmed: 'ยืนยันแล้ว (ภาพก่อนเปลี่ยน → ภาพล่าสุด)', latest: 'ล่าสุด (เทียบภาพที่ใช้ได้ก่อนหน้า)', week: '1 สัปดาห์', month: '1 เดือน', year: '1 ปี' };
+const H_TH: Record<HorizonResult['horizon'], string> = { confirmed: 'ยืนยันแล้ว (ภาพก่อนเปลี่ยน → ภาพล่าสุด)', latest: 'ล่าสุด (เทียบภาพที่ใช้ได้ก่อนหน้า)', week: '1 สัปดาห์', month: '1 เดือน', quarter: '3 เดือน', half: '6 เดือน', year: '1 ปี' };
 const LV_TH: Record<string, string> = { significant: 'เปลี่ยนแปลงมีนัยสำคัญ', minor: 'เปลี่ยนแปลงเล็กน้อย', none: 'ไม่พบการเปลี่ยนแปลงเกินเกณฑ์' };
 const LV_COLOR: Record<string, string> = { significant: '#d0705f', minor: '#d5aa69', none: '#8fb98a' };
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -69,7 +69,7 @@ function section(o: AlertItem): string {
   const latest = primary(o);
   const sep = o.areaUrl.includes('?') ? '&' : '?';
   const saved = (o.results.find((x) => x.horizon === 'latest') ?? latest).id;
-  const HL: Record<HorizonResult['horizon'], string> = { confirmed: 'ยืนยันแล้ว', latest: 'ภาพก่อนหน้า', week: '1 สัปดาห์', month: '1 เดือน', year: '1 ปี' };
+  const HL: Record<HorizonResult['horizon'], string> = { confirmed: 'ยืนยันแล้ว', latest: 'ภาพก่อนหน้า', week: '1 สัปดาห์', month: '1 เดือน', quarter: '3 เดือน', half: '6 เดือน', year: '1 ปี' };
   // a link that carries everything the page needs (scenes, result, spots), so it works on its own
   const link = (x: HorizonResult, extra = '') => {
     const rr = x.run;

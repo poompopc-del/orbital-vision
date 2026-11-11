@@ -146,9 +146,9 @@ export interface MonitorRun {
   /** results of the automatic server checker (stored in Supabase) */
   server?: boolean;
   /** server results: which comparison this is (latest = vs the previous usable scene) */
-  horizon?: 'latest' | 'week' | 'month' | 'year';
+  horizon?: 'latest' | 'week' | 'month' | 'quarter' | 'half' | 'year';
   /** server results: the same new scene compared with the scene ~1 week / 1 month / 1 year earlier */
-  horizons?: Partial<Record<'week' | 'month' | 'year', MonitorRun>>;
+  horizons?: Partial<Record<'week' | 'month' | 'quarter' | 'half' | 'year', MonitorRun>>;
   /** change seen on two successive usable images (the server only alerts on these) */
   confirmedBy?: { first: string; second: string };
   /** what the stricter cloud mask removed, % of the grid inside the image: scene mask · thin cloud · local haze · total after the buffer */
@@ -270,10 +270,12 @@ const DAY = 86400e3;
  * - month: clearest image of the previous 30 days vs clearest of the last 30 days
  * - year: clearest image of the same 30 days one year earlier (same season) vs the last 30 days
  */
-export type Baseline = 'previous' | 'month' | 'year';
+export type Baseline = 'previous' | 'month' | 'quarter' | 'half' | 'year';
 export const BASELINES: { id: Baseline; th: string; en: string }[] = [
   { id: 'previous', th: 'ช่วงก่อนหน้า', en: 'Previous period' },
   { id: 'month', th: 'เดือนที่แล้ว', en: 'Last month' },
+  { id: 'quarter', th: '3 เดือนก่อน', en: '3 months ago' },
+  { id: 'half', th: '6 เดือนก่อน', en: '6 months ago' },
   { id: 'year', th: 'ปีที่แล้ว', en: 'Last year' },
 ];
 export const baselineLabel = (b: Baseline | undefined, th: boolean) => {
@@ -290,7 +292,8 @@ export function windowsFor(periodDays: number, end = Date.now(), baseline: Basel
   }
   const aFrom = end - 30 * DAY;
   if (baseline === 'month') return { after: [day(aFrom), day(end)], before: [day(end - 60 * DAY), day(aFrom - DAY)], fallback: [day(end - 90 * DAY), day(aFrom - DAY)] };
-  const y = 365 * DAY;
+  // the same 30 days 3 months / 6 months / 1 year earlier
+  const y = (baseline === 'quarter' ? 91 : baseline === 'half' ? 182 : 365) * DAY;
   return { after: [day(aFrom), day(end)], before: [day(aFrom - y), day(end - y)], fallback: [day(aFrom - y - 30 * DAY), day(end - y + 30 * DAY)] };
 }
 

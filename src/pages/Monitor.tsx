@@ -191,7 +191,7 @@ export function MonitorWatch() {
     const hz = params.get('hz');
     return {
       run: params.get('run'),
-      hz: (hz === 'week' || hz === 'month' || hz === 'year' ? hz : 'latest') as 'latest' | 'week' | 'month' | 'year',
+      hz: (hz === 'week' || hz === 'month' || hz === 'quarter' || hz === 'half' || hz === 'year' ? hz : 'latest') as 'latest' | 'week' | 'month' | 'quarter' | 'half' | 'year',
       swipe: params.get('view') === 'swipe',
       bbox: num('bbox').length === 4 ? (num('bbox') as [number, number, number, number]) : null,
       pt: num('pt').length === 2 ? (num('pt') as [number, number]) : null,
@@ -1045,6 +1045,8 @@ export function MonitorWatch() {
               const w = windowsFor(period, Date.now(), baseline);
               if (baseline === 'month')
                 return L(`ภาพที่ชัดที่สุดของ 30 วันล่าสุด (${w.after[0]} – ${w.after[1]}) เทียบกับภาพที่ชัดที่สุดของ 30 วันก่อนหน้านั้น (${w.before[0]} – ${w.before[1]}) ถ้าไม่มีภาพผ่านเกณฑ์ จะขยายย้อนไปถึง ${w.fallback![0]}`, `Clearest image of the last 30 days (${w.after[0]} – ${w.after[1]}) vs the clearest of the 30 days before (${w.before[0]} – ${w.before[1]}); widened back to ${w.fallback![0]} if none passes.`);
+              if (baseline === 'quarter' || baseline === 'half')
+                return L(`ภาพที่ชัดที่สุดของ 30 วันล่าสุด เทียบกับภาพที่ชัดที่สุดช่วงเดียวกันเมื่อ ${baseline === 'quarter' ? '3' : '6'} เดือนก่อน (${w.before[0]} – ${w.before[1]}) · ดูความคืบหน้าระยะกลาง ${baseline === 'half' ? 'ช่วง 6 เดือนมักข้ามฤดู ควรอ่านคู่กับ “ปีที่แล้ว”' : ''} ถ้าไม่มีภาพผ่านเกณฑ์ จะขยายเป็น ±30 วัน`, `Clearest image of the last 30 days vs the clearest of the same 30 days ${baseline === 'quarter' ? '3' : '6'} months earlier (${w.before[0]} – ${w.before[1]}) · medium-term progress${baseline === 'half' ? '; 6 months usually crosses a season, read it with “Last year”' : ''}; widened ±30 days if none passes.`);
               if (baseline === 'year')
                 return L(`ภาพที่ชัดที่สุดของ 30 วันล่าสุด เทียบกับภาพที่ชัดที่สุดช่วงเดียวกันของปีที่แล้ว (${w.before[0]} – ${w.before[1]}) — ฤดูเดียวกัน จึงไม่สับสนการเปลี่ยนตามฤดู (นา/ป่าผลัดใบ/น้ำหลาก) ถ้าไม่มีภาพผ่านเกณฑ์ จะขยายเป็น ±30 วัน`, `Clearest image of the last 30 days vs the clearest of the same 30 days last year (${w.before[0]} – ${w.before[1]}) — same season, so seasonal change (crops, leaf-off, floods) is not mistaken for real change; widened ±30 days if none passes.`);
               return L(
@@ -1753,7 +1755,7 @@ function EditPanel({ b, orig, onSave, onCancel, onSet }: { b: BB; orig: BB; onSa
   );
 }
 
-function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn, init }: { init?: { run: string | null; hz: 'latest' | 'week' | 'month' | 'year'; swipe: boolean }; aoi: MonitorAoi; baseline: Baseline; onRun: (b?: Baseline) => void; onEdit: () => void; busy: boolean; lang: 'th' | 'en'; onSwipe: (A: ImageryItem, B: ImageryItem) => void; swipeOn: boolean }) {
+function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn, init }: { init?: { run: string | null; hz: 'latest' | 'week' | 'month' | 'quarter' | 'half' | 'year'; swipe: boolean }; aoi: MonitorAoi; baseline: Baseline; onRun: (b?: Baseline) => void; onEdit: () => void; busy: boolean; lang: 'th' | 'en'; onSwipe: (A: ImageryItem, B: ImageryItem) => void; swipeOn: boolean }) {
   const L = useL();
   const { unit } = useQc();
   const [swErr, setSwErr] = useState('');
@@ -1768,7 +1770,7 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn,
   const mine = runs.filter((r) => r.aoiId === aoi.id);
   const [runId, setRunId] = useState<string | null>(init?.run ?? null);
   // server results: the same new scene compared over several time spans
-  const [hz, setHz] = useState<'latest' | 'week' | 'month' | 'year'>(init?.hz ?? 'latest');
+  const [hz, setHz] = useState<'latest' | 'week' | 'month' | 'quarter' | 'half' | 'year'>(init?.hz ?? 'latest');
   const baseRun = mine.find((r) => r.id === runId) ?? mine[0];
   const run = hz !== 'latest' && baseRun?.horizons?.[hz] ? baseRun.horizons[hz]! : baseRun;
   // opened from "show" in an alert email: start the before/after swipe on the map once the result is here
@@ -1856,12 +1858,12 @@ function AoiDetail({ aoi, baseline, onRun, onEdit, busy, lang, onSwipe, swipeOn,
         {baseRun?.server && (
           <div className="flex flex-wrap items-center gap-1">
             <span className="text-[10px] text-muted">{L('เทียบกับภาพเมื่อ', 'Compared with')}</span>
-            {(['latest', 'week', 'month', 'year'] as const).map((h) => {
+            {(['latest', 'week', 'month', 'quarter', 'half', 'year'] as const).map((h) => {
               const has = h === 'latest' || !!baseRun.horizons?.[h];
               return (
                 <Button key={h} variant={hz === h ? 'active' : 'ghost'} disabled={!has} onClick={() => setHz(h)} className="!px-2 !py-0.5 text-[10px]"
                   title={has ? undefined : L('ไม่มีภาพที่ใช้ได้ในช่วงนั้น', 'No usable image around that time')}>
-                  {h === 'latest' ? L('ภาพก่อนหน้า', 'previous') : h === 'week' ? L('1 สัปดาห์', '1 week') : h === 'month' ? L('1 เดือน', '1 month') : L('1 ปี', '1 year')}
+                  {h === 'latest' ? L('ภาพก่อนหน้า', 'previous') : h === 'week' ? L('1 สัปดาห์', '1 week') : h === 'month' ? L('1 เดือน', '1 month') : h === 'quarter' ? L('3 เดือน', '3 months') : h === 'half' ? L('6 เดือน', '6 months') : L('1 ปี', '1 year')}
                 </Button>
               );
             })}
