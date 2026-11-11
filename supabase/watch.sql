@@ -51,7 +51,7 @@ create table if not exists public.watch_runs (
   id uuid primary key default gen_random_uuid(),
   area_id uuid not null references public.watch_areas (id) on delete cascade,
   user_id uuid not null references auth.users (id) on delete cascade,
-  horizon text not null check (horizon in ('latest', 'week', 'month', 'year')),
+  horizon text not null check (horizon in ('latest', 'week', 'month', 'quarter', 'half', 'year', 'confirmed')),
   trigger_scene text not null,
   status text not null,
   level text,
@@ -64,6 +64,9 @@ create table if not exists public.watch_runs (
   images jsonb,
   created_at timestamptz not null default now()
 );
+-- existing databases: widen the horizon list (3 / 6 months added). Safe to run again.
+alter table public.watch_runs drop constraint if exists watch_runs_horizon_check;
+alter table public.watch_runs add constraint watch_runs_horizon_check check (horizon in ('latest', 'week', 'month', 'quarter', 'half', 'year', 'confirmed'));
 create index if not exists watch_runs_area_idx on public.watch_runs (area_id, created_at desc);
 
 -- ---------- alerts ----------

@@ -3,7 +3,7 @@
 //   1. looks for Sentinel-2 / Landsat scenes newer than the last one it has seen,
 //   2. measures cloud and shadow inside the area for each new scene (per-pixel mask),
 //   3. for each new usable scene, compares it with the previous usable scene ("latest") and with
-//      the usable scenes nearest 7 / 30 / 365 days earlier ("week" / "month" / "year"),
+//      the usable scenes nearest 7 / 30 / 91 / 182 / 365 days earlier ("week" / "month" / "quarter" / "half" / "year"),
 //   4. stores results + before/after/change images in Supabase, and
 //   5. emails an alert when the latest comparison reaches the area's alert level.
 // The comparison is the same code the website uses (src/lib/monitor.ts → compareScenes).
@@ -31,9 +31,11 @@ const MAX_MINUTES = +(env.WATCH_MAX_MINUTES || 150); // leave time for the next 
 const MAX_NEW_PER_AREA = 3; // newest usable scenes processed per area per run
 const ALERT_ON_FIRST = env.WATCH_ALERT_ON_FIRST === '1';
 const APP_URL = (env.APP_URL || '').replace(/\/$/, '');
-const HORIZONS: { h: 'week' | 'month' | 'year'; days: number; tol: number }[] = [
+const HORIZONS: { h: 'week' | 'month' | 'quarter' | 'half' | 'year'; days: number; tol: number }[] = [
   { h: 'week', days: 7, tol: 4 },
   { h: 'month', days: 30, tol: 12 },
+  { h: 'quarter', days: 91, tol: 20 },
+  { h: 'half', days: 182, tol: 25 },
   { h: 'year', days: 365, tol: 30 },
 ];
 const started = Date.now();
@@ -344,7 +346,12 @@ class AreaJob {
         log(`  ${hz.h}: no usable scene near ${iso(target)}`);
         continue;
       }
-      results.push(A && H.id === A.id ? await this.copyAs(results[0], hz.h, A, B) : await this.compare(H, B, hz.h));
+      try {
+        results.push(A && H.id === A.id ? await this.copyAs(results[0], hz.h, A, B) : await this.compare(H, B, hz.h));
+      } catch (e: any) {
+        // e.g. the database still has the old horizon list (run supabase/watch.sql again): skip this horizon only
+        log(`  ${hz.h}: not stored — ${e?.message ?? e}`);
+      }
     }
     if (!results.length) {
       log(`  nothing to compare with — ${B.datetime.slice(0, 10)} becomes the reference`);

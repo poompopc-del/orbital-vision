@@ -16,7 +16,7 @@
 ## 1. สร้างโปรเจกต์ Supabase
 
 1. สมัครหรือเข้าสู่ระบบที่ supabase.com แล้วกด **New project** (เลือก region Singapore)
-2. ไปที่ **SQL Editor** แล้วรันไฟล์ `supabase/schema.sql` ก่อน จากนั้นรัน `supabase/watch.sql`
+2. ไปที่ **SQL Editor** แล้วรันไฟล์ `supabase/schema.sql` ก่อน จากนั้นรัน `supabase/watch.sql` และ `supabase/labels.sql` (ตารางป้ายกำกับ) · อัปเดตเวอร์ชันแล้วให้รัน `watch.sql` ซ้ำได้เลย (เพิ่มช่วงเทียบ 3/6 เดือน รันซ้ำปลอดภัย)
 3. ไปที่ **Authentication → URL Configuration**
    - ตั้ง **Site URL** = URL เว็บบน Vercel เช่น `https://orbital-vision.vercel.app`
    - เพิ่ม URL เดียวกันใน **Redirect URLs**

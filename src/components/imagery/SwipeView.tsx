@@ -156,18 +156,18 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g }: { 
                   ))}
                 </span>
               )}
-              {style === 'fill' && resultOn && (
-                <label className="flex items-center gap-1 text-[10px] text-muted">
-                  {L('ทึบ', 'Opacity')}
-                  <input type="range" min={0.15} max={1} step={0.05} value={res.alpha} onChange={(e) => g?.setLayer('change-result', { alpha: +e.target.value })} className="h-1 w-16" />
-                </label>
-              )}
+              {/* always laid out (hidden when not used) so the bar does not jump when switching fill / outline */}
+              <label className={cx('flex items-center gap-1 text-[10px] text-muted', !(style === 'fill' && resultOn) && 'invisible')}>
+                {L('ทึบ', 'Opacity')}
+                <input type="range" min={0.15} max={1} step={0.05} value={res.alpha} onChange={(e) => g?.setLayer('change-result', { alpha: +e.target.value })} className="h-1 w-16" />
+              </label>
             </>
           )}
           {spots && spotList.length > 0 && (
             <>
               {res && <span className="h-4 w-px bg-line" />}
               <label className="flex items-center gap-1"><input type="checkbox" checked={spotsOn} onChange={(e) => setSpotsOn(e.target.checked)} />{L('หมายเลขจุด', 'Spot numbers')}</label>
+              <span className="flex items-center gap-1 whitespace-nowrap">
               <button className="rounded border border-line px-1.5 hover:border-cyan-400/60" onClick={() => goSpot(spotIdx - 1)} title={L('จุดก่อนหน้า', 'Previous spot')}>◀</button>
               <span className="min-w-[7rem] text-center font-mono text-[10px]">
                 {cur
@@ -175,6 +175,7 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g }: { 
                   : L(`${spotList.length} จุด · กด ▶ เพื่อไล่ดู`, `${spotList.length} spots · ▶ to step`)}
               </span>
               <button className="rounded border border-line px-1.5 hover:border-cyan-400/60" onClick={() => goSpot(spotIdx + 1)} title={L('จุดถัดไป', 'Next spot')}>▶</button>
+              </span>
             </>
           )}
         </div>

@@ -25,6 +25,9 @@ import FloodPanel from '../components/gis/FloodPanel';
 import SceneDownload from '../components/gis/SceneDownload';
 import { imageProvider } from '../components/gis/sceneLayer';
 import { outlineDataUrl } from '../lib/outline';
+import TrendPanel from '../components/imagery/TrendPanel';
+import { LabelsPanel } from '../components/monitor/Labels';
+import { familyOf } from '../lib/qc';
 import { useMonitor } from './Monitor';
 
 const useL = () => {
@@ -33,7 +36,7 @@ const useL = () => {
 };
 const d10 = (s?: string | null) => (s ? s.slice(0, 10) : '—');
 
-type Mode = 'change' | 'view' | 'ndvi' | 'ndbi' | 'flood' | 'export';
+type Mode = 'change' | 'trend' | 'view' | 'ndvi' | 'ndbi' | 'flood' | 'export';
 const MODE_IDS: Mode[] = ['change', 'view', 'ndvi', 'ndbi', 'flood', 'export'];
 /** modes that work with a single image */
 const ONE_IMAGE: Mode[] = ['ndvi', 'ndbi', 'flood', 'export'];
@@ -65,6 +68,7 @@ export default function ImageryFlow() {
   const [step, setStep] = useState<1 | 2 | 3>(aoi ? 2 : 1);
   const [watchId, setWatchId] = useState<string | null>(null);
   const [pick, setPick] = useState<PickerCtx | null>(null);
+  const nOptical = (pick?.list ?? []).filter((x) => familyOf(x) === 'optical').length;
   // ?start=<mode> (from the home page): that mode is opened as soon as the images allow it
   const [params] = useSearchParams();
   const startParam = params.get('start') as Mode | null;
@@ -190,10 +194,10 @@ export default function ImageryFlow() {
           </Step>
 
           {/* ③ what next */}
-          <Step n={3} title={L('เลือกการวิเคราะห์', 'Analysis')} summary={mode ? MODES(L).find((m) => m.id === mode)?.label : undefined} open={step === 3} onToggle={() => setStep(step === 3 ? 2 : 3)} disabled={!aoi || !(A || B)}>
+          <Step n={3} title={L('เลือกการวิเคราะห์', 'Analysis')} summary={mode ? MODES(L).find((m) => m.id === mode)?.label : undefined} open={step === 3} onToggle={() => setStep(step === 3 ? 2 : 3)} disabled={!aoi || !(A || B || nOptical >= 3)}>
             <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-2">
               {MODES(L).map((m) => {
-                const need = ONE_IMAGE.includes(m.id) ? !!(A || B) : !!(A && B);
+                const need = m.id === 'trend' ? nOptical >= 3 : ONE_IMAGE.includes(m.id) ? !!(A || B) : !!(A && B);
                 return (
                   <button
                     key={m.id}
@@ -249,6 +253,7 @@ function StartHint({ mode }: { mode: Mode }) {
   const L = useL();
   const t: Record<Mode, [string, string]> = {
     change: ['เลือกภาพ A (ก่อน) และ B (หลัง) — จุดสีเขียวคือภาพที่ผ่านเกณฑ์เมฆ', 'Pick A (before) and B (after) — green dots pass the cloud check'],
+    trend: ['กด “ค้นหาภาพ” ให้ครอบช่วงที่ต้องการ (เช่น 1 ปี) ไม่ต้องเลือก A/B แล้วไปขั้นที่ 3 เลือก “แนวโน้มหลายภาพ”', 'Search over the period you want (e.g. 1 year) — no A/B needed — then pick “Multi-scene trend” in step 3'],
     view: ['เลือกภาพ A และ B ที่ต้องการดูเทียบกัน', 'Pick the A and B images to look at'],
     flood: ['น้ำท่วมมักมีเมฆ: ติ๊ก “Sentinel-1 เรดาร์” แล้วค้นหา จากนั้นใส่วันเหตุการณ์และกด “ก่อน/หลังเหตุการณ์” (ภาพเดียวก็ได้)', 'Floods are cloudy: tick “Sentinel-1 radar”, search, then set the event date and use “Before/after event” (one image also works)'],
     ndvi: ['เลือกภาพเดียวก็ได้ — กด “ภาพล่าสุดที่มี” หรือคลิกจุดสีเขียว', 'One image is enough — use “Latest available” or click a green dot'],
@@ -260,6 +265,7 @@ function StartHint({ mode }: { mode: Mode }) {
 
 const MODES = (L: (a: string, b: string) => string): { id: Mode; icon: string; label: string; desc: string }[] => [
   { id: 'change', icon: '🔍', label: L('ตรวจจับการเปลี่ยนแปลง', 'Change detection'), desc: L('ถางป่า สิ่งปลูกสร้าง น้ำ ไฟ · ได้พื้นที่ (ไร่/ตร.กม.) และพิกัดจุดที่เปลี่ยน', 'Clearing, construction, water, fire — areas in rai/km² and patch locations') },
+  { id: 'trend', icon: '📈', label: L('แนวโน้มหลายภาพ', 'Multi-scene trend'), desc: L('ซ้อน 3–12 ภาพ (1/3/6 เดือน, 1 ปี) · สีตามวันที่เปลี่ยน ทิศทางขยายตัว ไทม์แลปส์', 'Stack 3–12 scenes (1/3/6 months, 1 year) · colour by date, growth direction, time-lapse') },
   { id: 'view', icon: '◐', label: L('เลื่อนเทียบ / สลับภาพ', 'Swipe / blink'), desc: L('ดูภาพ A กับ B ด้วยตา · เปิด/ปิดผลตรวจจับซ้อนบนภาพได้', 'Inspect A and B visually · toggle the change result over them') },
   { id: 'flood', icon: '🌊', label: L('น้ำท่วม', 'Flood'), desc: L('ขอบเขตน้ำจากภาพหลัง (และภาพก่อน) · เรดาร์มองทะลุเมฆ', 'Water extent from the after (and before) image — radar sees through cloud') },
   { id: 'ndvi', icon: '🌾', label: L('พืชพรรณ (NDVI)', 'Vegetation (NDVI)'), desc: L('ความเขียวและสุขภาพพืช พร้อมสถิติของพื้นที่ (และดัชนีอื่น)', 'Greenness / plant health with area statistics (and other indices)') },
@@ -372,6 +378,7 @@ function ModeBody({ mode, pick, watch, onWatch, addRun, onMode }: { mode: Mode; 
     }
   };
 
+  if (mode === 'trend') return <TrendPanel pick={pick} />;
   if (mode === 'view')
     return (
       <div className="space-y-1 text-[11px] text-slate-300">
@@ -410,6 +417,10 @@ function ModeBody({ mode, pick, watch, onWatch, addRun, onMode }: { mode: Mode; 
         <div>
           <div className="label mb-1">{L('รายงาน', 'Report')}</div>
           {run ? <Button onClick={report}>{L('เปิดรายงาน (พิมพ์ / บันทึกเป็น PDF)', 'Open report (print / save as PDF)')}</Button> : <p className="text-[10px] text-muted">{L('ทำ “ตรวจจับการเปลี่ยนแปลง” ก่อน แล้วค่อยออกรายงาน', 'Run “Change detection” first, then make the report')}</p>}
+        </div>
+        <div>
+          <div className="label mb-1">{L('ฐานข้อมูลป้ายกำกับ', 'Label database')}</div>
+          <LabelsPanel />
         </div>
         <div>
           <div className="label mb-1">{L('เฝ้าระวังอัตโนมัติ', 'Automatic watch')}</div>
@@ -482,6 +493,7 @@ function ModeBody({ mode, pick, watch, onWatch, addRun, onMode }: { mode: Mode; 
 /** Which step-3 mode put a layer on the map. */
 function modeOfLayer(l: LayerEntry): Mode | null {
   if (l.id.startsWith('change-')) return 'change';
+  if (l.id.startsWith('trend-')) return 'trend';
   if (l.id === 'flood' || l.id.startsWith('flood')) return 'flood';
   if (l.id.startsWith('spectral')) return /^NDBI/i.test(l.name) ? 'ndbi' : 'ndvi';
   return null;

@@ -23,7 +23,7 @@ const COLL: { id: StacCollectionId; th: string }[] = [
   { id: 'sentinel-1-rtc', th: 'Sentinel-1 เรดาร์ (10 ม.)' },
 ];
 
-type Preset = 'event' | 'week' | 'month' | 'year';
+type Preset = 'event' | 'week' | 'month' | 'quarter' | 'half' | 'year';
 
 // ---------------------------------------------------------------- AOI-cloud cache (per area × scene, this browser)
 
@@ -210,7 +210,7 @@ export function ScenePicker({
         setErr(L(`${latest.length} ภาพล่าสุดมีเมฆในพื้นที่เกินเกณฑ์ — กด “ภาพล่าสุดที่มี” เพื่อดูภาพปัจจุบันแม้มีเมฆ หรือเลือก Sentinel-1 เรดาร์ซึ่งมองทะลุเมฆ`, `The ${latest.length} latest scenes are too cloudy over the area — use “Latest available” to view the current image anyway, or Sentinel-1 radar, which sees through cloud`));
         return;
       }
-      const back = p === 'week' ? 7 : p === 'month' ? 30 : 365;
+      const back = p === 'week' ? 7 : p === 'month' ? 30 : p === 'quarter' ? 91 : p === 'half' ? 182 : 365;
       const target = new Date(new Date(b.datetime).getTime() - back * 86400e3).toISOString();
       const near = [...list].filter((x) => x.collection === b.collection && x.datetime < b.datetime && sceneOk(x)).sort((x, y) => Math.abs(+new Date(x.datetime) - +new Date(target)) - Math.abs(+new Date(y.datetime) - +new Date(target))).slice(0, 8);
       const m2 = await measure(near, ac.signal);
@@ -242,13 +242,16 @@ export function ScenePicker({
   const pick = async (it: ImageryItem) => {
     if (familyOf(it) === 'optical' && cl[it.id] === undefined) await measure([it]);
     setBusy('');
-    if (slot === 'A') {
-      setA(it);
-      setSlot('B');
+    const nA = slot === 'A' ? it : A, nB = slot === 'A' ? B : it;
+    // the earlier image is always "before" (A), whichever order the dots were clicked in
+    if (nA && nB && nA.datetime > nB.datetime) {
+      setA(nB);
+      setB(nA);
     } else {
-      setB(it);
-      setSlot('A');
+      setA(nA);
+      setB(nB);
     }
+    setSlot(slot === 'A' ? 'B' : 'A');
   };
 
   const pair = A && B ? checkPair(A, B, qc) : null;
@@ -335,6 +338,8 @@ export function ScenePicker({
                 </Button>
                 <Button disabled={!!busy} onClick={() => preset('week')}>{L('รายสัปดาห์', 'Weekly')}</Button>
                 <Button disabled={!!busy} onClick={() => preset('month')}>{L('รายเดือน', 'Monthly')}</Button>
+                <Button disabled={!!busy} onClick={() => preset('quarter')}>{L('3 เดือน', '3 months')}</Button>
+                <Button disabled={!!busy} onClick={() => preset('half')}>{L('6 เดือน', '6 months')}</Button>
                 <Button disabled={!!busy} onClick={() => preset('year')}>{L('รายปี', 'Yearly')}</Button>
                 <div className="flex items-end gap-1">
                   <Field label={L('วันเหตุการณ์', 'Event date')}><Input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className="!py-1 text-xs" /></Field>
