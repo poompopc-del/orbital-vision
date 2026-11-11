@@ -1,6 +1,6 @@
 // Labelling detected changes: a chip per result row (shows an earlier label at that place, or 🏷),
 // an editor to choose what the spot is, and a panel with the label database (counts, export, map).
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { useLang } from '../../i18n';
 import { Cesium } from '../../lib/cesium';
 import { cachedLabels, deleteLabel, kindOf, LABEL_KINDS, labelsCsv, labelsGeoJson, labelsNear, labelStore, loadLabels, onLabels, saveLabel, type ChangeLabel, type LabelKind } from '../../lib/labels';
@@ -88,10 +88,14 @@ const download = (name: string, text: string, type: string) => {
 /** The label database: counts by kind, export, show on the map. */
 export function LabelsPanel() {
   const L = useL();
-  const g = useContext(GisCtx);
+  const gNow = useContext(GisCtx);
+  const gRef = useRef(gNow);
+  gRef.current = gNow;
+  const hasG = !!gNow;
   const labels = useLabels();
   const [onMap, setOnMap] = useState(false);
   useEffect(() => {
+    const g = gRef.current;
     if (!g) return;
     if (!onMap || !labels.length) { g.removeLayer('labels'); return; }
     const ds = new Cesium.CustomDataSource('labels');
@@ -105,7 +109,7 @@ export function LabelsPanel() {
     }
     g.putDataSource('labels', L('ป้ายกำกับที่ติดไว้', 'Labels'), ds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [g, onMap, labels]);
+  }, [hasG, onMap, labels]);
   const counts = LABEL_KINDS.map((k) => ({ ...k, n: labels.filter((l) => l.label === k.id).length })).filter((k) => k.n);
   const stamp = new Date().toISOString().slice(0, 10);
   return (

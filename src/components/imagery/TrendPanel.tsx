@@ -40,7 +40,12 @@ export function spread<T>(list: T[], max: number): T[] {
 
 export default function TrendPanel({ pick }: { pick: PickerCtx }) {
   const L = useL();
-  const g = useContext(GisCtx);
+  const gNow = useContext(GisCtx);
+  // the layer host object changes whenever a layer is added: effects read it from a ref and depend
+  // only on whether it exists, or putting a layer would re-run them forever
+  const gRef = useRef(gNow);
+  gRef.current = gNow;
+  const hasG = !!gNow;
   const { aoi } = useWorkspace();
   const [days, setDays] = useState(90);
   const [max, setMax] = useState(8);
@@ -101,6 +106,7 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
 
   // ---- map: change by date (the frame shown), growth arrows + numbers, optionally the scene itself
   useEffect(() => {
+    const g = gRef.current;
     if (!g || !run || frame < 0) return;
     let dead = false;
     const b = run.bounds;
@@ -114,8 +120,9 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
     });
     return () => { dead = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [g, run, frame]);
+  }, [hasG, run, frame]);
   useEffect(() => {
+    const g = gRef.current;
     if (!g || !run) return;
     const ds = new Cesium.CustomDataSource('trend-arrows');
     const S = run.scenes.length;
@@ -138,8 +145,9 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
     }
     g.putDataSource('trend-arrows', L('ทิศทางการขยายตัว', 'Growth direction'), ds, { meta: L('ลูกศร = จากจุดที่เปลี่ยนก่อน ไปจุดที่เปลี่ยนล่าสุด', 'arrow = from the earliest change to the latest') });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [g, run]);
+  }, [hasG, run]);
   useEffect(() => {
+    const g = gRef.current;
     if (!g) return;
     const it = sceneOn && frame >= 0 ? used.find((u) => u.id === run?.scenes[frame]?.id) : null;
     if (!it) { g.removeLayer('trend-scene'); return; }
@@ -151,8 +159,9 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
       g.viewer.scene.requestRender();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [g, sceneOn, frame, run]);
-  useEffect(() => () => { ['trend-scene'].forEach((id) => g?.removeLayer(id)); }, [g]);
+  }, [hasG, sceneOn, frame, run]);
+  // leaving the panel: the real-scene layer goes (the result layers stay, listed under “on the map”)
+  useEffect(() => () => gRef.current?.removeLayer('trend-scene'), []);
   // time-lapse
   useEffect(() => {
     if (!playing || !run) return;
