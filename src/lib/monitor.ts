@@ -461,7 +461,7 @@ export async function landCoverShares(aoi: GeoJSON.Polygon, signal?: AbortSignal
   return out.length ? out : null;
 }
 
-async function landCoverMask(aoi: GeoJSON.Polygon, purpose: Purpose, grid: ReturnType<typeof gridFor>, signal?: AbortSignal): Promise<Float32Array | null> {
+export async function landCoverMask(aoi: GeoJSON.Polygon, purpose: Purpose, grid: ReturnType<typeof gridFor>, signal?: AbortSignal): Promise<Float32Array | null> {
   const allow = WC_ALLOW[purpose], deny = WC_DENY[purpose];
   if (!allow && !deny) return null;
   const r = await fetch('https://planetarycomputer.microsoft.com/api/stac/v1/search', {
@@ -511,7 +511,7 @@ function despeckle(r: Raster): Raster {
 
 const lsBit = (k: number) => `(((qa_pixel/${2 ** k})%2)>=1)`;
 /** per-pixel state codes: 0 no data · 3 cloud shadow · 8 cloud · 4 clear */
-function stateExpr(it: ImageryItem): string | null {
+export function stateExpr(it: ImageryItem): string | null {
   const k = sensorOf(it);
   // SCL 7 "unclassified" is mostly cloud edges and haze on Sentinel-2 L2A: treated as cloud
   if (k === 's2') return 'where((SCL==0)|(SCL==1),0,where(SCL==3,3,where((SCL==7)|(SCL==8)|(SCL==9)|(SCL==10),8,4)))';
