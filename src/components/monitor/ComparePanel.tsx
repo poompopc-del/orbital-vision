@@ -273,7 +273,8 @@ export function ScenePicker({
   useEffect(() => {
     onPair?.(ctxRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [A?.id, B?.id, A && cl[A.id], B && cl[B.id]]);
+  // also the scene list and cloud measurements: the multi-scene trend works from the list, without A/B
+  }, [A?.id, B?.id, A && cl[A.id], B && cl[B.id], list, cl]);
 
   const inner = (
     <>
