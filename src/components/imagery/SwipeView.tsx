@@ -6,11 +6,11 @@
 import { useEffect, useState, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react';
 import { useLang } from '../../i18n';
 import { Cesium } from '../../lib/cesium';
-import { displayTemplate } from '../../lib/export';
+import { displayTemplate, encodeGeoTiff, renderScene, safeName, saveBlob, savePng, summarySheet, withOverlay, type GeoCanvas } from '../../lib/export';
 import type { ImageryItem } from '../../lib/stac';
 import { pcProvider } from '../gis/sceneLayer';
 import type { GisApi } from '../gis/GisContext';
-import { Button, cx } from '../ui';
+import { Button, Spinner, cx } from '../ui';
 
 /** which result layers of the host to draw over the images (default: the two-scene change result) */
 export interface SwipeOverlay { result: string; outline?: string; spots?: string }
@@ -110,6 +110,61 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g, ids 
     if (!focus || !viewer || viewer.isDestroyed()) return;
     viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(focus.lon, focus.lat, focus.heightM ?? 1500), duration: 0.9 });
   }, [viewer, focus?.key]);
+  // ---- download the two images (what is on screen), optionally with the highlight burnt in
+  const [dlOpen, setDlOpen] = useState(false);
+  const [dlFmt, setDlFmt] = useState<'png' | 'tif'>('png');
+  const [dlMark, setDlMark] = useState(true);
+  const [dlBusy, setDlBusy] = useState('');
+  const viewBox = (): GeoJSON.Polygon | null => {
+    if (!viewer || viewer.isDestroyed()) return null;
+    const r = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid);
+    if (!r) return null;
+    const d = (v: number) => Cesium.Math.toDegrees(v);
+    const [w, so, e, n] = [d(r.west), d(r.south), d(r.east), d(r.north)];
+    if (!(e > w && n > so) || e - w > 2 || n - so > 2) return null; // whole globe in view: zoom in first
+    return { type: 'Polygon', coordinates: [[[w, so], [e, so], [e, n], [w, n], [w, so]]] };
+  };
+  const overlayOf = () => {
+    const ent = style === 'outline' && outl ? outl : res;
+    const prov = ent?.layer?.imageryProvider as (Cesium.SingleTileImageryProvider & { url?: string }) | undefined;
+    if (!prov?.url || !prov.rectangle) return null;
+    const r = prov.rectangle, d = Cesium.Math.toDegrees;
+    return { url: prov.url, b: { west: d(r.west), south: d(r.south), east: d(r.east), north: d(r.north) } };
+  };
+  const download = async (which: 'A' | 'B' | 'AB') => {
+    const box = viewBox();
+    if (!box) { setDlBusy(L('ซูมเข้าให้เห็นพื้นที่ก่อน (มุมมองกว้างเกิน)', 'Zoom in to the area first (view too wide)')); setTimeout(() => setDlBusy(''), 2500); return; }
+    const ov = dlMark && res ? overlayOf() : null;
+    const one = async (it: ImageryItem, k: string): Promise<GeoCanvas> => {
+      const img = await renderScene(it, box, { onProgress: (a, n) => setDlBusy(`${L('ภาพ', 'Image')} ${k} ${a}/${n}`) });
+      return ov ? withOverlay(img, ov.url, ov.b) : img;
+    };
+    const name = (it: ImageryItem, k: string) => `${k}_${it.datetime.slice(0, 10)}_${safeName(String(it.collection))}${ov ? '_highlight' : ''}`;
+    try {
+      if (which === 'AB') {
+        const [ia, ib] = [await one(A, 'A'), await one(B, 'B')];
+        setDlBusy(L('รวมเป็นแผ่นเดียว…', 'Making the sheet…'));
+        const c = box.coordinates[0];
+        const sheet = await summarySheet(
+          `${L('เทียบ', 'Compare')} ${A.datetime.slice(0, 10)} → ${B.datetime.slice(0, 10)}`,
+          [{ img: ia, caption: `A · ${L('ก่อน', 'before')} · ${A.datetime.slice(0, 10)}` }, { img: ib, caption: `B · ${L('หลัง', 'after')} · ${B.datetime.slice(0, 10)}` }],
+          [],
+          [`${c[0][1].toFixed(5)}, ${c[0][0].toFixed(5)} → ${c[2][1].toFixed(5)}, ${c[2][0].toFixed(5)} (WGS84)`, `${A.collectionLabel ?? A.collection} · ${B.collectionLabel ?? B.collection}${ov ? ` · ${L('ไฮไลต์ = ส่วนที่ตรวจพบการเปลี่ยนแปลง', 'highlight = detected change')}` : ''}`],
+        );
+        saveBlob(sheet, `compare_${A.datetime.slice(0, 10)}_${B.datetime.slice(0, 10)}${ov ? '_highlight' : ''}.png`);
+      } else {
+        const it = which === 'A' ? A : B;
+        const g2 = await one(it, which);
+        if (dlFmt === 'tif') saveBlob(encodeGeoTiff(g2), `${name(it, which)}.tif`);
+        else await savePng(g2, `${name(it, which)}.png`);
+      }
+      setDlBusy('');
+    } catch (e: any) {
+      setDlBusy(`${L('ดาวน์โหลดไม่สำเร็จ', 'Download failed')}: ${e?.message ?? e}`);
+      setTimeout(() => setDlBusy(''), 4000);
+    }
+  };
+
   const cur = spotIdx >= 0 && spotIdx < spotList.length ? spotInfo(spotIdx) : null;
 
   const drag = (e: RPointerEvent<HTMLDivElement>) => {
@@ -201,6 +256,29 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g, ids 
         <Button variant={show === 'A' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('A'); }}>A {L('ก่อน', 'before')}</Button>
         <Button variant={show === 'B' && !blink ? 'active' : 'ghost'} onClick={() => { setBlink(false); setShow('B'); }}>B {L('หลัง', 'after')}</Button>
         <Button variant={blink ? 'active' : 'ghost'} onClick={() => { const on = !blink; setBlink(on); setShow(on ? 'A' : 'split'); }} title={L('สลับภาพ A/B อัตโนมัติ ให้จุดที่เปลี่ยน “กะพริบ” เห็นชัด', 'Alternate A/B automatically so changes flicker')}>⟳ {L('กะพริบ', 'Blink')}</Button>
+        <span className="relative">
+          <Button variant={dlOpen ? 'active' : 'ghost'} onClick={() => setDlOpen(!dlOpen)} title={L('ดาวน์โหลดภาพ A / B ตามที่เห็นบนจอ', 'Download images A / B as seen on screen')}>⬇ {L('ดาวน์โหลด', 'Download')}</Button>
+          {dlOpen && (
+            <div className="absolute bottom-full right-0 mb-1 w-64 space-y-1.5 rounded-md border border-line bg-ink-950/95 p-2 text-[11px]">
+              <div className="text-[10px] text-muted">{L('ตัดตามพื้นที่ที่เห็นบนจอตอนนี้ (ซูม/เลื่อนก่อนกด)', 'Cut to what is on screen now (zoom / pan first)')}</div>
+              <div className="flex items-center gap-2">
+                <span className="flex overflow-hidden rounded border border-line">
+                  {(['png', 'tif'] as const).map((f) => (
+                    <button key={f} onClick={() => setDlFmt(f)} className={cx('px-1.5 py-0.5', dlFmt === f ? 'bg-cyan-400/20 text-white' : 'text-muted hover:text-white')}>{f === 'png' ? 'PNG' : 'GeoTIFF'}</button>
+                  ))}
+                </span>
+                {res && <label className="flex items-center gap-1"><input type="checkbox" checked={dlMark} onChange={(e) => setDlMark(e.target.checked)} />{L('ใส่ไฮไลต์', 'With highlight')}</label>}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                <Button disabled={!!dlBusy} onClick={() => void download('A')}>A {A.datetime.slice(0, 10)}</Button>
+                <Button disabled={!!dlBusy} onClick={() => void download('B')}>B {B.datetime.slice(0, 10)}</Button>
+                <Button disabled={!!dlBusy} onClick={() => void download('AB')} title={L('ภาพ A และ B วางคู่กันในไฟล์ PNG เดียว พร้อมวันที่และพิกัด', 'A and B side by side in one PNG, with dates and coordinates')}>A | B {L('คู่กัน', 'side by side')}</Button>
+              </div>
+              {dlBusy && <div className="flex items-center gap-1.5 text-cyan-300">{!dlBusy.startsWith(L('ดาวน์โหลดไม่', 'Download f')) && !dlBusy.startsWith(L('ซูม', 'Zoom')) && <Spinner />}{dlBusy}</div>}
+              {res && dlMark && <div className="text-[9px] text-muted">{L(`ไฮไลต์แบบ${style === 'outline' && outl ? 'เส้นขอบ' : 'เติมสี'}ตามที่เลือกบนแถบ`, `${style === 'outline' && outl ? 'Outline' : 'Fill'} highlight, as chosen on the bar`)}</div>}
+            </div>
+          )}
+        </span>
         {onClose && <button className="px-2 text-cyan-300 hover:underline" onClick={onClose}>{L('ปิด', 'Close')}</button>}
       </div>
     </>
