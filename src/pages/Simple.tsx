@@ -136,7 +136,7 @@ export default function Simple() {
     if (!p) return setImportMsg('อ่านพิกัดไม่ได้ — ลองแบบ 13.97, 104.13 หรือ 13 58 12 N 104 08 03 E หรือ UTM');
     const { lat, lon } = p;
     setImportMsg('');
-    setPlace({ name: `${lat.toFixed(5)}, ${lon.toFixed(5)}`, aoi: targetAoi({ lon, lat, sizeKm: boxKm }), lon, lat });
+    setPlace({ name: 'พิกัดที่ใส่', aoi: targetAoi({ lon, lat, sizeKm: boxKm }), lon, lat });
   };
   const onFiles = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -196,13 +196,17 @@ export default function Simple() {
       const cg = Cesium.Cartographic.fromCartesian(c);
       const lat = Cesium.Math.toDegrees(cg.latitude), lon = Cesium.Math.toDegrees(cg.longitude);
       setCoordText(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-      setPlace({ name: `${lat.toFixed(5)}, ${lon.toFixed(5)}`, aoi: targetAoi({ lon, lat, sizeKm: km }), lon, lat });
+      setPlace({ name: 'จุดที่คลิกบนแผนที่', aoi: targetAoi({ lon, lat, sizeKm: km }), lon, lat });
       setClickMode(false);
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     return () => h.destroy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewer]);
 
+  // start over Thailand and its neighbours
+  useEffect(() => {
+    if (viewer && !viewer.isDestroyed()) viewer.camera.setView({ destination: Cesium.Rectangle.fromDegrees(96, 4, 108, 22) });
+  }, [viewer]);
   // the area box on the map
   const akey = place ? JSON.stringify(place.aoi.coordinates) : '';
   useEffect(() => {
