@@ -4,6 +4,7 @@ import { fetchRaster, gridFor, type Grid } from './change';
 import { indexExpression, INDICES } from './spectral';
 import { landCoverMask, stateExpr } from './monitor';
 import { analyseStack, compass, dateColour, type Growth } from './timeseries';
+import { clearMask } from './cloudmask';
 import type { ImageryItem } from './stac';
 
 export interface TrendScene { id: string; collection: string; date: string }
@@ -34,6 +35,13 @@ export interface TrendRun {
   drop: number;
   noise: number;
   forestOnly: boolean;
+}
+
+/** state codes for the stack: like stateExpr, but Sentinel-2 "dark area" (SCL 2) kept apart as 2 —
+ * it is usually cloud shadow next to a cloud (clearMask decides) */
+function stackStateExpr(it: ImageryItem): string | null {
+  if (/sentinel-2/i.test(String(it.collection))) return 'where((SCL==0)|(SCL==1),0,where(SCL==2,2,where(SCL==3,3,where((SCL==7)|(SCL==8)|(SCL==9)|(SCL==10),8,4))))';
+  return stateExpr(it);
 }
 
 const gridMetres = (g: Grid) => ((g.east - g.west) * 111320 * Math.cos((((g.south + g.north) / 2) * Math.PI) / 180)) / g.width;
@@ -111,8 +119,10 @@ export async function runTrend(
     const it = list[k];
     const lbl = `ภาพ ${k + 1}/${list.length} (${it.datetime.slice(0, 10)})`;
     const nd = await fetchRaster(it, indexExpression(it, ndviDef), [-1, 1], grid, signal, (d, n) => progress(`อ่าน NDVI ${lbl} ${d}/${n}`));
-    const st = await fetchRaster(it, stateExpr(it)!, [0, 255], grid, signal, (d, n) => progress(`อ่านหน้ากากเมฆ ${lbl} ${d}/${n}`));
-    const clear = Float32Array.from(nd.values, (v, p) => (Math.round(st.values[p]) === 4 ? v : NaN));
+    const st = await fetchRaster(it, stackStateExpr(it)!, [0, 255], grid, signal, (d, n) => progress(`อ่านหน้ากากเมฆ ${lbl} ${d}/${n}`));
+    // cloud / shadow grown by 40 m, dark pixels within 1 km of a cloud taken as shadow
+    const ok = clearMask(st.values, W, H, gridMetres(grid));
+    const clear = Float32Array.from(nd.values, (v, p) => (ok[p] ? v : NaN));
     const coarse = blockMean(clear, W, H, f);
     for (let q = 0; q < coarse.length; q++) if (!mask[q]) coarse[q] = NaN;
     stack.push(coarse);

@@ -22,7 +22,7 @@ export function outlineRgba(src: Uint8ClampedArray, W: number, H: number, minAlp
 }
 
 /** Same as outlineRgba, for an image URL (browser only): returns a PNG data URL. */
-export async function outlineDataUrl(url: string): Promise<string> {
+export async function outlineDataUrl(url: string, minAlpha = 200): Promise<string> {
   const img = new Image();
   img.crossOrigin = 'anonymous';
   await new Promise<void>((ok, bad) => {
@@ -36,7 +36,7 @@ export async function outlineDataUrl(url: string): Promise<string> {
   const ctx = c.getContext('2d')!;
   ctx.drawImage(img, 0, 0);
   const d = ctx.getImageData(0, 0, c.width, c.height);
-  d.data.set(outlineRgba(d.data, c.width, c.height));
+  d.data.set(outlineRgba(d.data, c.width, c.height, minAlpha));
   ctx.putImageData(d, 0, 0);
   return c.toDataURL('image/png');
 }

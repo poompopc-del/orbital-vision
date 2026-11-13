@@ -3,7 +3,7 @@
 // When a change-detection result is on the map (layers change-result / change-outline / change-spots
 // of the page's layer host), it is drawn OVER both images, with its own controls: on/off, fill or
 // outline, opacity, numbered spots and ◀ ▶ to fly from spot to spot.
-import { useEffect, useState, type PointerEvent as RPointerEvent, type RefObject } from 'react';
+import { useEffect, useState, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react';
 import { useLang } from '../../i18n';
 import { Cesium } from '../../lib/cesium';
 import { displayTemplate } from '../../lib/export';
@@ -12,7 +12,18 @@ import { pcProvider } from '../gis/sceneLayer';
 import type { GisApi } from '../gis/GisContext';
 import { Button, cx } from '../ui';
 
-export default function SwipeView({ viewer, A, B, containerRef, onClose, g }: { viewer: Cesium.Viewer | null; A: ImageryItem; B: ImageryItem; containerRef: RefObject<HTMLElement>; onClose?: () => void; g?: GisApi | null }) {
+/** which result layers of the host to draw over the images (default: the two-scene change result) */
+export interface SwipeOverlay { result: string; outline?: string; spots?: string }
+const CHANGE_IDS: SwipeOverlay = { result: 'change-result', outline: 'change-outline', spots: 'change-spots' };
+
+export default function SwipeView({ viewer, A, B, containerRef, onClose, g, ids = CHANGE_IDS, focus, extra }: {
+  viewer: Cesium.Viewer | null; A: ImageryItem; B: ImageryItem; containerRef: RefObject<HTMLElement>; onClose?: () => void; g?: GisApi | null;
+  ids?: SwipeOverlay;
+  /** fly here when it changes (e.g. the piece picked in a list) */
+  focus?: { lon: number; lat: number; heightM?: number; key: string } | null;
+  /** extra controls in the result bar (e.g. ◀ ▶ between trend pieces) */
+  extra?: ReactNode;
+}) {
   const lang = useLang((s) => s.lang);
   const L = (th: string, en: string) => (lang === 'th' ? th : en);
   const [split, setSplit] = useState(0.5);
@@ -46,9 +57,9 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g }: { 
   }, [blink]);
 
   // ---- change result over the images
-  const res = g?.layers.find((l) => l.id === 'change-result');
-  const outl = g?.layers.find((l) => l.id === 'change-outline');
-  const spots = g?.layers.find((l) => l.id === 'change-spots');
+  const res = g?.layers.find((l) => l.id === ids.result);
+  const outl = ids.outline ? g?.layers.find((l) => l.id === ids.outline) : undefined;
+  const spots = ids.spots ? g?.layers.find((l) => l.id === ids.spots) : undefined;
   const [resultOn, setResultOn] = useState(true);
   const [style, setStyle] = useState<'fill' | 'outline'>('fill');
   const [spotsOn, setSpotsOn] = useState(true);
@@ -65,13 +76,13 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g }: { 
   }, [viewer, A.id, B.id, res?.layer, outl?.layer]);
   useEffect(() => {
     if (!g) return;
-    if (res) g.setLayer('change-result', { show: resultOn && (style === 'fill' || !outl) });
-    if (outl) g.setLayer('change-outline', { show: resultOn && style === 'outline' });
+    if (res) g.setLayer(ids.result, { show: resultOn && (style === 'fill' || !outl) });
+    if (outl && ids.outline) g.setLayer(ids.outline, { show: resultOn && style === 'outline' });
     viewer?.scene.requestRender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resultOn, style, !!res, !!outl]);
   useEffect(() => {
-    if (g && spots) g.setLayer('change-spots', { show: spotsOn });
+    if (g && spots && ids.spots) g.setLayer(ids.spots, { show: spotsOn });
     viewer?.scene.requestRender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spotsOn, !!spots]);
@@ -95,6 +106,10 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g }: { 
     setSpotIdx(k);
     if (!spotsOn) setSpotsOn(true);
   };
+  useEffect(() => {
+    if (!focus || !viewer || viewer.isDestroyed()) return;
+    viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(focus.lon, focus.lat, focus.heightM ?? 1500), duration: 0.9 });
+  }, [viewer, focus?.key]);
   const cur = spotIdx >= 0 && spotIdx < spotList.length ? spotInfo(spotIdx) : null;
 
   const drag = (e: RPointerEvent<HTMLDivElement>) => {
@@ -139,7 +154,7 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g }: { 
           {show === 'A' ? `A · ${L('ก่อน', 'before')} · ${A.datetime.slice(0, 10)}` : `B · ${L('หลัง', 'after')} · ${B.datetime.slice(0, 10)}`}
         </div>
       )}
-      {(res || spots) && (
+      {(res || spots || extra) && (
         <div className="absolute bottom-14 left-1/2 z-20 flex max-w-[calc(100%-24px)] -translate-x-1/2 flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-md border border-line bg-ink-950/85 px-2 py-1 text-[11px] text-slate-200">
           {res && (
             <>
@@ -159,7 +174,7 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g }: { 
               {/* always laid out (hidden when not used) so the bar does not jump when switching fill / outline */}
               <label className={cx('flex items-center gap-1 text-[10px] text-muted', !(style === 'fill' && resultOn) && 'invisible')}>
                 {L('ทึบ', 'Opacity')}
-                <input type="range" min={0.15} max={1} step={0.05} value={res.alpha} onChange={(e) => g?.setLayer('change-result', { alpha: +e.target.value })} className="h-1 w-16" />
+                <input type="range" min={0.15} max={1} step={0.05} value={res.alpha} onChange={(e) => g?.setLayer(ids.result, { alpha: +e.target.value })} className="h-1 w-16" />
               </label>
             </>
           )}
@@ -178,6 +193,7 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g }: { 
               </span>
             </>
           )}
+          {extra && <>{(res || spots) && <span className="h-4 w-px bg-line" />}{extra}</>}
         </div>
       )}
       <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px] text-slate-200">

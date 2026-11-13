@@ -1,13 +1,14 @@
 // Multi-scene trend: pick a period (1 / 3 / 6 / 12 months), the clear scenes in it are stacked,
 // and the map shows WHEN each change happened (colour by date), WHICH WAY it grew (arrows) and a
 // time-lapse of the change building up scene by scene.
-import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLang } from '../../i18n';
 import { Cesium } from '../../lib/cesium';
 import { familyOf } from '../../lib/qc';
 import { displayTemplate } from '../../lib/export';
 import { dateColour } from '../../lib/timeseries';
-import { runTrend, type TrendRun } from '../../lib/trend';
+import { runTrend, type TrendPiece, type TrendRun } from '../../lib/trend';
+import { outlineDataUrl } from '../../lib/outline';
 import type { ImageryItem } from '../../lib/stac';
 import { useWorkspace } from '../../store';
 import { GisCtx } from '../gis/GisContext';
@@ -26,8 +27,8 @@ const PERIODS = [
   { d: 182, th: '6 เดือน', en: '6 months' },
   { d: 365, th: '1 ปี', en: '1 year' },
 ];
-/** scenes with more cloud + shadow than this inside the AOI add little and are skipped */
-const MAX_CLOUD = 70;
+/** scenes with more cloud + shadow than this inside the AOI add little (and leak cloud edges) and are skipped */
+const MAX_CLOUD = 50;
 const css = (k: number, S: number) => `rgb(${dateColour(k, S).join(',')})`;
 
 /** Up to `max` items spread evenly over the list, always keeping the first and the last. */
@@ -38,8 +39,21 @@ export function spread<T>(list: T[], max: number): T[] {
   return [...new Set(out)];
 }
 
-export default function TrendPanel({ pick }: { pick: PickerCtx }) {
+/** what the page's swipe view shows for a picked trend piece */
+export interface TrendSwipe { A: ImageryItem; B: ImageryItem; focus: { lon: number; lat: number; heightM: number; key: string }; extra: ReactNode }
+
+const cloudScore = (pick: PickerCtx, it: ImageryItem) => { const c = pick.cloudOf(it); return c ? c.cloudPct + c.shadowPct : 50; };
+/** BEFORE = the clearest scene before the change started; AFTER = the clearest one from its start on (later wins a tie) */
+export function swipePair(p: TrendPiece, used: ImageryItem[], score: (it: ImageryItem) => number): [ImageryItem, ImageryItem] | null {
+  const best = (xs: ImageryItem[]) => xs.reduce<ImageryItem | null>((b, x) => (!b || score(x) <= score(b) + 1 ? x : b), null);
+  const a = best(used.slice(Math.max(0, p.first - 3), p.first));
+  const b = best(used.slice(p.first));
+  return a && b ? [a, b] : null;
+}
+
+export default function TrendPanel({ pick, onSwipe }: { pick: PickerCtx; onSwipe?: (s: TrendSwipe | null) => void }) {
   const L = useL();
+  const lang = useLang((x) => x.lang);
   const gNow = useContext(GisCtx);
   // the layer host object changes whenever a layer is added: effects read it from a ref and depend
   // only on whether it exists, or putting a layer would re-run them forever
@@ -60,6 +74,8 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
   const abort = useRef<AbortController | null>(null);
   const labels = useLabels();
   const [editing, setEditing] = useState<LabelTarget | null>(null);
+  /** index into run.pieces of the piece opened in the swipe view */
+  const [sel, setSel] = useState(-1);
 
   const optical: ImageryItem[] = useMemo(() => (pick.list ?? []).filter((x) => familyOf(x) === 'optical').sort((a, b) => a.datetime.localeCompare(b.datetime)), [pick.list]);
   const newest = optical[optical.length - 1];
@@ -79,6 +95,7 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
     if (!aoi) return;
     setErr('');
     setRun(null);
+    setSel(-1);
     const ac = new AbortController();
     abort.current = ac;
     try {
@@ -95,6 +112,7 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
       setUsed(chosen);
       const r = await runTrend(aoi.geometry, chosen, setBusy, ac.signal, { forestOnly: forest });
       setRun(r);
+      setSel(-1);
       setFrame(r.scenes.length - 1);
     } catch (e: any) {
       if (e?.name !== 'AbortError') setErr(e?.message ?? String(e));
@@ -118,6 +136,16 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
         meta: `${run.scenes[0].date} → ${run.scenes[run.scenes.length - 1].date} · ${run.scenes.length} ${L('ภาพ', 'scenes')}`,
       });
     });
+    // the same, as outlines only (for the swipe view: the imagery under a patch stays visible)
+    void outlineDataUrl(run.frameUrls[frame] ?? run.imageUrl, 100)
+      .then((u) => imageProvider(u, b.west, b.south, b.east, b.north))
+      .then((prov) => {
+        if (dead) return;
+        const shown = gRef.current?.layers.find((l) => l.id === 'trend-outline')?.show ?? false;
+        gRef.current?.putImagery('trend-outline', L('ขอบเขตการเปลี่ยนแปลง (หลายภาพ)', 'Change outline (multi-scene)'), prov, { alpha: 1 });
+        gRef.current?.setLayer('trend-outline', { show: shown });
+      })
+      .catch(() => undefined);
     return () => { dead = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasG, run, frame]);
@@ -162,6 +190,39 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
   }, [hasG, sceneOn, frame, run]);
   // leaving the panel: the real-scene layer goes (the result layers stay, listed under “on the map”)
   useEffect(() => () => gRef.current?.removeLayer('trend-scene'), []);
+  // ---- swipe view of the picked piece: clearest scene before it started vs. clearest after
+  useEffect(() => {
+    if (!onSwipe) return;
+    const p = run && sel >= 0 ? run.pieces[sel] : null;
+    const pair = p ? swipePair(p, used, (it) => cloudScore(pick, it)) : null;
+    if (!run || !p || !pair) { onSwipe(null); return; }
+    const S = run.scenes.length;
+    const step = (d: number) => setSel((i) => (((i + d) % run.pieces.length) + run.pieces.length) % run.pieces.length);
+    onSwipe({
+      A: pair[0], B: pair[1],
+      focus: { lon: p.lon, lat: p.lat, heightM: Math.max(1200, Math.sqrt(p.km2) * 6000, p.lengthKm * 1600), key: `${run.scenes[0].id}:${p.n}` },
+      extra: (
+        <span className="flex items-center gap-1 whitespace-nowrap">
+          <button className="rounded border border-line px-1.5 hover:border-cyan-400/60" onClick={() => step(-1)} title={L('แห่งก่อนหน้า', 'Previous piece')}>◀</button>
+          <span className="text-center font-mono text-[10px]">
+            {L('แห่งที่', '#')} {p.n}/{run.pieces.length} · {(p.km2 * 625).toFixed(1)} {L('ไร่', 'rai')} · <span style={{ color: css(p.first, S) }}>■</span> {run.scenes[p.first].date}{p.unconfirmed ? '*' : ''}
+          </span>
+          <button className="rounded border border-line px-1.5 hover:border-cyan-400/60" onClick={() => step(1)} title={L('แห่งถัดไป', 'Next piece')}>▶</button>
+          <button className="px-1 text-cyan-300 hover:underline" onClick={() => setSel(-1)}>{L('ปิด', 'Close')}</button>
+        </span>
+      ),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run, sel, used, lang]);
+  // while swiping: all change up to the newest scene, no real-scene underlay
+  useEffect(() => {
+    if (sel < 0 || !run) return;
+    setPlaying(false);
+    setSceneOn(false);
+    setFrame(run.scenes.length - 1);
+  }, [sel, run]);
+  useEffect(() => () => onSwipe?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // time-lapse
   useEffect(() => {
     if (!playing || !run) return;
@@ -251,10 +312,10 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
 
           {run.pieces.length > 0 && (
             <table className="w-full text-[10px]">
-              <thead className="text-muted"><tr><th className="text-left">#</th><th className="text-left">lat, lon</th><th>{L('ไร่', 'rai')}</th><th>{L('เริ่ม → ล่าสุด', 'first → last')}</th><th>{L('ทิศ', 'dir')}</th><th>{L('ป้าย', 'label')}</th></tr></thead>
+              <thead className="text-muted"><tr><th className="text-left">#</th><th className="text-left">lat, lon</th><th>{L('ไร่', 'rai')}</th><th>{L('เริ่ม → ล่าสุด', 'first → last')}</th><th>{L('ทิศ', 'dir')}</th><th>{L('ป้าย', 'label')}</th><th /></tr></thead>
               <tbody>
-                {run.pieces.slice(0, 15).map((p) => (
-                  <tr key={p.n} className="border-t border-white/5">
+                {run.pieces.slice(0, 15).map((p, i) => (
+                  <tr key={p.n} className={cx('border-t border-white/5', sel === i && 'bg-cyan-400/15')}>
                     <td>{p.n}</td>
                     <td className="font-mono">{p.lat.toFixed(5)}, {p.lon.toFixed(5)}</td>
                     <td className="text-center">{rai(p.km2)}</td>
@@ -268,12 +329,14 @@ export default function TrendPanel({ pick }: { pick: PickerCtx }) {
                       };
                       return <LabelChip t={t} labels={labels} active={editing?.ref === t.ref} onOpen={() => setEditing(editing?.ref === t.ref ? null : t)} />;
                     })()}</td>
+                    <td className="text-right">{onSwipe && <button className={cx('rounded border px-1', sel === i ? 'border-cyan-400 text-white' : 'border-line text-cyan-300 hover:border-cyan-400/60')} onClick={() => setSel(sel === i ? -1 : i)} title={L('เลื่อนเทียบภาพก่อน/หลังของแห่งนี้ พร้อมไฮไลต์ส่วนที่เปลี่ยน', 'Swipe before/after of this piece, with the change highlighted')}>◐ {L('เทียบ', 'swipe')}</button>}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
           {editing && <LabelEditor key={editing.ref} t={editing} labels={labels} onDone={() => setEditing(null)} />}
+          {onSwipe && run.pieces.length > 0 && <p className="text-[10px] text-cyan-300">{L('กด ◐ เทียบ ที่แถว เพื่อเลื่อนดูภาพก่อน/หลังของแห่งนั้น และเปิดปิดไฮไลต์ส่วนที่เปลี่ยนได้', 'Press ◐ swipe on a row to compare before/after there, with the change highlight on or off')}</p>}
           <p className="text-[9px] text-muted">{L('สีจาง / * = เห็นเฉพาะภาพล่าสุด ยังยืนยันไม่ได้จนกว่าจะมีภาพถัดไป · ผลเป็นการชี้เป้า ควรเปิดดูภาพจริงยืนยัน', 'Light colour / * = seen on the newest scene only, unconfirmed until the next one · results point where to look; confirm on the imagery')}</p>
         </div>
       )}

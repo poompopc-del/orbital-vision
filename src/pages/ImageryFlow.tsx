@@ -25,7 +25,7 @@ import FloodPanel from '../components/gis/FloodPanel';
 import SceneDownload from '../components/gis/SceneDownload';
 import { imageProvider } from '../components/gis/sceneLayer';
 import { outlineDataUrl } from '../lib/outline';
-import TrendPanel from '../components/imagery/TrendPanel';
+import TrendPanel, { type TrendSwipe } from '../components/imagery/TrendPanel';
 import { LabelsPanel } from '../components/monitor/Labels';
 import { familyOf } from '../lib/qc';
 import { useMonitor } from './Monitor';
@@ -79,6 +79,8 @@ export default function ImageryFlow() {
     setModeS(m);
   };
   const [sideOpen, setSideOpen] = useState(true);
+  // a trend piece opened for before/after swiping (set by the trend panel)
+  const [tSwipe, setTSwipe] = useState<TrendSwipe | null>(null);
 
   const akey = useMemo(() => (aoi ? aoiKey(aoi.geometry) : ''), [aoi?.geometry]);
   const watch = aois.find((a) => a.id === watchId && aoiKey(a.geometry) === akey) ?? aois.find((a) => aoiKey(a.geometry) === akey) ?? null;
@@ -112,7 +114,8 @@ export default function ImageryFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [A?.id, B?.id]);
   // place names / old borders would sit over the images while comparing
-  const viewing = mode === 'view' && !!A && !!B;
+  const trendSwiping = mode === 'trend' && !!tSwipe;
+  const viewing = (mode === 'view' && !!A && !!B) || trendSwiping;
   useEffect(() => {
     if (!viewer) return;
     const lab = getLabelsLayer(viewer);
@@ -225,7 +228,7 @@ export default function ImageryFlow() {
                 </div>
               );
             })()}
-            {mode && <div className="mt-3 border-t border-line pt-3">{aoi && pick && <ModeBody mode={mode} pick={pick} watch={watch} onWatch={(a) => { setAois((l) => [...l, a]); setWatchId(a.id); }} addRun={addRun} onMode={setMode} />}</div>}
+            {mode && <div className="mt-3 border-t border-line pt-3">{aoi && pick && <ModeBody mode={mode} pick={pick} onTrendSwipe={setTSwipe} watch={watch} onWatch={(a) => { setAois((l) => [...l, a]); setWatchId(a.id); }} addRun={addRun} onMode={setMode} />}</div>}
           </Step>
         </aside>
 
@@ -236,7 +239,8 @@ export default function ImageryFlow() {
               » {L('แผงควบคุม', 'Panel')}
             </button>
           )}
-          {viewing && A && B && <SwipeView viewer={viewer} A={A} B={B} containerRef={mapRef} onClose={() => setMode(null)} g={g} />}
+          {viewing && !trendSwiping && A && B && <SwipeView viewer={viewer} A={A} B={B} containerRef={mapRef} onClose={() => setMode(null)} g={g} />}
+          {trendSwiping && tSwipe && <SwipeView key="trend" viewer={viewer} A={tSwipe.A} B={tSwipe.B} containerRef={mapRef} g={g} ids={{ result: 'trend-result', outline: 'trend-outline' }} focus={tSwipe.focus} extra={tSwipe.extra} />}
           {!viewing && <OnMap g={g} />}
           {!aoi && (
             <div className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-md border border-line bg-ink-950/85 px-3 py-1.5 text-xs text-slate-200">
@@ -273,7 +277,7 @@ const MODES = (L: (a: string, b: string) => string): { id: Mode; icon: string; l
   { id: 'export', icon: '📷', label: L('ภาพ · รายงาน · เฝ้าระวัง', 'Images · report · watch'), desc: L('ดาวน์โหลดภาพ (GeoTIFF/PNG) ออกรายงาน หรือเพิ่มเข้าการตรวจอัตโนมัติ', 'Download images (GeoTIFF/PNG), make a report, or add to automatic checks') },
 ];
 
-function ModeBody({ mode, pick, watch, onWatch, addRun, onMode }: { mode: Mode; pick: PickerCtx; watch: MonitorAoi | null; onWatch: (a: MonitorAoi) => void; addRun: (r: MonitorRun) => void; onMode: (m: Mode) => void }) {
+function ModeBody({ mode, pick, onTrendSwipe, watch, onWatch, addRun, onMode }: { mode: Mode; pick: PickerCtx; onTrendSwipe: (s: TrendSwipe | null) => void; watch: MonitorAoi | null; onWatch: (a: MonitorAoi) => void; addRun: (r: MonitorRun) => void; onMode: (m: Mode) => void }) {
   const L = useL();
   const lang = useLang((s) => s.lang);
   const { qc, unit } = useQc();
@@ -378,7 +382,7 @@ function ModeBody({ mode, pick, watch, onWatch, addRun, onMode }: { mode: Mode; 
     }
   };
 
-  if (mode === 'trend') return <TrendPanel pick={pick} />;
+  if (mode === 'trend') return <TrendPanel pick={pick} onSwipe={onTrendSwipe} />;
   if (mode === 'view')
     return (
       <div className="space-y-1 text-[11px] text-slate-300">
