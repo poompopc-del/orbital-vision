@@ -16,13 +16,16 @@ import { Button, Spinner, cx } from '../ui';
 export interface SwipeOverlay { result: string; outline?: string; spots?: string }
 const CHANGE_IDS: SwipeOverlay = { result: 'change-result', outline: 'change-outline', spots: 'change-spots' };
 
-export default function SwipeView({ viewer, A, B, containerRef, onClose, g, ids = CHANGE_IDS, focus, extra }: {
+export default function SwipeView({ viewer, A, B, containerRef, onClose, g, ids = CHANGE_IDS, focus, extra, template = displayTemplate, templateKey = 'true' }: {
   viewer: Cesium.Viewer | null; A: ImageryItem; B: ImageryItem; containerRef: RefObject<HTMLElement>; onClose?: () => void; g?: GisApi | null;
   ids?: SwipeOverlay;
   /** fly here when it changes (e.g. the piece picked in a list) */
   focus?: { lon: number; lat: number; heightM?: number; key: string } | null;
   /** extra controls in the result bar (e.g. ◀ ▶ between trend pieces) */
   extra?: ReactNode;
+  /** tile template per scene (band combination); templateKey must change when it does */
+  template?: (it: ImageryItem) => string;
+  templateKey?: string;
 }) {
   const lang = useLang((s) => s.lang);
   const L = (th: string, en: string) => (lang === 'th' ? th : en);
@@ -32,8 +35,8 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g, ids 
 
   useEffect(() => {
     if (!viewer || viewer.isDestroyed()) return;
-    const la = viewer.imageryLayers.addImageryProvider(pcProvider(displayTemplate(A), A));
-    const lb = viewer.imageryLayers.addImageryProvider(pcProvider(displayTemplate(B), B));
+    const la = viewer.imageryLayers.addImageryProvider(pcProvider(template(A), A));
+    const lb = viewer.imageryLayers.addImageryProvider(pcProvider(template(B), B));
     la.splitDirection = Cesium.SplitDirection.LEFT;
     lb.splitDirection = Cesium.SplitDirection.RIGHT;
     viewer.scene.requestRender();
@@ -44,7 +47,7 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g, ids 
         viewer.scene.splitPosition = 0.5;
       }
     };
-  }, [viewer, A.id, B.id]);
+  }, [viewer, A.id, B.id, templateKey]);
   useEffect(() => {
     if (!viewer || viewer.isDestroyed()) return;
     viewer.scene.splitPosition = show === 'A' ? 1 : show === 'B' ? 0 : split;
@@ -73,7 +76,7 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g, ids 
       l.splitDirection = Cesium.SplitDirection.NONE;
     }
     viewer.scene.requestRender();
-  }, [viewer, A.id, B.id, res?.layer, outl?.layer]);
+  }, [viewer, A.id, B.id, templateKey, res?.layer, outl?.layer]);
   useEffect(() => {
     if (!g) return;
     if (res) g.setLayer(ids.result, { show: resultOn && (style === 'fill' || !outl) });
@@ -136,7 +139,7 @@ export default function SwipeView({ viewer, A, B, containerRef, onClose, g, ids 
     if (!box) { setDlBusy(L('ซูมเข้าให้เห็นพื้นที่ก่อน (มุมมองกว้างเกิน)', 'Zoom in to the area first (view too wide)')); setTimeout(() => setDlBusy(''), 2500); return; }
     const ov = dlMark && res ? overlayOf() : null;
     const one = async (it: ImageryItem, k: string): Promise<GeoCanvas> => {
-      const img = await renderScene(it, box, { onProgress: (a, n) => setDlBusy(`${L('ภาพ', 'Image')} ${k} ${a}/${n}`) });
+      const img = await renderScene(it, box, { template: template(it), onProgress: (a, n) => setDlBusy(`${L('ภาพ', 'Image')} ${k} ${a}/${n}`) });
       return ov ? withOverlay(img, ov.url, ov.b) : img;
     };
     const name = (it: ImageryItem, k: string) => `${k}_${it.datetime.slice(0, 10)}_${safeName(String(it.collection))}${ov ? '_highlight' : ''}`;
