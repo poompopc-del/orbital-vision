@@ -60,6 +60,7 @@ function writeCloudCache(key: string, vals: Record<string, CloudVal>) {
 }
 
 const AUTO_MAX = 120; // scenes measured automatically per view; the rest on request
+const OLDEST_MAX = 30; // "oldest usable" looks at most this many scenes from the old end
 
 export interface PickerCtx {
   A: ImageryItem | null;
@@ -239,6 +240,36 @@ export function ScenePicker({
       setErr(L(`ภาพล่าสุด ${d10(it.datetime)} ไม่ผ่านเกณฑ์ (${c.reasons.join(', ')}) — เลื่อนเทียบดูได้ แต่ระบบจะไม่สรุปผลการเปลี่ยนแปลงจากภาพนี้`, `Latest scene ${d10(it.datetime)} fails the thresholds (${c.reasons.join(', ')}) — you can swipe to look, but no change conclusion is made from it`));
   };
 
+  /** The oldest scene in the list that passes the thresholds as "before" (A) — measures from the old end
+   * in small batches instead of waiting for the automatic newest-first measuring to reach it. */
+  const pickOldest = async () => {
+    if (!list?.length) return;
+    const ac = new AbortController();
+    abort.current = ac;
+    setErr('');
+    try {
+      const cand = list.filter(sceneOk); // oldest first
+      let m: Record<string, AoiCloud | null | 'err'> = { ...cl };
+      let a: ImageryItem | null = null;
+      for (let i = 0; i < Math.min(cand.length, OLDEST_MAX) && !a; i += 6) {
+        const batch = cand.slice(i, Math.min(i + 6, OLDEST_MAX));
+        m = { ...m, ...(await measure(batch, ac.signal)) };
+        a = batch.find((x) => passes(x, m)) ?? null;
+      }
+      if (!a) {
+        setErr(L(`${Math.min(cand.length, OLDEST_MAX)} ภาพแรกของช่วงค้นหามีเมฆในพื้นที่เกินเกณฑ์ — คลิกเลือกจากไทม์ไลน์เอง หรือผ่อนเกณฑ์เมฆ`, `The first ${Math.min(cand.length, OLDEST_MAX)} scenes of the range are too cloudy over the area — pick one on the timeline or relax the cloud limits`));
+        return;
+      }
+      setA(a);
+      if (B && B.datetime <= a.datetime) setB(null);
+      setSlot('B');
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') setErr(e?.message ?? String(e));
+    } finally {
+      setBusy('');
+    }
+  };
+
   const pick = async (it: ImageryItem) => {
     if (familyOf(it) === 'optical' && cl[it.id] === undefined) await measure([it]);
     setBusy('');
@@ -334,6 +365,9 @@ export function ScenePicker({
               <p className="text-[10px] text-muted">{L(`คลิกจุดบนไทม์ไลน์เพื่อเลือกภาพ ${slot === 'A' ? '“ก่อน” (A)' : '“หลัง” (B)'} · ${list.length} ภาพ`, `Click a dot to set ${slot === 'A' ? 'BEFORE (A)' : 'AFTER (B)'} · ${list.length} scenes`)}</p>
 
               <div className="flex flex-wrap items-end gap-1">
+                <Button disabled={!!busy} onClick={() => void pickOldest()} title={L('ตั้งภาพ “ก่อน” (A) เป็นภาพเก่าที่สุดที่ผ่านเกณฑ์ — วัดเมฆจากฝั่งเก่าก่อน ไม่ต้องรอให้วัดครบ', 'Set BEFORE (A) to the oldest passing scene — measures from the old end, no need to wait for all')}>
+                  {L('ภาพเก่าสุดที่ใช้ได้', 'Oldest usable')} ({d10(list[0].datetime)}…)
+                </Button>
                 <Button disabled={!!busy} onClick={() => void pickLatest()} title={L('ตั้งภาพ “หลัง” (B) เป็นภาพใหม่ที่สุดในคลัง แม้มีเมฆ', 'Set AFTER (B) to the newest scene, even if cloudy')}>
                   {L('ภาพล่าสุดที่มี', 'Latest available')} ({d10(list[list.length - 1].datetime)})
                 </Button>
