@@ -184,7 +184,7 @@ export function MonitorWatch() {
   // boxes still to be checked by the user after "add along border" (one at a time)
   const [adjustQ, setAdjustQ] = useState<string[]>([]);
   const [params] = useSearchParams();
-  // link from an alert email: ?area=<id>&run=<id>&hz=week&view=swipe&bbox=w,s,e,n&pt=lat,lon
+  // link from an alert email or a report: ?area=<id>&run=<id>&hz=week&view=swipe&bbox=w,s,e,n&pt=lat,lon&src=report&t=<spot name>
   const deepArea = params.get('area');
   const deep = useMemo(() => {
     const num = (k: string) => (params.get(k) ?? '').split(',').map(Number).filter((x) => Number.isFinite(x));
@@ -199,6 +199,10 @@ export function MonitorWatch() {
       a: params.get('a'),
       b: params.get('b'),
       hl: params.get('hl') ?? '',
+      // where the link came from: 'report' = a link in a written report (default: the alert email)
+      src: params.get('src') ?? '',
+      // short name of the spot, shown in the note (e.g. "จุด A")
+      t: params.get('t') ?? '',
       lv: params.get('lv') ?? '',
       km2: params.get('km2') ?? '',
       hs: (params.get('hs') ?? '').split(';').map((x) => x.split(',').map(Number)).filter((x) => x.length === 2 && x.every(Number.isFinite)) as [number, number][],
@@ -1181,7 +1185,7 @@ export function MonitorWatch() {
             <div className="flex items-start justify-between gap-2">
               <div>
                 <div className="font-semibold text-white">
-                  {L('จากอีเมลแจ้งเตือน', 'From the alert email')}{deep.hl ? ` · ${L('เทียบ', 'compared')} ${deep.hl}` : ''}
+                  {deep.src === 'report' ? L('จากรายงานเฝ้าระวัง', 'From the watch report') : L('จากอีเมลแจ้งเตือน', 'From the alert email')}{deep.t ? ` · ${deep.t}` : ''}{deep.hl ? ` · ${L('เทียบ', 'compared')} ${deep.hl}` : ''}
                   {deep.lv ? <span className={cx('ml-1', deep.lv === 'significant' ? 'text-bad' : deep.lv === 'minor' ? 'text-warn' : 'text-cyan-300')}>· {deep.lv === 'significant' ? L('เปลี่ยนแปลงมีนัยสำคัญ', 'significant change') : deep.lv === 'minor' ? L('เปลี่ยนแปลงเล็กน้อย', 'minor change') : L('ไม่พบการเปลี่ยนแปลงเกินเกณฑ์', 'no change above threshold')}{deep.km2 ? ` ${deep.km2} ${L('ตร.กม.', 'km²')}` : ''}</span> : null}
                 </div>
                 <div className="mt-0.5 text-[11px] text-slate-300">
