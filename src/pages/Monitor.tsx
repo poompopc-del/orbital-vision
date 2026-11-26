@@ -413,6 +413,7 @@ export function MonitorWatch() {
   const [blink, setBlink] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
   const line = useLineStyle((s) => s.style);
+  const setLine = useLineStyle((s) => s.set);
   const [sideOpen, setSideOpenS] = useState(() => readPref('ov.monitor.side', true));
   const setSideOpen = (v: boolean) => { setSideOpenS(v); writePref('ov.monitor.side', v); };
   const [legendOpen, setLegendOpenS] = useState(() => readPref('ov.monitor.legend', true));
@@ -1173,6 +1174,12 @@ export function MonitorWatch() {
             <label className="flex items-center gap-1 px-1 text-slate-300">
               <input type="checkbox" checked={outline} onChange={(e) => setOutline(e.target.checked)} />
               {L('เส้นขอบพื้นที่', 'Area outline')}
+            </label>
+          )}
+          {clean && line.show && (
+            <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เปิด/ปิดเส้นเขตแดนบนภาพ (เส้นจากไฟล์ที่นำเข้า หรือ Natural Earth) — ปิดเมื่อเส้นบังพื้นที่ที่กำลังดู', 'Show/hide the boundary line on the imagery (your imported file or Natural Earth) — turn off when it hides what you are looking at')}>
+              <input type="checkbox" checked={line.inClean} onChange={(e) => setLine({ inClean: e.target.checked })} />
+              {L('เส้นเขตแดน', 'Boundary')}
             </label>
           )}
         </div>
