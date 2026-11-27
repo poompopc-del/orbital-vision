@@ -24,6 +24,7 @@ import ResultQuality from '../components/monitor/ResultQuality';
 import ExtentBar from '../components/monitor/ExtentBar';
 import CoordImport from '../components/monitor/CoordImport';
 import { useLineStyle } from '../lib/lineStyle';
+import { ADMIN_STYLE, loadAdmin, useAdminLayers, type AdminLevel } from '../lib/adminLayer';
 import { useQc } from '../lib/qcStore';
 import { fmtArea, km2ToRai, type AreaUnit } from '../lib/area';
 import { hotspotKm2 } from '../lib/monitor';
@@ -414,6 +415,9 @@ export function MonitorWatch() {
   const mapRef = useRef<HTMLDivElement>(null);
   const line = useLineStyle((s) => s.style);
   const setLine = useLineStyle((s) => s.set);
+  const admin = useAdminLayers((s) => s.prefs);
+  const setAdmin = useAdminLayers((s) => s.set);
+  const [adminErr, setAdminErr] = useState('');
   const [sideOpen, setSideOpenS] = useState(() => readPref('ov.monitor.side', true));
   const setSideOpen = (v: boolean) => { setSideOpenS(v); writePref('ov.monitor.side', v); };
   const [legendOpen, setLegendOpenS] = useState(() => readPref('ov.monitor.legend', true));
@@ -553,6 +557,57 @@ export function MonitorWatch() {
       if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
     };
   }, [viewer, borderLinesState, extentLines, clean, line]);
+
+  // ---- map: district / subdistrict outlines of the Cambodian-border provinces (each its own layer,
+  // so switching one never redraws the other; stays on in the imagery-only view until switched off)
+  const adminEffect = (level: AdminLevel) => () => {
+    if (!viewer || !admin[level]) return;
+    let gone = false;
+    const ds = new Cesium.CustomDataSource(`admin-${level}`);
+    const st = ADMIN_STYLE[level];
+    const col = Cesium.Color.fromCssColorString(st.color);
+    void loadAdmin(level)
+      .then((fc) => {
+        if (gone || viewer.isDestroyed()) return;
+        setAdminErr('');
+        const mat = st.dashed
+          ? new Cesium.PolylineDashMaterialProperty({ color: col, dashLength: 10 })
+          : new Cesium.PolylineOutlineMaterialProperty({ color: col, outlineColor: Cesium.Color.BLACK.withAlpha(0.5), outlineWidth: 1 });
+        const labelDist = new Cesium.DistanceDisplayCondition(0, st.labelMaxM);
+        for (const f of fc.features) {
+          for (const poly of f.geometry.coordinates)
+            for (const ring of poly)
+              ds.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()), width: st.width + (st.dashed ? 0 : 1), material: mat } });
+          if (admin.labels) {
+            const p = f.properties;
+            ds.entities.add({
+              position: Cesium.Cartesian3.fromDegrees(p.lp[0], p.lp[1]),
+              label: {
+                text: level === 'amphoe' ? `อ.${p.name_th}` : `ต.${p.name_th}`,
+                font: st.font,
+                fillColor: col,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 3,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                distanceDisplayCondition: labelDist,
+              },
+            });
+          }
+        }
+        void viewer.dataSources.add(ds);
+        viewer.scene.requestRender();
+      })
+      .catch((e: unknown) => {
+        if (!gone) setAdminErr(String((e as Error)?.message ?? e));
+      });
+    return () => {
+      gone = true;
+      if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
+    };
+  };
+  useEffect(adminEffect('amphoe'), [viewer, admin.amphoe, admin.labels]);
+  useEffect(adminEffect('tambon'), [viewer, admin.tambon, admin.labels]);
 
   // ---- map: AOIs coloured by last result, candidate tiles
   useEffect(() => {
@@ -1182,6 +1237,24 @@ export function MonitorWatch() {
               {L('เส้นเขตแดน', 'Boundary')}
             </label>
           )}
+          <span className="mx-0.5 h-4 w-px bg-line" />
+          <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตอำเภอ 7 จังหวัดติดกัมพูชา (RTSD 2022) — เส้นเขตปกครอง ไม่ใช่เส้นเขตแดนระหว่างประเทศ', 'District lines of the 7 provinces on the Cambodian border (RTSD 2022) — administrative lines, not the international boundary')}>
+            <input type="checkbox" checked={admin.amphoe} onChange={(e) => setAdmin({ amphoe: e.target.checked })} />
+            <i className="inline-block h-0.5 w-3" style={{ background: ADMIN_STYLE.amphoe.color }} />
+            {L('อำเภอ', 'District')}
+          </label>
+          <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตตำบล 7 จังหวัดติดกัมพูชา (RTSD 2022) · ชื่อตำบลจะแสดงเมื่อซูมเข้าใกล้', 'Subdistrict lines of the 7 provinces on the Cambodian border (RTSD 2022) · names appear when zoomed in')}>
+            <input type="checkbox" checked={admin.tambon} onChange={(e) => setAdmin({ tambon: e.target.checked })} />
+            <i className="inline-block h-0.5 w-3 border-t border-dashed" style={{ borderColor: ADMIN_STYLE.tambon.color }} />
+            {L('ตำบล', 'Subdistrict')}
+          </label>
+          {(admin.amphoe || admin.tambon) && (
+            <label className="flex items-center gap-1 px-1 text-slate-300">
+              <input type="checkbox" checked={admin.labels} onChange={(e) => setAdmin({ labels: e.target.checked })} />
+              {L('ชื่อ', 'Names')}
+            </label>
+          )}
+          {adminErr && (admin.amphoe || admin.tambon) && <span className="px-1 text-bad" title={adminErr}>{L('โหลดชั้นเขตปกครองไม่ได้', 'Admin layer failed to load')}</span>}
         </div>
         {swipe && deepNote && (
           <div className="absolute left-1/2 top-3 z-30 w-[min(560px,92%)] -translate-x-1/2 rounded-md border border-cyan-400/60 bg-ink-950/90 px-3 py-2 text-xs text-slate-100 shadow-lg">
