@@ -24,7 +24,7 @@ import ResultQuality from '../components/monitor/ResultQuality';
 import ExtentBar from '../components/monitor/ExtentBar';
 import CoordImport from '../components/monitor/CoordImport';
 import { useLineStyle } from '../lib/lineStyle';
-import { ADMIN_STYLE, loadAdmin, useAdminLayers, type AdminLevel } from '../lib/adminLayer';
+import { ADMIN_STYLE, ADMIN_SWATCHES, labelFont, loadAdmin, useAdminLayers, type AdminLayerPrefs, type AdminLevel, type LabelSize } from '../lib/adminLayer';
 import { useQc } from '../lib/qcStore';
 import { fmtArea, km2ToRai, type AreaUnit } from '../lib/area';
 import { hotspotKm2 } from '../lib/monitor';
@@ -418,6 +418,8 @@ export function MonitorWatch() {
   const admin = useAdminLayers((s) => s.prefs);
   const setAdmin = useAdminLayers((s) => s.set);
   const [adminErr, setAdminErr] = useState('');
+  const [adminStyleOpen, setAdminStyleOpen] = useState(false);
+  const resetAdminStyle = useAdminLayers((s) => s.resetStyle);
   const [sideOpen, setSideOpenS] = useState(() => readPref('ov.monitor.side', true));
   const setSideOpen = (v: boolean) => { setSideOpenS(v); writePref('ov.monitor.side', v); };
   const [legendOpen, setLegendOpenS] = useState(() => readPref('ov.monitor.legend', true));
@@ -565,30 +567,39 @@ export function MonitorWatch() {
     let gone = false;
     const ds = new Cesium.CustomDataSource(`admin-${level}`);
     const st = ADMIN_STYLE[level];
-    const col = Cesium.Color.fromCssColorString(st.color);
+    const col = Cesium.Color.fromCssColorString(level === 'amphoe' ? admin.amphoeColor : admin.tambonColor);
+    const width = level === 'amphoe' ? admin.amphoeWidth : admin.tambonWidth;
     void loadAdmin(level)
       .then((fc) => {
         if (gone || viewer.isDestroyed()) return;
         setAdminErr('');
         const mat = st.dashed
-          ? new Cesium.PolylineDashMaterialProperty({ color: col, dashLength: 10 })
-          : new Cesium.PolylineOutlineMaterialProperty({ color: col, outlineColor: Cesium.Color.BLACK.withAlpha(0.5), outlineWidth: 1 });
+          ? new Cesium.PolylineDashMaterialProperty({ color: col, dashLength: 12 })
+          : new Cesium.PolylineOutlineMaterialProperty({ color: col, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1 });
         const labelDist = new Cesium.DistanceDisplayCondition(0, st.labelMaxM);
+        const font = labelFont(level, admin.labelSize);
+        // names: white text with a black outline; optionally on a dark box edged in the line colour's tone
+        const bg = Cesium.Color.fromCssColorString('#0b0f12').withAlpha(0.78);
         for (const f of fc.features) {
           for (const poly of f.geometry.coordinates)
             for (const ring of poly)
-              ds.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()), width: st.width + (st.dashed ? 0 : 1), material: mat } });
+              ds.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()), width: width + (st.dashed ? 0 : 1), material: mat } });
           if (admin.labels) {
             const p = f.properties;
             ds.entities.add({
               position: Cesium.Cartesian3.fromDegrees(p.lp[0], p.lp[1]),
               label: {
                 text: level === 'amphoe' ? `อ.${p.name_th}` : `ต.${p.name_th}`,
-                font: st.font,
-                fillColor: col,
+                font,
+                fillColor: admin.labelBox ? col.brighten(0.35, new Cesium.Color()) : Cesium.Color.WHITE,
                 outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 3,
+                outlineWidth: 4,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: admin.labelBox,
+                backgroundColor: bg,
+                backgroundPadding: new Cesium.Cartesian2(6, 4),
+                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                verticalOrigin: Cesium.VerticalOrigin.CENTER,
                 disableDepthTestDistance: Number.POSITIVE_INFINITY,
                 distanceDisplayCondition: labelDist,
               },
@@ -606,8 +617,9 @@ export function MonitorWatch() {
       if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
     };
   };
-  useEffect(adminEffect('amphoe'), [viewer, admin.amphoe, admin.labels]);
-  useEffect(adminEffect('tambon'), [viewer, admin.tambon, admin.labels]);
+  const labelDeps = [admin.labels, admin.labelSize, admin.labelBox];
+  useEffect(adminEffect('amphoe'), [viewer, admin.amphoe, admin.amphoeColor, admin.amphoeWidth, ...labelDeps]);
+  useEffect(adminEffect('tambon'), [viewer, admin.tambon, admin.tambonColor, admin.tambonWidth, ...labelDeps]);
 
   // ---- map: AOIs coloured by last result, candidate tiles
   useEffect(() => {
@@ -1240,12 +1252,12 @@ export function MonitorWatch() {
           <span className="mx-0.5 h-4 w-px bg-line" />
           <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตอำเภอ 7 จังหวัดติดกัมพูชา (RTSD 2022) — เส้นเขตปกครอง ไม่ใช่เส้นเขตแดนระหว่างประเทศ', 'District lines of the 7 provinces on the Cambodian border (RTSD 2022) — administrative lines, not the international boundary')}>
             <input type="checkbox" checked={admin.amphoe} onChange={(e) => setAdmin({ amphoe: e.target.checked })} />
-            <i className="inline-block h-0.5 w-3" style={{ background: ADMIN_STYLE.amphoe.color }} />
+            <i className="inline-block h-0.5 w-3" style={{ background: admin.amphoeColor }} />
             {L('อำเภอ', 'District')}
           </label>
           <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตตำบล 7 จังหวัดติดกัมพูชา (RTSD 2022) · ชื่อตำบลจะแสดงเมื่อซูมเข้าใกล้', 'Subdistrict lines of the 7 provinces on the Cambodian border (RTSD 2022) · names appear when zoomed in')}>
             <input type="checkbox" checked={admin.tambon} onChange={(e) => setAdmin({ tambon: e.target.checked })} />
-            <i className="inline-block h-0.5 w-3 border-t border-dashed" style={{ borderColor: ADMIN_STYLE.tambon.color }} />
+            <i className="inline-block h-0.5 w-3 border-t border-dashed" style={{ borderColor: admin.tambonColor }} />
             {L('ตำบล', 'Subdistrict')}
           </label>
           {(admin.amphoe || admin.tambon) && (
@@ -1253,6 +1265,59 @@ export function MonitorWatch() {
               <input type="checkbox" checked={admin.labels} onChange={(e) => setAdmin({ labels: e.target.checked })} />
               {L('ชื่อ', 'Names')}
             </label>
+          )}
+          {(admin.amphoe || admin.tambon) && (
+            <button onClick={() => setAdminStyleOpen(!adminStyleOpen)} className={cx('rounded px-2 py-1', adminStyleOpen ? 'bg-cyan-400/15 text-cyan-300' : 'text-slate-200 hover:text-white')} title={L('ปรับสีเส้น ความหนา และขนาดชื่อ', 'Line colour, width and name size')}>
+              🎨 {L('ปรับแต่ง', 'Style')}
+            </button>
+          )}
+          {adminStyleOpen && (admin.amphoe || admin.tambon) && (
+            <div className="absolute left-0 top-full mt-1 w-[300px] space-y-2 rounded-md border border-line bg-ink-950/95 p-2 text-[11px] text-slate-200 shadow-lg">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold">{L('ชั้นเขตอำเภอ / ตำบล', 'District / subdistrict layers')}</span>
+                <span className="flex gap-2">
+                  <button className="text-muted hover:text-white" onClick={resetAdminStyle}>{L('ค่าเริ่มต้น', 'Default')}</button>
+                  <button className="text-muted hover:text-white" onClick={() => setAdminStyleOpen(false)}>✕</button>
+                </span>
+              </div>
+              {(['amphoe', 'tambon'] as AdminLevel[]).map((lv) => {
+                const cKey = lv === 'amphoe' ? 'amphoeColor' : 'tambonColor';
+                const wKey = lv === 'amphoe' ? 'amphoeWidth' : 'tambonWidth';
+                return (
+                  <div key={lv} className="rounded border border-line p-1.5">
+                    <div className="mb-1 font-semibold">{lv === 'amphoe' ? L('เส้นอำเภอ', 'District line') : L('เส้นตำบล', 'Subdistrict line')}</div>
+                    <div className="flex flex-wrap items-center gap-1">
+                      {ADMIN_SWATCHES.map((c) => (
+                        <button key={c} onClick={() => setAdmin({ [cKey]: c } as Partial<AdminLayerPrefs>)} title={c} style={{ background: c }}
+                          className={cx('h-5 w-5 rounded-full border', admin[cKey].toLowerCase() === c ? 'border-cyan-300 ring-2 ring-cyan-300/60' : 'border-white/30')} />
+                      ))}
+                      <input type="color" value={admin[cKey]} onChange={(e) => setAdmin({ [cKey]: e.target.value } as Partial<AdminLayerPrefs>)} className="ml-1 h-5 w-7 cursor-pointer rounded border border-line bg-transparent p-0" title={L('เลือกสีเอง', 'Custom colour')} />
+                    </div>
+                    <label className="mt-1 flex items-center gap-1">
+                      {L('ความหนา', 'Width')}
+                      <input type="range" min={1} max={6} step={0.5} value={admin[wKey]} onChange={(e) => setAdmin({ [wKey]: +e.target.value } as Partial<AdminLayerPrefs>)} className="w-24" />
+                      <span className="font-mono">{admin[wKey]}</span>
+                    </label>
+                  </div>
+                );
+              })}
+              <div className="rounded border border-line p-1.5">
+                <div className="mb-1 font-semibold">{L('ชื่ออำเภอ / ตำบล', 'Names')}</div>
+                <div className="flex items-center gap-1">
+                  {L('ขนาด', 'Size')}
+                  {(['s', 'm', 'l'] as LabelSize[]).map((z) => (
+                    <button key={z} onClick={() => setAdmin({ labelSize: z })} className={cx('rounded border px-2 py-0.5', admin.labelSize === z ? 'border-cyan-400 text-cyan-300' : 'border-line hover:border-cyan-400/50')}>
+                      {z === 's' ? L('เล็ก', 'S') : z === 'm' ? L('กลาง', 'M') : L('ใหญ่', 'L')}
+                    </button>
+                  ))}
+                </div>
+                <label className="mt-1 flex items-center gap-1">
+                  <input type="checkbox" checked={admin.labelBox} onChange={(e) => setAdmin({ labelBox: e.target.checked })} />
+                  {L('พื้นหลังทึบใต้ชื่อ (อ่านง่ายบนภาพสว่าง)', 'Dark box behind names (easier on bright imagery)')}
+                </label>
+                <p className="mt-1 text-[10px] text-muted">{L('ชื่ออำเภอขึ้นเมื่อซูมต่ำกว่า ~600 กม. · ชื่อตำบลขึ้นเมื่อซูมต่ำกว่า ~70 กม.', 'District names show below ~600 km, subdistrict names below ~70 km')}</p>
+              </div>
+            </div>
           )}
           {adminErr && (admin.amphoe || admin.tambon) && <span className="px-1 text-bad" title={adminErr}>{L('โหลดชั้นเขตปกครองไม่ได้', 'Admin layer failed to load')}</span>}
         </div>
