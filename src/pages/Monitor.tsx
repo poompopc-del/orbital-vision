@@ -23,8 +23,9 @@ import ComparePanel, { QcPanel } from '../components/monitor/ComparePanel';
 import ResultQuality from '../components/monitor/ResultQuality';
 import ExtentBar from '../components/monitor/ExtentBar';
 import CoordImport from '../components/monitor/CoordImport';
+import OsmTools from '../components/monitor/OsmTools';
 import { useLineStyle } from '../lib/lineStyle';
-import { ADMIN_STYLE, ADMIN_SWATCHES, labelFont, loadAdmin, useAdminLayers, type AdminLayerPrefs, type AdminLevel, type LabelSize } from '../lib/adminLayer';
+import { ADMIN_STYLE, ADMIN_SWATCHES, labelFont, loadAdmin, loadProvinceIndex, useAdminLayers, type AdminCollection, type AdminLayerPrefs, type AdminLevel, type LabelSize } from '../lib/adminLayer';
 import { useQc } from '../lib/qcStore';
 import { fmtArea, km2ToRai, type AreaUnit } from '../lib/area';
 import { hotspotKm2 } from '../lib/monitor';
@@ -562,59 +563,100 @@ export function MonitorWatch() {
 
   // ---- map: district / subdistrict outlines of the Cambodian-border provinces (each its own layer,
   // so switching one never redraws the other; stays on in the imagery-only view until switched off)
+  // whole country, split per province: only provinces inside the view are fetched and drawn (drawn ones
+  // stay until the layer or its style changes). Lines and names are primitives (PolylineCollection /
+  // LabelCollection), far lighter than entities for ~1 M vertices.
+  const [adminZoomHint, setAdminZoomHint] = useState(false);
   const adminEffect = (level: AdminLevel) => () => {
-    if (!viewer || !admin[level]) return;
+    if (!viewer || !admin[level]) {
+      if (level === 'tambon') setAdminZoomHint(false);
+      return;
+    }
     let gone = false;
-    const ds = new Cesium.CustomDataSource(`admin-${level}`);
     const st = ADMIN_STYLE[level];
     const col = Cesium.Color.fromCssColorString(level === 'amphoe' ? admin.amphoeColor : admin.tambonColor);
     const width = level === 'amphoe' ? admin.amphoeWidth : admin.tambonWidth;
-    void loadAdmin(level)
-      .then((fc) => {
-        if (gone || viewer.isDestroyed()) return;
-        setAdminErr('');
-        const mat = st.dashed
-          ? new Cesium.PolylineDashMaterialProperty({ color: col, dashLength: 12 })
-          : new Cesium.PolylineOutlineMaterialProperty({ color: col, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1 });
-        const labelDist = new Cesium.DistanceDisplayCondition(0, st.labelMaxM);
-        const font = labelFont(level, admin.labelSize);
-        // names: white text with a black outline; optionally on a dark box edged in the line colour's tone
-        const bg = Cesium.Color.fromCssColorString('#0b0f12').withAlpha(0.78);
-        for (const f of fc.features) {
-          for (const poly of f.geometry.coordinates)
-            for (const ring of poly)
-              ds.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()), width: width + (st.dashed ? 0 : 1), material: mat } });
-          if (admin.labels) {
-            const p = f.properties;
-            ds.entities.add({
-              position: Cesium.Cartesian3.fromDegrees(p.lp[0], p.lp[1]),
-              label: {
-                text: level === 'amphoe' ? `อ.${p.name_th}` : `ต.${p.name_th}`,
-                font,
-                fillColor: admin.labelBox ? col.brighten(0.35, new Cesium.Color()) : Cesium.Color.WHITE,
-                outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 4,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                showBackground: admin.labelBox,
-                backgroundColor: bg,
-                backgroundPadding: new Cesium.Cartesian2(6, 4),
-                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-                verticalOrigin: Cesium.VerticalOrigin.CENTER,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-                distanceDisplayCondition: labelDist,
-              },
-            });
-          }
+    const mat = st.dashed
+      ? Cesium.Material.fromType('PolylineDash', { color: col, dashLength: 12 })
+      : Cesium.Material.fromType('PolylineOutline', { color: col, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1 });
+    const labelDist = new Cesium.DistanceDisplayCondition(0, st.labelMaxM);
+    const font = labelFont(level, admin.labelSize);
+    const bg = Cesium.Color.fromCssColorString('#0b0f12').withAlpha(0.78);
+    const fill = admin.labelBox ? col.brighten(0.35, new Cesium.Color()) : Cesium.Color.WHITE;
+    const lines = viewer.scene.primitives.add(new Cesium.PolylineCollection()) as Cesium.PolylineCollection;
+    const labels = viewer.scene.primitives.add(new Cesium.LabelCollection()) as Cesium.LabelCollection;
+    const drawn = new Set<string>();
+    const draw = (fc: AdminCollection) => {
+      for (const f of fc.features) {
+        for (const poly of f.geometry.coordinates)
+          for (const ring of poly) lines.add({ positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()), width: width + (st.dashed ? 0 : 1), material: mat });
+        if (admin.labels) {
+          const p = f.properties;
+          labels.add({
+            position: Cesium.Cartesian3.fromDegrees(p.lp[0], p.lp[1]),
+            text: level === 'amphoe' ? `อ.${p.name_th}` : `ต.${p.name_th}`,
+            font,
+            fillColor: fill,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 4,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            showBackground: admin.labelBox,
+            backgroundColor: bg,
+            backgroundPadding: new Cesium.Cartesian2(6, 4),
+            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            verticalOrigin: Cesium.VerticalOrigin.CENTER,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            distanceDisplayCondition: labelDist,
+          });
         }
-        void viewer.dataSources.add(ds);
-        viewer.scene.requestRender();
-      })
-      .catch((e: unknown) => {
-        if (!gone) setAdminErr(String((e as Error)?.message ?? e));
-      });
+      }
+      viewer.scene.requestRender();
+    };
+    const update = async () => {
+      if (gone || viewer.isDestroyed()) return;
+      const r = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid);
+      const d = Cesium.Math.toDegrees;
+      // looking at the sky / whole globe: treat as the whole country
+      const [w, s0, e, n] = r ? [d(r.west), d(r.south), d(r.east), d(r.north)] : [-180, -90, 180, 90];
+      const tooWide = Math.max(e - w, n - s0) > st.maxSpanDeg;
+      if (level === 'tambon') setAdminZoomHint(tooWide);
+      if (tooWide) return;
+      try {
+        const idx = await loadProvinceIndex();
+        const want = idx.filter((p) => !drawn.has(p.pcode) && p.bbox[0] <= e && p.bbox[2] >= w && p.bbox[1] <= n && p.bbox[3] >= s0);
+        await Promise.all(
+          want.map(async (p) => {
+            drawn.add(p.pcode);
+            try {
+              const fc = await loadAdmin(level, p.pcode);
+              if (!gone && !viewer.isDestroyed()) draw(fc);
+            } catch (err) {
+              drawn.delete(p.pcode); // retry on the next move
+              throw err;
+            }
+          }),
+        );
+        if (!gone) setAdminErr('');
+      } catch (err) {
+        if (!gone) setAdminErr(String((err as Error)?.message ?? err));
+      }
+    };
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const onMove = () => {
+      clearTimeout(t);
+      t = setTimeout(() => void update(), 400);
+    };
+    void update();
+    const off = viewer.camera.moveEnd.addEventListener(onMove);
     return () => {
       gone = true;
-      if (!viewer.isDestroyed()) viewer.dataSources.remove(ds, true);
+      clearTimeout(t);
+      off();
+      if (!viewer.isDestroyed()) {
+        viewer.scene.primitives.remove(lines);
+        viewer.scene.primitives.remove(labels);
+        viewer.scene.requestRender();
+      }
     };
   };
   const labelDeps = [admin.labels, admin.labelSize, admin.labelBox];
@@ -1228,7 +1270,7 @@ export function MonitorWatch() {
         <div className={clean ? 'hidden' : ''}>
           <ExtentBar viewer={viewer} customRect={customRect} onLines={setExtentLines} nb={borderNb} onNb={(n) => void showBorderTiles(n).catch(() => {})} shift={tileShift} onShift={setTileShift} tileCount={tiles.length} />
         </div>
-        <div className="absolute left-3 top-3 z-20 flex items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px]">
+        <div className="absolute left-3 top-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px]">
           {!sideOpen && (
             <button onClick={() => setSideOpen(true)} className="rounded px-2 py-1 text-cyan-300 hover:text-white" title={L('แสดงแผงควบคุม', 'Show the control panel')}>
               » {L('แผงควบคุม', 'Panel')}{sel ? ` · ${sel.name.slice(0, 24)}` : ''}
@@ -1250,12 +1292,12 @@ export function MonitorWatch() {
             </label>
           )}
           <span className="mx-0.5 h-4 w-px bg-line" />
-          <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตอำเภอ 7 จังหวัดติดกัมพูชา (RTSD 2022) — เส้นเขตปกครอง ไม่ใช่เส้นเขตแดนระหว่างประเทศ', 'District lines of the 7 provinces on the Cambodian border (RTSD 2022) — administrative lines, not the international boundary')}>
+          <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตอำเภอทั้งประเทศ (RTSD 2022) — เส้นเขตปกครอง ไม่ใช่เส้นเขตแดนระหว่างประเทศ', 'District lines, whole country (RTSD 2022) — administrative lines, not the international boundary')}>
             <input type="checkbox" checked={admin.amphoe} onChange={(e) => setAdmin({ amphoe: e.target.checked })} />
             <i className="inline-block h-0.5 w-3" style={{ background: admin.amphoeColor }} />
             {L('อำเภอ', 'District')}
           </label>
-          <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตตำบล 7 จังหวัดติดกัมพูชา (RTSD 2022) · ชื่อตำบลจะแสดงเมื่อซูมเข้าใกล้', 'Subdistrict lines of the 7 provinces on the Cambodian border (RTSD 2022) · names appear when zoomed in')}>
+          <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตตำบลทั้งประเทศ (RTSD 2022) · แสดงเมื่อกรอบภาพเล็กกว่า ~330 กม. · ชื่อตำบลแสดงเมื่อซูมเข้าใกล้', 'Subdistrict lines, whole country (RTSD 2022) · shown when the view is under ~330 km · names appear when zoomed in')}>
             <input type="checkbox" checked={admin.tambon} onChange={(e) => setAdmin({ tambon: e.target.checked })} />
             <i className="inline-block h-0.5 w-3 border-t border-dashed" style={{ borderColor: admin.tambonColor }} />
             {L('ตำบล', 'Subdistrict')}
@@ -1319,7 +1361,9 @@ export function MonitorWatch() {
               </div>
             </div>
           )}
+          {admin.tambon && adminZoomHint && <span className="px-1 text-warn">{L('ซูมเข้าเพื่อดูตำบล', 'Zoom in for subdistricts')}</span>}
           {adminErr && (admin.amphoe || admin.tambon) && <span className="px-1 text-bad" title={adminErr}>{L('โหลดชั้นเขตปกครองไม่ได้', 'Admin layer failed to load')}</span>}
+          <OsmTools viewer={viewer} />
         </div>
         {swipe && deepNote && (
           <div className="absolute left-1/2 top-3 z-30 w-[min(560px,92%)] -translate-x-1/2 rounded-md border border-cyan-400/60 bg-ink-950/90 px-3 py-2 text-xs text-slate-100 shadow-lg">
