@@ -73,15 +73,17 @@ export interface GeocodeHit {
 }
 
 let lastGeocode = 0;
-export async function geocode(q: string): Promise<GeocodeHit[]> {
+/** opts.lang: answer language (default en) · opts.countrycodes: e.g. 'th,kh' to search only there */
+export async function geocode(q: string, opts: { lang?: string; countrycodes?: string } = {}): Promise<GeocodeHit[]> {
   const coords = parseCoordinates(q);
   if (coords) return [{ label: `${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}`, lon: coords[0], lat: coords[1] }];
   const wait = 1100 - (Date.now() - lastGeocode); // Nominatim policy: ≤ 1 request / second
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastGeocode = Date.now();
   bumpQuota('geocode');
-  const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&q=${encodeURIComponent(q)}`, {
-    headers: { 'Accept-Language': 'en' },
+  const cc = opts.countrycodes ? `&countrycodes=${encodeURIComponent(opts.countrycodes)}` : '';
+  const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6${cc}&q=${encodeURIComponent(q)}`, {
+    headers: { 'Accept-Language': opts.lang ?? 'en' },
   });
   if (!r.ok) throw new Error(`Geocoder error (HTTP ${r.status})`);
   const j = await r.json();

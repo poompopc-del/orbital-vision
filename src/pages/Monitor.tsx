@@ -23,6 +23,7 @@ import ComparePanel, { QcPanel } from '../components/monitor/ComparePanel';
 import ResultQuality from '../components/monitor/ResultQuality';
 import ExtentBar from '../components/monitor/ExtentBar';
 import CoordImport from '../components/monitor/CoordImport';
+import OsmTools from '../components/monitor/OsmTools';
 import { useLineStyle } from '../lib/lineStyle';
 import { ADMIN_STYLE, ADMIN_SWATCHES, labelFont, loadAdmin, useAdminLayers, type AdminLayerPrefs, type AdminLevel, type LabelSize } from '../lib/adminLayer';
 import { useQc } from '../lib/qcStore';
@@ -1228,7 +1229,7 @@ export function MonitorWatch() {
         <div className={clean ? 'hidden' : ''}>
           <ExtentBar viewer={viewer} customRect={customRect} onLines={setExtentLines} nb={borderNb} onNb={(n) => void showBorderTiles(n).catch(() => {})} shift={tileShift} onShift={setTileShift} tileCount={tiles.length} />
         </div>
-        <div className="absolute left-3 top-3 z-20 flex items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px]">
+        <div className="absolute left-3 top-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1 rounded-md border border-line bg-ink-950/85 p-1 text-[11px]">
           {!sideOpen && (
             <button onClick={() => setSideOpen(true)} className="rounded px-2 py-1 text-cyan-300 hover:text-white" title={L('แสดงแผงควบคุม', 'Show the control panel')}>
               » {L('แผงควบคุม', 'Panel')}{sel ? ` · ${sel.name.slice(0, 24)}` : ''}
@@ -1320,6 +1321,7 @@ export function MonitorWatch() {
             </div>
           )}
           {adminErr && (admin.amphoe || admin.tambon) && <span className="px-1 text-bad" title={adminErr}>{L('โหลดชั้นเขตปกครองไม่ได้', 'Admin layer failed to load')}</span>}
+          <OsmTools viewer={viewer} />
         </div>
         {swipe && deepNote && (
           <div className="absolute left-1/2 top-3 z-30 w-[min(560px,92%)] -translate-x-1/2 rounded-md border border-cyan-400/60 bg-ink-950/90 px-3 py-2 text-xs text-slate-100 shadow-lg">

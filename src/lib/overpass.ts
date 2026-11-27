@@ -3,9 +3,10 @@
 
 const OVERPASS = 'https://overpass-api.de/api/interpreter';
 
-async function overpass(query: string, timeoutMs = 60000): Promise<any> {
+export async function overpass(query: string, timeoutMs = 60000, signal?: AbortSignal): Promise<any> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  signal?.addEventListener('abort', () => ctrl.abort());
   try {
     const r = await fetch(OVERPASS, {
       method: 'POST',
