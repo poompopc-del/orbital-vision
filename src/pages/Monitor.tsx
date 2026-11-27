@@ -25,7 +25,7 @@ import ExtentBar from '../components/monitor/ExtentBar';
 import CoordImport from '../components/monitor/CoordImport';
 import OsmTools from '../components/monitor/OsmTools';
 import { useLineStyle } from '../lib/lineStyle';
-import { ADMIN_STYLE, ADMIN_SWATCHES, labelFont, loadAdmin, loadProvinceIndex, useAdminLayers, type AdminCollection, type AdminLayerPrefs, type AdminLevel, type LabelSize } from '../lib/adminLayer';
+import { ADMIN_STYLE, ADMIN_SWATCHES, labelFont, loadAdmin, loadProvinceIndex, useAdminLayers, type AdminCollection, type AdminLayerPrefs, type AdminLevel, type LabelSize, type ProvinceIndex } from '../lib/adminLayer';
 import { useQc } from '../lib/qcStore';
 import { fmtArea, km2ToRai, type AreaUnit } from '../lib/area';
 import { hotspotKm2 } from '../lib/monitor';
@@ -505,6 +505,21 @@ export function MonitorWatch() {
     if (!deep.pt && !deep.bbox) setTimeout(() => !viewer.isDestroyed() && flyToPolygon(viewer, a.geometry), 1200);
   }, [deepArea, aois, viewer]);
   const [deepNote, setDeepNote] = useState<null | { A: string; B: string }>(null);
+  // the alert-email note can be dragged out of the way (offset in px from its default spot) or minimised
+  const [notePos, setNotePos] = useState<[number, number]>([0, 0]);
+  const [noteMin, setNoteMin] = useState(false);
+  const dragNote = (e: RPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY;
+    const [ox, oy] = notePos;
+    const move = (ev: PointerEvent) => setNotePos([ox + ev.clientX - sx, oy + ev.clientY - sy]);
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
   const deepSwiped = useRef(false);
   useEffect(() => {
     if (!viewer || deepSwiped.current || !deep.a || !deep.b) return;
@@ -563,30 +578,43 @@ export function MonitorWatch() {
 
   // ---- map: district / subdistrict outlines of the Cambodian-border provinces (each its own layer,
   // so switching one never redraws the other; stays on in the imagery-only view until switched off)
-  // whole country, split per province: only provinces inside the view are fetched and drawn (drawn ones
-  // stay until the layer or its style changes). Lines and names are primitives (PolylineCollection /
-  // LabelCollection), far lighter than entities for ~1 M vertices.
-  const [adminZoomHint, setAdminZoomHint] = useState(false);
+  // whole country, split per province. Drawn only when zoomed in (ADMIN_STYLE.maxSpanDeg), and only the
+  // provinces in (or just around) the view: provinces that leave the view are removed again, so the map
+  // never holds more than a few provinces' lines. Primitives (PolylineCollection / LabelCollection) per province.
+  const [adminZoomHint, setAdminZoomHint] = useState<{ amphoe: boolean; tambon: boolean }>({ amphoe: false, tambon: false });
   const adminEffect = (level: AdminLevel) => () => {
+    const hint = (v: boolean) => setAdminZoomHint((h) => (h[level] === v ? h : { ...h, [level]: v }));
     if (!viewer || !admin[level]) {
-      if (level === 'tambon') setAdminZoomHint(false);
+      hint(false);
       return;
     }
     let gone = false;
     const st = ADMIN_STYLE[level];
     const col = Cesium.Color.fromCssColorString(level === 'amphoe' ? admin.amphoeColor : admin.tambonColor);
     const width = level === 'amphoe' ? admin.amphoeWidth : admin.tambonWidth;
-    const mat = st.dashed
-      ? Cesium.Material.fromType('PolylineDash', { color: col, dashLength: 12 })
-      : Cesium.Material.fromType('PolylineOutline', { color: col, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1 });
+    // one material per province collection, so removing a province never touches another one's material
+    const newMat = () =>
+      st.dashed
+        ? Cesium.Material.fromType('PolylineDash', { color: col, dashLength: 12 })
+        : Cesium.Material.fromType('PolylineOutline', { color: col, outlineColor: Cesium.Color.BLACK.withAlpha(0.6), outlineWidth: 1 });
     const labelDist = new Cesium.DistanceDisplayCondition(0, st.labelMaxM);
     const font = labelFont(level, admin.labelSize);
     const bg = Cesium.Color.fromCssColorString('#0b0f12').withAlpha(0.78);
     const fill = admin.labelBox ? col.brighten(0.35, new Cesium.Color()) : Cesium.Color.WHITE;
-    const lines = viewer.scene.primitives.add(new Cesium.PolylineCollection()) as Cesium.PolylineCollection;
-    const labels = viewer.scene.primitives.add(new Cesium.LabelCollection()) as Cesium.LabelCollection;
-    const drawn = new Set<string>();
-    const draw = (fc: AdminCollection) => {
+    type Drawn = { lines: Cesium.PolylineCollection; labels: Cesium.LabelCollection } | null; // null = loading
+    const drawn = new Map<string, Drawn>();
+    const drop = (pc: string) => {
+      const d = drawn.get(pc);
+      drawn.delete(pc);
+      if (d && !viewer.isDestroyed()) {
+        viewer.scene.primitives.remove(d.lines);
+        viewer.scene.primitives.remove(d.labels);
+      }
+    };
+    const draw = (pc: string, fc: AdminCollection) => {
+      const lines = viewer.scene.primitives.add(new Cesium.PolylineCollection()) as Cesium.PolylineCollection;
+      const labels = viewer.scene.primitives.add(new Cesium.LabelCollection()) as Cesium.LabelCollection;
+      const mat = newMat();
       for (const f of fc.features) {
         for (const poly of f.geometry.coordinates)
           for (const ring of poly) lines.add({ positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()), width: width + (st.dashed ? 0 : 1), material: mat });
@@ -610,26 +638,39 @@ export function MonitorWatch() {
           });
         }
       }
+      drawn.set(pc, { lines, labels });
       viewer.scene.requestRender();
     };
     const update = async () => {
       if (gone || viewer.isDestroyed()) return;
       const r = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid);
       const d = Cesium.Math.toDegrees;
-      // looking at the sky / whole globe: treat as the whole country
       const [w, s0, e, n] = r ? [d(r.west), d(r.south), d(r.east), d(r.north)] : [-180, -90, 180, 90];
       const tooWide = Math.max(e - w, n - s0) > st.maxSpanDeg;
-      if (level === 'tambon') setAdminZoomHint(tooWide);
-      if (tooWide) return;
+      hint(tooWide);
+      if (tooWide) {
+        // zoomed out: remove everything (nothing readable at that scale anyway)
+        [...drawn.keys()].forEach(drop);
+        viewer.scene.requestRender();
+        return;
+      }
       try {
         const idx = await loadProvinceIndex();
-        const want = idx.filter((p) => !drawn.has(p.pcode) && p.bbox[0] <= e && p.bbox[2] >= w && p.bbox[1] <= n && p.bbox[3] >= s0);
+        if (gone) return;
+        // keep provinces touching the view plus a margin of half a view; drop the rest
+        const mx = (e - w) / 2, my = (n - s0) / 2;
+        const near = (p: ProvinceIndex, k: number) => p.bbox[0] <= e + mx * k && p.bbox[2] >= w - mx * k && p.bbox[1] <= n + my * k && p.bbox[3] >= s0 - my * k;
+        const keep = new Set(idx.filter((p) => near(p, 1)).map((p) => p.pcode));
+        [...drawn.keys()].filter((pc) => !keep.has(pc)).forEach(drop);
+        viewer.scene.requestRender();
+        const want = idx.filter((p) => !drawn.has(p.pcode) && near(p, 0));
         await Promise.all(
           want.map(async (p) => {
-            drawn.add(p.pcode);
+            drawn.set(p.pcode, null);
             try {
               const fc = await loadAdmin(level, p.pcode);
-              if (!gone && !viewer.isDestroyed()) draw(fc);
+              // still wanted (not dropped while loading) and layer still on
+              if (!gone && !viewer.isDestroyed() && drawn.has(p.pcode) && drawn.get(p.pcode) === null) draw(p.pcode, fc);
             } catch (err) {
               drawn.delete(p.pcode); // retry on the next move
               throw err;
@@ -653,8 +694,7 @@ export function MonitorWatch() {
       clearTimeout(t);
       off();
       if (!viewer.isDestroyed()) {
-        viewer.scene.primitives.remove(lines);
-        viewer.scene.primitives.remove(labels);
+        [...drawn.keys()].forEach(drop);
         viewer.scene.requestRender();
       }
     };
@@ -1292,12 +1332,12 @@ export function MonitorWatch() {
             </label>
           )}
           <span className="mx-0.5 h-4 w-px bg-line" />
-          <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตอำเภอทั้งประเทศ (RTSD 2022) — เส้นเขตปกครอง ไม่ใช่เส้นเขตแดนระหว่างประเทศ', 'District lines, whole country (RTSD 2022) — administrative lines, not the international boundary')}>
+          <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตอำเภอทั้งประเทศ (RTSD 2022) · แสดงเมื่อกรอบภาพเล็กกว่า ~280 กม. — เส้นเขตปกครอง ไม่ใช่เส้นเขตแดนระหว่างประเทศ', 'District lines, whole country (RTSD 2022) · shown when the view is under ~280 km — administrative lines, not the international boundary')}>
             <input type="checkbox" checked={admin.amphoe} onChange={(e) => setAdmin({ amphoe: e.target.checked })} />
             <i className="inline-block h-0.5 w-3" style={{ background: admin.amphoeColor }} />
             {L('อำเภอ', 'District')}
           </label>
-          <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตตำบลทั้งประเทศ (RTSD 2022) · แสดงเมื่อกรอบภาพเล็กกว่า ~330 กม. · ชื่อตำบลแสดงเมื่อซูมเข้าใกล้', 'Subdistrict lines, whole country (RTSD 2022) · shown when the view is under ~330 km · names appear when zoomed in')}>
+          <label className="flex items-center gap-1 px-1 text-slate-300" title={L('เส้นแบ่งเขตตำบลทั้งประเทศ (RTSD 2022) · แสดงเมื่อกรอบภาพเล็กกว่า ~90 กม. · ชื่อตำบลแสดงเมื่อซูมเข้าใกล้', 'Subdistrict lines, whole country (RTSD 2022) · shown when the view is under ~90 km · names appear when zoomed in')}>
             <input type="checkbox" checked={admin.tambon} onChange={(e) => setAdmin({ tambon: e.target.checked })} />
             <i className="inline-block h-0.5 w-3 border-t border-dashed" style={{ borderColor: admin.tambonColor }} />
             {L('ตำบล', 'Subdistrict')}
@@ -1357,18 +1397,35 @@ export function MonitorWatch() {
                   <input type="checkbox" checked={admin.labelBox} onChange={(e) => setAdmin({ labelBox: e.target.checked })} />
                   {L('พื้นหลังทึบใต้ชื่อ (อ่านง่ายบนภาพสว่าง)', 'Dark box behind names (easier on bright imagery)')}
                 </label>
-                <p className="mt-1 text-[10px] text-muted">{L('ชื่ออำเภอขึ้นเมื่อซูมต่ำกว่า ~600 กม. · ชื่อตำบลขึ้นเมื่อซูมต่ำกว่า ~70 กม.', 'District names show below ~600 km, subdistrict names below ~70 km')}</p>
+                <p className="mt-1 text-[10px] text-muted">{L('เส้นอำเภอแสดงเมื่อกรอบภาพเล็กกว่า ~280 กม. · เส้นตำบลเมื่อเล็กกว่า ~90 กม. · ชื่อตำบลขึ้นเมื่อซูมใกล้ขึ้นอีก', 'District lines show when the view is under ~280 km, subdistricts under ~90 km')}</p>
               </div>
             </div>
           )}
-          {admin.tambon && adminZoomHint && <span className="px-1 text-warn">{L('ซูมเข้าเพื่อดูตำบล', 'Zoom in for subdistricts')}</span>}
+          {((admin.amphoe && adminZoomHint.amphoe) || (admin.tambon && adminZoomHint.tambon)) && (
+            <span className="px-1 text-warn">{admin.amphoe && adminZoomHint.amphoe ? L('ซูมเข้าเพื่อดูเขตอำเภอ', 'Zoom in for districts') : L('ซูมเข้าเพื่อดูตำบล', 'Zoom in for subdistricts')}</span>
+          )}
           {adminErr && (admin.amphoe || admin.tambon) && <span className="px-1 text-bad" title={adminErr}>{L('โหลดชั้นเขตปกครองไม่ได้', 'Admin layer failed to load')}</span>}
           <OsmTools viewer={viewer} />
         </div>
         {swipe && deepNote && (
-          <div className="absolute left-1/2 top-3 z-30 w-[min(560px,92%)] -translate-x-1/2 rounded-md border border-cyan-400/60 bg-ink-950/90 px-3 py-2 text-xs text-slate-100 shadow-lg">
+          <div
+            className={cx('absolute left-1/2 top-16 z-30 rounded-md border border-cyan-400/60 bg-ink-950/90 px-3 py-2 text-xs text-slate-100 shadow-lg', noteMin ? 'w-auto' : 'w-[min(560px,92%)]')}
+            style={{ transform: `translate(calc(-50% + ${notePos[0]}px), ${notePos[1]}px)` }}
+          >
             <div className="flex items-start justify-between gap-2">
-              <div>
+              <div
+                onPointerDown={dragNote}
+                className="shrink-0 cursor-move touch-none select-none px-0.5 text-base leading-none text-muted hover:text-white"
+                title={L('ลากเพื่อย้ายกล่องนี้', 'Drag to move this box')}
+              >
+                ⠿
+              </div>
+              {noteMin ? (
+                <button className="flex-1 text-left font-semibold text-white" onClick={() => setNoteMin(false)} title={L('แสดงรายละเอียด', 'Show details')}>
+                  {L('จากอีเมลแจ้งเตือน', 'From the alert email')} ▾
+                </button>
+              ) : (
+              <div className="flex-1">
                 <div className="font-semibold text-white">
                   {L('จากอีเมลแจ้งเตือน', 'From the alert email')}{deep.hl ? ` · ${L('เทียบ', 'compared')} ${deep.hl}` : ''}
                   {deep.lv ? <span className={cx('ml-1', deep.lv === 'significant' ? 'text-bad' : deep.lv === 'minor' ? 'text-warn' : 'text-cyan-300')}>· {deep.lv === 'significant' ? L('เปลี่ยนแปลงมีนัยสำคัญ', 'significant change') : deep.lv === 'minor' ? L('เปลี่ยนแปลงเล็กน้อย', 'minor change') : L('ไม่พบการเปลี่ยนแปลงเกินเกณฑ์', 'no change above threshold')}{deep.km2 ? ` ${deep.km2} ${L('ตร.กม.', 'km²')}` : ''}</span> : null}
@@ -1381,6 +1438,8 @@ export function MonitorWatch() {
                   {deep.hs.length ? L(` · จุดแดงมีเลข = จุดที่ตรวจพบ (${deep.hs.length} จุด)`, ` · numbered red dots = detected spots (${deep.hs.length})`) : ''}
                 </div>
               </div>
+              )}
+              {!noteMin && <button className="shrink-0 text-muted hover:text-white" onClick={() => setNoteMin(true)} title={L('ย่อกล่อง', 'Minimise')}>▴</button>}
               <button className="shrink-0 text-muted hover:text-white" onClick={() => setDeepNote(null)}>✕</button>
             </div>
           </div>

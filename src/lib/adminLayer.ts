@@ -22,10 +22,10 @@ export type AdminCollection = GeoJSON.FeatureCollection<GeoJSON.MultiPolygon, Ad
 
 /** Fixed per-level behaviour; colour and width are user settings (AdminLayerPrefs). */
 export const ADMIN_STYLE: Record<AdminLevel, { dashed: boolean; labelMaxM: number; basePx: number; maxSpanDeg: number }> = {
-  // districts: solid line, names when the camera is below ~600 km
-  amphoe: { dashed: false, labelMaxM: 6e5, basePx: 15, maxSpanDeg: 99 }, // any zoom (whole country ≈ 9 MB)
-  // subdistricts: dashed line, names only when zoomed in (below ~70 km)
-  tambon: { dashed: true, labelMaxM: 7e4, basePx: 13, maxSpanDeg: 3 }, // only when the view is under ~330 km
+  // districts: solid line, names when the camera is below ~300 km
+  amphoe: { dashed: false, labelMaxM: 3e5, basePx: 15, maxSpanDeg: 2.5 }, // only when the view is under ~280 km
+  // subdistricts: dashed line, names only when zoomed in (below ~50 km)
+  tambon: { dashed: true, labelMaxM: 5e4, basePx: 13, maxSpanDeg: 0.8 }, // only when the view is under ~90 km
 };
 export const ADMIN_SWATCHES = ['#fb923c', '#facc15', '#ef4444', '#ffffff', '#22d3ee', '#7dd3fc', '#f472b6', '#4ade80', '#a78bfa', '#000000'];
 export type LabelSize = 's' | 'm' | 'l';
